@@ -4,6 +4,17 @@ import type { AgentMessage, RpcSessionState, SessionEntry } from '@shared/engine
 import type { EngineHandle } from './handle'
 import { asRecord, asRecords, stringValue } from './prime/transport'
 
+const CONVERSATION_ENTRY_TYPES = new Set([
+  'message',
+  'custom_message',
+  'compaction',
+  'branch_summary'
+])
+
+export function isHandoffMetadataEntry(type: string): boolean {
+  return !CONVERSATION_ENTRY_TYPES.has(type)
+}
+
 export interface HandoffSnapshot {
   state: RpcSessionState
   messages: AgentMessage[]
@@ -18,7 +29,7 @@ export function hasHandoffHistory(snapshot: HandoffSnapshot): boolean {
     const entry = entries.get(entryId)
     if (!entry || visited.has(entryId)) throw new Error('The source session has an invalid branch')
     visited.add(entryId)
-    if (!['model_change', 'thinking_level_change', 'session_info', 'label'].includes(entry.type)) {
+    if (!isHandoffMetadataEntry(entry.type)) {
       return true
     }
     entryId = entry.parentId

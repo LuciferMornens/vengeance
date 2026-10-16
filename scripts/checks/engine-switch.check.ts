@@ -15,6 +15,7 @@ import { PrimeTransport } from '../../src/main/engine/prime/transport'
 import {
   assertPrimeHandoffIdle,
   hasHandoffHistory,
+  isHandoffMetadataEntry,
   type HandoffSnapshot
 } from '../../src/main/engine/switch'
 import { check } from './harness'
@@ -246,6 +247,62 @@ await check('engine switch: only the selected branch decides whether history is 
   ]
   snapshot.leafId = 'custom'
   assert.equal(hasHandoffHistory(snapshot), true)
+})
+
+await check('engine switch: native metadata alone is an empty conversation', () => {
+  const metadataTypes = [
+    'model_change',
+    'thinking_level_change',
+    'service_tier_change',
+    'session_info',
+    'session_state',
+    'label',
+    'usage',
+    'child_usage_attributed',
+    'git_state',
+    'custom',
+    'context_edit',
+    'future_metadata'
+  ]
+  const snapshot: HandoffSnapshot = {
+    state: {
+      sessionId: 'metadata-only',
+      thinkingLevel: 'off',
+      isStreaming: false,
+      isCompacting: false,
+      steeringMode: 'all',
+      followUpMode: 'all',
+      autoCompactionEnabled: true,
+      messageCount: 0,
+      pendingMessageCount: 0
+    },
+    entries: [],
+    messages: [],
+    leafId: null
+  }
+  for (const [index, type] of metadataTypes.entries()) {
+    assert.equal(isHandoffMetadataEntry(type), true, type)
+    // Unknown native metadata uses the same envelope as the modeled entry types.
+    const entry = {
+      type,
+      id: `metadata-${index}`,
+      parentId: snapshot.leafId,
+      timestamp
+    } as SessionEntry
+    snapshot.entries.push(entry)
+    snapshot.leafId = entry.id
+    assert.equal(hasHandoffHistory(snapshot), false, type)
+  }
+  for (const type of ['message', 'custom_message', 'compaction', 'branch_summary']) {
+    assert.equal(isHandoffMetadataEntry(type), false, type)
+    // Only the native context-bearing kind matters to the history-presence guard.
+    const entry = { type, id: 'conversation', parentId: snapshot.leafId, timestamp } as SessionEntry
+    assert.equal(
+      hasHandoffHistory({ ...snapshot, entries: [...snapshot.entries, entry], leafId: entry.id }),
+      true,
+      type
+    )
+  }
 })
 
 async function fixture() {
