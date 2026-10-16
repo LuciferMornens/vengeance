@@ -91,6 +91,33 @@ function fixtureArgs(): EngineHandoffArgs {
   }
 }
 
+function metadataFixtureArgs(): EngineHandoffArgs {
+  const args = fixtureArgs()
+  const metadata = [
+    { type: 'model_change', provider: 'archived-provider', modelId: 'archived-model' },
+    { type: 'thinking_level_change', thinkingLevel: 'archived-thinking' },
+    { type: 'service_tier_change', serviceTier: 'archived-tier' },
+    { type: 'session_info', name: 'archived-name' },
+    { type: 'session_state', state: { status: 'archived' } },
+    { type: 'label', targetId: 'entry-0', label: 'archived-label' },
+    { type: 'usage', kind: 'archived-usage', provider: 'provider', model: 'model', usage },
+    { type: 'child_usage_attributed', targetId: 'entry-1', childUsage: usage },
+    { type: 'git_state', git: { branch: 'archived-branch' } }
+  ]
+  // Engine 2 metadata extends the common entry union at the native protocol boundary.
+  const entries = metadata.map((entry, index) => ({
+    ...entry,
+    id: `metadata-${index}`,
+    parentId: index ? `metadata-${index - 1}` : args.leafId,
+    timestamp: new Date(fixtureTimestamp).toISOString()
+  })) as SessionEntry[]
+  return {
+    ...args,
+    entries: [...args.entries, ...entries],
+    leafId: entries.at(-1)!.id
+  }
+}
+
 await check('engine handoff keeps pre-compaction turns, tool pairs and image bytes', () => {
   const history = buildEngineHandoffHistory(fixtureArgs())
   assert.equal(history.entries.length, 5)
@@ -116,6 +143,21 @@ await check('engine handoff rejects missing parents and incomplete window-only s
       }),
     /complete conversation history/
   )
+})
+
+await check('engine handoff archives native controls outside conversation context', () => {
+  for (const targetEngine of ['pi', 'prime'] as const) {
+    const history = buildEngineHandoffHistory({ ...metadataFixtureArgs(), targetEngine })
+    const metadata = history.entries.filter((entry) => entry.id.startsWith('metadata-'))
+    assert.equal(metadata.length, 9)
+    assert.ok(metadata.every((entry) => entry.type === 'custom'))
+    assert.ok(metadata.every((entry) => entry.fields.content === undefined))
+    assert.ok(JSON.stringify(metadata).includes('archived-thinking'))
+    const conversation = history.entries.filter(
+      (entry) => entry.type === 'message' || entry.type === 'custom_message'
+    )
+    assert.ok(!JSON.stringify(conversation).includes('archived-thinking'))
+  }
 })
 
 await check(
@@ -249,6 +291,20 @@ await check(
       assert.ok((await readFile(path, 'utf8')).includes(imageData))
       assert.ok((await readFile(path, 'utf8')).includes('full tool output'))
       await rm(path)
+
+      const metadataPath = writePiHandoffHistory(
+        native,
+        buildEngineHandoffHistory(metadataFixtureArgs()),
+        directory
+      )
+      const metadataSession = native.SessionManager.open(metadataPath)
+      assert.ok(JSON.stringify(metadataSession.getEntries()).includes('archived-thinking'))
+      assert.ok(
+        !JSON.stringify(metadataSession.buildSessionContext().messages).includes(
+          'archived-thinking'
+        )
+      )
+      await rm(metadataPath)
 
       const customHistory = {
         ...history,

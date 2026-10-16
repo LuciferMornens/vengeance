@@ -8,6 +8,17 @@ import type { SettingsManagerLike } from '../settings/pi-modules'
 
 const MAX_HISTORY_BYTES = 256 * 1024 * 1024
 const HISTORY_CUSTOM_TYPE = 'vengeance-engine-history'
+const METADATA_ENTRY_TYPES = new Set([
+  'model_change',
+  'thinking_level_change',
+  'service_tier_change',
+  'session_info',
+  'session_state',
+  'label',
+  'usage',
+  'child_usage_attributed',
+  'git_state'
+])
 
 export interface EngineHandoffArgs {
   sourceEngine: EngineId
@@ -73,7 +84,10 @@ export interface PiHandoffModule {
   getDefaultSessionDir(cwd: string, agentDir?: string): string
   SessionManager: {
     create(cwd: string, sessionDir?: string, options?: { parentSession?: string }): PiHandoffManager
-    open(path: string): { getEntries(): SessionEntry[] }
+    open(path: string): {
+      getEntries(): SessionEntry[]
+      buildSessionContext(): { messages: AgentMessage[] }
+    }
   }
 }
 
@@ -235,7 +249,11 @@ export function buildEngineHandoffHistory(args: EngineHandoffArgs): EngineHandof
     if (entry.type === 'context_edit' && args.targetEngine === 'pi') {
       return [{ id: source.id, type: 'context_edit', fields }]
     }
-    if (entry.type === 'context_edit' || entry.type === 'custom') {
+    if (
+      entry.type === 'context_edit' ||
+      entry.type === 'custom' ||
+      METADATA_ENTRY_TYPES.has(String(entry.type))
+    ) {
       return [
         {
           id: source.id,
@@ -244,7 +262,6 @@ export function buildEngineHandoffHistory(args: EngineHandoffArgs): EngineHandof
         }
       ]
     }
-    // Native model, reasoning, lifecycle and extension settings must not control the target runtime.
     return [historicalEntry(entry, args.sourceEngine)]
   })
   return {
