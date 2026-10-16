@@ -51,6 +51,8 @@ export interface EngineHandle {
     nextArgs: CreateAgentArgs,
     executablePath?: string | null
   ): Promise<CreateAgentArgs | void>
+  /** Block side operations while a cross-engine history handoff owns this connection. */
+  guardHandoff?(): { assertIdle(): void; release(): void }
   stderr(): string
   /** Native backends implement bridge operations directly, without a loaded extension. */
   bridge?(request: BridgeRequest): Promise<BridgeResult>

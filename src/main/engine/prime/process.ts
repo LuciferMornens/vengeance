@@ -39,11 +39,12 @@ import {
   thinkingLevel
 } from './normalize'
 import { asRecord, asRecords, PrimeCommandError, stringValue, type PrimeRecord } from './transport'
-import { forkPrimeSession } from './sessions'
+import { forkPrimeSession, primeCreatePayload } from './sessions'
 import { primeRestartSelection, restartPrimeSession } from './restart'
 import { PrimeSpeedControl } from './speed'
 import { samePath } from '../../paths'
 import { locatePrimeEngine } from './locate'
+import { guardPrimeHandoff } from './daemon-activity'
 
 export interface PrimeEngineProcessOptions {
   args: CreateAgentArgs
@@ -126,6 +127,20 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
     return this.startup
   }
 
+  guardHandoff(): { assertIdle(): void; release(): void } {
+    const client = this.requireClient()
+    const guard = guardPrimeHandoff(client.socketPath)
+    return {
+      assertIdle: () => {
+        if (this.client !== client || !client.connected) {
+          throw new Error('The source engine reconnected during the switch. Try again.')
+        }
+        guard.assertIdle()
+      },
+      release: guard.release
+    }
+  }
+
   private async initialize(): Promise<void> {
     try {
       const requested = this.args
@@ -169,7 +184,7 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
       if (this.stopping) return
       if (!this.activeSessionId) {
         try {
-          const created = await client.request('create', createPayload(args), 0)
+          const created = await client.request('create', primeCreatePayload(args), 0)
           this.activeSessionId = stringValue(created.activeSessionId) ?? stringValue(created.id)
           this.state = created
           this.ownsSession = args.noSession === true
@@ -767,29 +782,5 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
     this.bashRunner.disconnect()
     for (const unsubscribe of this.unsubscribers) unsubscribe()
     this.unsubscribers = []
-  }
-}
-
-function createPayload(args: CreateAgentArgs): PrimeRecord {
-  const launch = args.launch?.prime
-  return {
-    sessionPath: args.sessionPath,
-    noSession: args.noSession,
-    name: args.name,
-    lifecycle: args.noSession ? 'client_owned' : 'resident',
-    config: {
-      cwd: args.cwd,
-      sessionDir: args.sessionDir,
-      provider: args.provider,
-      model: args.model,
-      thinking: args.thinking,
-      systemPrompt: launch?.systemPrompt,
-      appendSystemPrompt: launch?.appendSystemPrompt ?? [],
-      skills: launch?.skills ?? [],
-      promptTemplates: launch?.promptTemplates ?? [],
-      models: launch?.models,
-      autonomous: launch?.autonomous,
-      executionMode: 'desktop'
-    }
   }
 }

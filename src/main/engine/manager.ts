@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import { rm } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
 import {
   hasBridgeCommands,
+  isEngineId,
   normalizeEngineId,
   type AgentInfo,
   type BridgeCallOptions,
@@ -21,16 +23,26 @@ import type {
   RpcResponse,
   RpcSuccessResponse
 } from '@shared/engine-types'
+import { samePath } from '../paths'
 import type { SubagentInspectReply, SubagentInspectRequest } from '@shared/subagents'
 import { bridgeLoadFailed, bridgeTimeout, callBridge } from './bridge'
 import type { EngineHandle } from './handle'
 import { locateEngine, type EngineLocation } from './locate'
 import { MockEngineProcess } from './mock'
+import { readMockHandoff } from './mock-handoff'
 import { EngineProcess } from './rpc-process'
 import { PrimeMockEngineProcess } from './prime/mock'
 import { asRecord, stringValue } from './prime/transport'
 import { requestSessionTree } from './session-tree'
 import { inspectSubagent } from './subagents-inspect'
+import {
+  assertPrimeHandoffIdle,
+  assertSwitchTarget,
+  captureHandoffSnapshot,
+  hasHandoffHistory,
+  pausePrimeHandoff,
+  sameHandoffSnapshot
+} from './switch'
 
 export interface EngineManagerHooks {
   onEvent(agentId: string, event: EngineEvent): void
@@ -59,6 +71,11 @@ interface ManagedAgent {
   unsubscribe: Array<() => void>
   started?: boolean
   restarting?: boolean
+  switching?: boolean
+  hidden?: boolean
+  bufferedEvents?: EngineEvent[]
+  operations?: number
+  terminated?: boolean
 }
 
 const AGENT_ID = /^[A-Za-z0-9-]{1,64}$/
@@ -124,7 +141,7 @@ export class EngineManager {
   ) {}
 
   list(): AgentInfo[] {
-    return [...this.agents.values()].map((a) => ({ ...a.info }))
+    return [...this.agents.values()].filter((agent) => !agent.hidden).map((a) => ({ ...a.info }))
   }
 
   get(agentId: string): AgentInfo | undefined {
@@ -146,7 +163,8 @@ export class EngineManager {
   async create(
     args: CreateAgentArgs,
     agentId: string = randomUUID(),
-    location?: EngineLocation
+    location?: EngineLocation,
+    hidden = false
   ): Promise<AgentInfo> {
     if (!AGENT_ID.test(agentId)) throw new Error(`Invalid agent id ${agentId}`)
     if (this.agents.has(agentId)) throw new Error(`Agent ${agentId} already exists`)
@@ -162,7 +180,13 @@ export class EngineManager {
       createdAt: Date.now(),
       args: { ...args, engine }
     }
-    const agent: ManagedAgent = { info, handle: null, unsubscribe: [] }
+    const agent: ManagedAgent = {
+      info,
+      handle: null,
+      unsubscribe: [],
+      hidden,
+      bufferedEvents: hidden ? [] : undefined
+    }
     this.agents.set(agentId, agent)
     try {
       const resolved =
@@ -173,13 +197,18 @@ export class EngineManager {
       info.busy = false
       info.error = agent.handle?.error ?? (error as Error).message
       // A disposed (or already replaced) agent must not report over its successor with the same id.
-      if (this.agents.get(agentId) === agent) this.hooks.onStatus(agentId, info.status, { ...info })
+      if (this.agents.get(agentId) === agent && !agent.hidden) {
+        this.hooks.onStatus(agentId, info.status, { ...info })
+      }
     }
     return { ...info }
   }
 
   async command(agentId: string, command: RpcCommand): Promise<RpcResponse> {
-    const agent = this.require(agentId)
+    return this.operation(agentId, (agent) => this.sendCommand(agent, command))
+  }
+
+  private async sendCommand(agent: ManagedAgent, command: RpcCommand): Promise<RpcResponse> {
     const handle = this.requireHandle(agent)
     const reply =
       command.type === 'get_tree' && agent.info.engine === 'pi'
@@ -241,7 +270,14 @@ export class EngineManager {
     request: BridgeRequest,
     options: BridgeCallOptions = {}
   ): Promise<BridgeResult> {
-    const agent = this.require(agentId)
+    return this.operation(agentId, (agent) => this.sendBridge(agent, request, options))
+  }
+
+  private async sendBridge(
+    agent: ManagedAgent,
+    request: BridgeRequest,
+    options: BridgeCallOptions
+  ): Promise<BridgeResult> {
     const handle = this.requireHandle(agent)
     if (agent.info.engine === 'prime') {
       if (!handle.bridge) throw new Error('This engine does not provide this session operation')
@@ -268,7 +304,14 @@ export class EngineManager {
     type: string,
     payload?: Record<string, unknown>
   ): Promise<unknown> {
-    const agent = this.require(agentId)
+    return this.operation(agentId, (agent) => this.sendNative(agent, type, payload))
+  }
+
+  private async sendNative(
+    agent: ManagedAgent,
+    type: string,
+    payload?: Record<string, unknown>
+  ): Promise<unknown> {
     const handle = this.requireHandle(agent)
     if (agent.info.engine !== 'prime' || !handle.nativeCommand) {
       throw new Error('Native operations are not available for this engine')
@@ -283,7 +326,9 @@ export class EngineManager {
   }
 
   respondUi(agentId: string, response: RpcExtensionUIResponse): void {
-    this.require(agentId).handle?.respondUi(response)
+    const agent = this.require(agentId)
+    if (agent.switching) throw new Error('Wait for the engine switch to finish')
+    agent.handle?.respondUi(response)
   }
 
   stderr(agentId: string): string {
@@ -293,6 +338,7 @@ export class EngineManager {
   /** Restart with the same args (resuming the session file); `patch` keys, even undefined ones, replace stored args. */
   async restart(agentId: string, patch?: Partial<CreateAgentArgs>): Promise<AgentInfo> {
     const agent = this.require(agentId)
+    if (agent.switching) throw new Error('Wait for the engine switch to finish')
     if (agent.restarting) throw new Error('This engine is already restarting')
     agent.restarting = true
     const assertOpen = (): void => {
@@ -341,11 +387,154 @@ export class EngineManager {
     }
   }
 
+  async switchEngine(agentId: string, args: CreateAgentArgs): Promise<AgentInfo> {
+    const source = this.require(agentId)
+    if (!isEngineId(args.engine) || args.engine === source.info.engine) {
+      throw new Error('Choose a different engine for this session')
+    }
+    if (!isAbsolute(args.cwd) || !samePath(args.cwd, source.info.cwd)) {
+      throw new Error('Engine switching must keep the current workspace')
+    }
+    assertSwitchTarget(source.info, args)
+    if (source.switching || source.restarting || source.operations) {
+      throw new Error('Wait for the current session operation to finish before switching engines')
+    }
+    source.switching = true
+    const candidateId = randomUUID()
+    let generatedPath: string | undefined
+    let releasePause: (() => Promise<void>) | undefined
+    let guard: ReturnType<NonNullable<EngineHandle['guardHandoff']>> | undefined
+    let committed = false
+    const assertOpen = (): void => {
+      if (this.agents.get(agentId) !== source) throw new Error('This session is no longer open')
+    }
+    try {
+      const handle = this.requireHandle(source)
+      if (source.info.engine === 'prime' && !this.options.mock) {
+        guard = handle.guardHandoff?.()
+        if (!guard) throw new Error('The source engine cannot guard a session handoff')
+        releasePause = await pausePrimeHandoff(handle)
+      }
+      const snapshot = await captureHandoffSnapshot(handle)
+      assertOpen()
+      const noSession =
+        args.noSession || (source.info.args.noSession && !snapshot.state.sessionFile)
+      if (noSession && snapshot.messages.length) {
+        throw new Error(
+          'Temporary sessions with messages cannot switch engines without saving history'
+        )
+      }
+      const target: CreateAgentArgs = {
+        ...args,
+        cwd: source.info.cwd,
+        name: snapshot.state.sessionName ?? args.name,
+        noSession
+      }
+      await this.resolveSwitchSelection(target, candidateId)
+      assertOpen()
+      const hasHistory = hasHandoffHistory(snapshot)
+      if (!noSession && hasHistory) {
+        const { createEngineHandoff } = this.options.mock
+          ? await import('./mock-handoff')
+          : await import('../features/sessions/handoff')
+        const sessionEnv =
+          args.engine === 'pi' ? 'PI_CODING_AGENT_SESSION_DIR' : 'PRIME_AGENT_SESSION_DIR'
+        const result = await createEngineHandoff(
+          {
+            sourceEngine: source.info.engine,
+            targetEngine: args.engine,
+            cwd: target.cwd,
+            name: target.name,
+            messages: snapshot.messages,
+            entries: snapshot.entries,
+            leafId: snapshot.leafId,
+            sourceSessionPath: source.info.sessionFile,
+            sessionDir: target.sessionDir ?? target.launch?.env?.[sessionEnv],
+            launchEnv: target.launch?.env
+          },
+          this.options.engineOverridePath(args.engine)
+        )
+        generatedPath = result.path
+        target.sessionPath = result.path
+      }
+      assertOpen()
+      await this.create(target, candidateId, undefined, true)
+      const candidate = this.require(candidateId)
+      if (candidate.info.status !== 'ready') {
+        throw new Error(candidate.info.error ?? 'The destination engine did not become ready')
+      }
+      const destination = await captureHandoffSnapshot(this.requireHandle(candidate))
+      if (generatedPath && !samePath(destination.state.sessionFile ?? '', generatedPath)) {
+        throw new Error('The destination engine did not open the transferred session')
+      }
+      const current = await captureHandoffSnapshot(handle)
+      assertOpen()
+      if (source.info.engine === 'prime' && !this.options.mock) {
+        await assertPrimeHandoffIdle(handle)
+        assertOpen()
+      }
+      guard?.assertIdle()
+      if (candidate.info.status !== 'ready') {
+        throw new Error('The destination engine stopped before the switch could finish')
+      }
+      if (source.info.busy || !sameHandoffSnapshot(snapshot, current)) {
+        throw new Error(
+          'The source session changed while switching engines. Try again when it is idle.'
+        )
+      }
+      source.hidden = true
+      await this.terminateAgent(source)
+      assertOpen()
+      this.agents.delete(candidateId)
+      candidate.info.agentId = agentId
+      candidate.info.createdAt = source.info.createdAt
+      candidate.hidden = false
+      this.agents.set(agentId, candidate)
+      committed = true
+      this.hooks.onStatus(agentId, candidate.info.status, { ...candidate.info })
+      const startupEvents = candidate.bufferedEvents ?? []
+      candidate.bufferedEvents = undefined
+      for (const event of startupEvents) {
+        // The renderer carries the user's unsent draft across the handoff.
+        if (event.type === 'extension_ui_request' && event.method === 'set_editor_text') continue
+        this.hooks.onEvent(agentId, event)
+      }
+      return { ...candidate.info }
+    } finally {
+      source.switching = false
+      source.hidden = false
+      let pauseError: unknown
+      try {
+        await releasePause?.()
+      } catch (error) {
+        if (!committed && this.agents.get(agentId) === source) pauseError = error
+      }
+      guard?.release()
+      if (!committed) {
+        const candidate = this.agents.get(candidateId)
+        if (candidate) {
+          await this.terminateAgent(candidate)
+          this.agents.delete(candidateId)
+        }
+        if (generatedPath) await rm(generatedPath, { force: true })
+      }
+      if (pauseError) {
+        throw new Error(
+          'The source engine could not resume incoming work after the failed switch',
+          {
+            cause: pauseError
+          }
+        )
+      }
+    }
+  }
+
   async dispose(agentId: string): Promise<void> {
     const agent = this.agents.get(agentId)
     if (!agent) return
     this.agents.delete(agentId)
-    await this.stopAgent(agent)
+    if (agent.hidden) await this.terminateAgent(agent)
+    else await this.stopAgent(agent)
   }
 
   async disposeAll(): Promise<void> {
@@ -353,10 +542,12 @@ export class EngineManager {
   }
 
   async mockPlay(agentId: string, args: MockPlayArgs): Promise<void> {
-    const handle = this.require(agentId).handle
-    if (!(handle instanceof MockEngineProcess))
-      throw new Error('mock:play is only available in mock mode')
-    await handle.play(args)
+    await this.operation(agentId, async (agent) => {
+      const handle = agent.handle
+      if (!(handle instanceof MockEngineProcess))
+        throw new Error('mock:play is only available in mock mode')
+      await handle.play(args)
+    })
   }
 
   private locate(): Promise<EngineLocation> {
@@ -388,6 +579,9 @@ export class EngineManager {
         executablePath: this.options.engineOverridePath('prime')
       })
     } else {
+      const history = this.options.mock
+        ? await readMockHandoff(info.args.sessionPath, info.engine)
+        : undefined
       handle = location
         ? new EngineProcess({
             location,
@@ -399,11 +593,15 @@ export class EngineManager {
             }
           })
         : info.engine === 'prime'
-          ? new PrimeMockEngineProcess(info.args)
-          : new MockEngineProcess(info.args, {
-              ...this.options.bridgeEnv?.(),
-              ...info.args.launch?.env
-            })
+          ? new PrimeMockEngineProcess(info.args, undefined, history)
+          : new MockEngineProcess(
+              info.args,
+              {
+                ...this.options.bridgeEnv?.(),
+                ...info.args.launch?.env
+              },
+              history
+            )
     }
     agent.handle = handle
     info.status = 'starting'
@@ -419,7 +617,8 @@ export class EngineManager {
         return this.startHandle(agent, location, false)
       }
       // The process may still be running (e.g. get_state answered success:false); never leave it orphaned.
-      await handle.stop(0)
+      if (agent.hidden) await this.terminateAgent(agent)
+      else await handle.stop(0)
       throw error
     }
     // Disposed during startup: dispose() stopped the handle it saw, but make sure nothing outlives the agent.
@@ -459,7 +658,8 @@ export class EngineManager {
           info.sessionId = stringValue(state.sessionId)
           info.sessionName = stringValue(state.sessionName)
         }
-        this.hooks.onEvent(info.agentId, event)
+        if (agent.hidden) agent.bufferedEvents?.push(event)
+        else this.hooks.onEvent(info.agentId, event)
       }),
       handle.on('status', (status) => {
         if (!current()) return
@@ -472,10 +672,11 @@ export class EngineManager {
           info.busy = false
           info.error = handle.error
         }
-        this.hooks.onStatus(info.agentId, status, { ...info })
+        if (!agent.hidden) this.hooks.onStatus(info.agentId, status, { ...info })
       }),
       handle.on('exit', (exit) => {
         if (!current()) return
+        if (agent.hidden) return
         this.hooks.onExit({
           agentId: info.agentId,
           ...exit,
@@ -496,6 +697,39 @@ export class EngineManager {
     } finally {
       this.unwire(agent)
     }
+  }
+
+  private async terminateAgent(agent: ManagedAgent): Promise<void> {
+    const handle = agent.handle
+    if (
+      !agent.terminated &&
+      agent.info.engine === 'prime' &&
+      handle?.nativeCommand &&
+      (agent.started || handle.nativeAgentId)
+    ) {
+      await handle.nativeCommand('kill')
+      agent.terminated = true
+      // A successful native kill may remove the session before its client can detach.
+      await this.stopAgent(agent).catch(() => undefined)
+    } else {
+      await this.stopAgent(agent)
+    }
+  }
+
+  private async resolveSwitchSelection(args: CreateAgentArgs, candidateId: string): Promise<void> {
+    if (args.provider && args.model && args.thinking !== undefined) return
+    await this.create({ ...args, noSession: true }, candidateId, undefined, true)
+    const candidate = this.require(candidateId)
+    if (candidate.info.status !== 'ready') {
+      throw new Error(candidate.info.error ?? 'The destination engine could not select a model')
+    }
+    const { state } = await captureHandoffSnapshot(this.requireHandle(candidate))
+    if (!state.model) throw new Error('Choose a model for the destination engine before switching')
+    args.provider = state.model.provider
+    args.model = state.model.id
+    args.thinking = state.thinkingLevel
+    await this.terminateAgent(candidate)
+    this.agents.delete(candidateId)
   }
 
   private async refreshSession(agent: ManagedAgent): Promise<void> {
@@ -521,6 +755,20 @@ export class EngineManager {
     const agent = this.agents.get(agentId)
     if (!agent) throw new Error(`Unknown agent ${agentId}`)
     return agent
+  }
+
+  private async operation<Result>(
+    agentId: string,
+    run: (agent: ManagedAgent) => Promise<Result>
+  ): Promise<Result> {
+    const agent = this.require(agentId)
+    if (agent.switching) throw new Error('Wait for the engine switch to finish')
+    agent.operations = (agent.operations ?? 0) + 1
+    try {
+      return await run(agent)
+    } finally {
+      agent.operations--
+    }
   }
 
   private requireHandle(agent: ManagedAgent): EngineHandle {

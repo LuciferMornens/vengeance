@@ -5,12 +5,17 @@ import { getPrimeAgentDir } from './locate'
 import { asRecord, stringValue } from './transport'
 
 const MAX_HELPER_OUTPUT_BYTES = 64 * 1024
+const SESSION_HELPER_TIMEOUT_MS = 120_000
 
 type SessionCommand =
   | { operation: 'fork'; path: string; cwd: string; sessionDir: string }
   | { operation: 'branch'; path: string; entryId: string; sessionDir: string }
+  | { operation: 'handoff'; inputPath: string; sessionDir: string }
 
-export function nativePrimeSessionCommand(command: SessionCommand): Promise<string> {
+export function nativePrimeSessionCommand(
+  command: SessionCommand,
+  environment: Record<string, string> = {}
+): Promise<string> {
   const name = process.platform === 'win32' ? 'vengeance-prime-auth.exe' : 'vengeance-prime-auth'
   const executable = app.isPackaged
     ? join(process.resourcesPath, 'prime-auth', name)
@@ -18,13 +23,25 @@ export function nativePrimeSessionCommand(command: SessionCommand): Promise<stri
   return new Promise((resolve, reject) => {
     const child = spawn(executable, ['--session'], {
       windowsHide: true,
-      env: { ...process.env, PRIME_AGENT_CODING_AGENT_DIR: getPrimeAgentDir() },
+      env: {
+        ...process.env,
+        ...environment,
+        PRIME_AGENT_CODING_AGENT_DIR: environment.PRIME_AGENT_CODING_AGENT_DIR ?? getPrimeAgentDir()
+      },
       stdio: ['pipe', 'pipe', 'ignore']
     })
     const chunks: Buffer[] = []
     let length = 0
     let failure: Error | undefined
-    child.once('error', reject)
+    const timeout = setTimeout(() => {
+      failure = new Error('Engine 2 session operation timed out')
+      child.kill()
+    }, SESSION_HELPER_TIMEOUT_MS)
+    timeout.unref()
+    child.once('error', (error) => {
+      clearTimeout(timeout)
+      reject(error)
+    })
     child.stdin.on('error', (error) => {
       failure ??= error
     })
@@ -38,6 +55,7 @@ export function nativePrimeSessionCommand(command: SessionCommand): Promise<stri
       chunks.push(chunk)
     })
     child.once('close', (code) => {
+      clearTimeout(timeout)
       if (failure) return reject(failure)
       if (code !== 0) return reject(new Error('Engine 2 could not create the session'))
       try {

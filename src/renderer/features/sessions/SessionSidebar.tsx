@@ -1,21 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, type KeyboardEvent } from 'react'
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
 import { useShallow } from 'zustand/react/shallow'
-import {
-  ChevronDown,
-  ChevronRight,
-  FileInput,
-  FolderOpen,
-  Ghost,
-  Pin,
-  Search,
-  Settings,
-  SlidersHorizontal,
-  SquarePen,
-  Trash2,
-  X
-} from 'lucide-react'
+import { ChevronRight, FolderOpen, Pin, Search, Settings, Trash2, X } from 'lucide-react'
 import type { OpenSessionRef } from '@shared/api/app'
+import { ENGINE_LABELS, normalizeEngineId } from '@shared/api/engine'
 import type { SessionListItem } from '@shared/api/sessions'
 import { cn } from '../../lib/cn'
 import { basename, pluralize } from '../../lib/format'
@@ -23,19 +11,17 @@ import { spring } from '../../lib/motion'
 import { normalizePath, samePath } from '../../lib/paths'
 import { useAgents, type AgentsStore } from '../../store/agents'
 import { useApp } from '../../store/app'
-import { Button, DropdownMenu, IconButton, Input, Tooltip } from '../../ui'
-import { openLaunchDialog } from '../launch'
-import { chooseWorkspace, newSession } from '../shell/workspace'
+import { Button, IconButton, Input, Tooltip } from '../../ui'
+import { chooseWorkspace } from '../shell/workspace'
 import {
   activateAgent,
-  newEphemeralSession,
   openSession,
-  pickImport,
   prewarmSavedSession,
   renameSession,
   requestCloseAgent
 } from './actions'
 import { LiveDot } from './LiveDot'
+import { NewSessionActions } from './NewSessionActions'
 import { historyMenu, openAgentMenu } from './menus'
 import {
   agentMessageCount,
@@ -159,6 +145,8 @@ function HistoryRow({
         meta={
           <>
             <span className="tabular">{pluralize(item.messageCount, 'message')}</span>
+            <span aria-hidden>·</span>
+            <span className="shrink-0">{ENGINE_LABELS[normalizeEngineId(item.engine)]}</span>
             {showWorkspace && (
               <>
                 <span aria-hidden>·</span>
@@ -254,6 +242,8 @@ function OpenRow({
           >
             {status}
           </span>
+          <span aria-hidden>·</span>
+          <span className="shrink-0">{ENGINE_LABELS[normalizeEngineId(engine)]}</span>
           {foreignWorkspace && (
             <>
               <span aria-hidden>·</span>
@@ -340,9 +330,11 @@ function DormantRow({
             {listing && (
               <span className="tabular">{pluralize(listing.messageCount, 'message')}</span>
             )}
+            {listing && <span aria-hidden>·</span>}
+            <span className="shrink-0">{ENGINE_LABELS[normalizeEngineId(session.engine)]}</span>
             {foreignWorkspace && (
               <>
-                {listing && <span aria-hidden>·</span>}
+                <span aria-hidden>·</span>
                 <span className="truncate">{foreignWorkspace}</span>
               </>
             )}
@@ -581,45 +573,7 @@ export function SessionSidebar() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-1 px-2 pt-1.5">
         <WorkspaceSwitcher />
-        <div className="flex items-center">
-          <IconButton
-            label="New session"
-            hotkey="mod+n"
-            size="sm"
-            onClick={() => void newSession()}
-          >
-            <SquarePen />
-          </IconButton>
-          <DropdownMenu
-            align="end"
-            items={[
-              {
-                label: 'New session',
-                icon: <SquarePen />,
-                hotkey: 'mod+n',
-                onSelect: () => void newSession()
-              },
-              {
-                label: 'New ephemeral session',
-                icon: <Ghost />,
-                onSelect: () => void newEphemeralSession()
-              },
-              {
-                label: 'New session with options…',
-                icon: <SlidersHorizontal />,
-                disabled: !activeWorkspace,
-                onSelect: () => activeWorkspace && openLaunchDialog('session', activeWorkspace)
-              },
-              { kind: 'separator' },
-              { label: 'Import session…', icon: <FileInput />, onSelect: () => void pickImport() }
-            ]}
-            trigger={
-              <IconButton label="More ways to start" size="xs" className="-ml-0.5 w-5">
-                <ChevronDown />
-              </IconButton>
-            }
-          />
-        </div>
+        <NewSessionActions />
       </div>
       <div className="px-3 pt-2 pb-1.5">
         <SearchField />

@@ -41,6 +41,7 @@ export interface AgentsStore {
   disposeAgent(agentId: string): Promise<void>
   /** Restart the engine in place (same agent id); `patch` replaces stored CreateAgentArgs keys (see engine:restart). */
   restartAgent(agentId: string, patch?: Partial<CreateAgentArgs>): Promise<void>
+  switchEngine(agentId: string, args: CreateAgentArgs): Promise<void>
   setActive(agentId: string | null, activationRevision?: number): void
 
   /** Send user input: starts a run when idle, steers/follows up while running. */
@@ -76,6 +77,7 @@ export interface AgentsStore {
 const earlyEvents = new Map<string, EngineEvent[]>()
 const MAX_EARLY_EVENTS = 2000
 const restartRequests = new Set<string>()
+const switchRequests = new Set<string>()
 
 function upsertInfo(state: AgentsStore, info: AgentInfo): Pick<AgentsStore, 'agents' | 'order'> {
   const existing = state.agents[info.agentId]
@@ -83,6 +85,24 @@ function upsertInfo(state: AgentsStore, info: AgentInfo): Pick<AgentsStore, 'age
   const replaced = !!info.sessionId && !!sessionId && info.sessionId !== sessionId
   const starting = info.status === 'starting' && existing?.status !== 'starting'
   const reset = existing && starting && restartRequests.has(info.agentId)
+  if (existing && existing.info.engine !== info.engine) {
+    clearAgentWork(info.agentId)
+    const fresh = createAgentState(info)
+    return {
+      agents: {
+        ...state.agents,
+        [info.agentId]: {
+          ...fresh,
+          engineGeneration: existing.engineGeneration + 1,
+          snapshotRevision: existing.snapshotRevision + 1,
+          entries: existing.entries,
+          tools: existing.tools,
+          ext: { ...fresh.ext, editorText: existing.ext.editorText }
+        }
+      },
+      order: state.order
+    }
+  }
   if (reset) clearAgentWork(info.agentId)
   const agent = existing
     ? {
@@ -188,7 +208,9 @@ export const useAgents = create<AgentsStore>()((set, get) => ({
 
   async restartAgent(agentId, patch) {
     if (!get().agents[agentId]) return
-    if (restartRequests.has(agentId)) throw new Error('This engine is already restarting')
+    if (restartRequests.has(agentId) || switchRequests.has(agentId)) {
+      throw new Error('This engine is already changing')
+    }
     flush()
     restartRequests.add(agentId)
     try {
@@ -208,6 +230,36 @@ export const useAgents = create<AgentsStore>()((set, get) => ({
       throw error
     } finally {
       restartRequests.delete(agentId)
+    }
+  },
+
+  async switchEngine(agentId, args) {
+    flush()
+    const agent = get().agents[agentId]
+    if (!agent) throw new Error('This session is closed')
+    if (switchRequests.has(agentId) || restartRequests.has(agentId)) {
+      throw new Error('This engine is already changing')
+    }
+    switchRequests.add(agentId)
+    get().patchAgent(agentId, {
+      status: 'starting',
+      engineGeneration: agent.engineGeneration + 1,
+      snapshotRevision: agent.snapshotRevision + 1
+    })
+    try {
+      const info = await invoke('engine:switch', agentId, args)
+      if (!get().agents[agentId]) return
+      flush()
+      set((state) => upsertInfo(state, info))
+      await get().refresh(agentId)
+    } catch (error) {
+      const current = (await invoke('engine:list').catch(() => [] as AgentInfo[])).find(
+        (candidate) => candidate.agentId === agentId
+      )
+      if (current && get().agents[agentId]) set((state) => upsertInfo(state, current))
+      throw error
+    } finally {
+      switchRequests.delete(agentId)
     }
   },
 
@@ -692,6 +744,12 @@ export function startAgentEventPump(): void {
     flush()
     const store = useAgents.getState()
     if (!store.agents[agentId]) return
+    if (
+      switchRequests.has(agentId) &&
+      store.agents[agentId]?.info.engine === info.engine &&
+      info.status === 'ready'
+    )
+      return
     useAgents.setState((state) => upsertInfo(state, info))
     if (info.status === 'crashed') store.patchAgent(agentId, { phase: 'idle', streaming: null })
   })

@@ -1,20 +1,11 @@
-import {
-  ArrowUp,
-  CornerDownRight,
-  Cpu,
-  ListEnd,
-  Paperclip,
-  Square,
-  SquareTerminal
-} from 'lucide-react'
-import { ENGINE_LABELS } from '@shared/api/engine'
+import { ArrowUp, CornerDownRight, ListEnd, Paperclip, Square, SquareTerminal } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { useAgents } from '../../store/agents'
 import { Button, IconButton, Kbd, Tooltip } from '../../ui'
 import { ContextMeter } from '../chat/ContextRing'
 import { PrimeControls } from '../engines/prime-controls'
+import { SessionEngineMenu } from '../engines/SessionEngineMenu'
 import { supportsEngineCommand, useEngineCapabilities } from '../engines/registry'
-import { openSettingsSection } from '../palette/settings-sections'
 import { ModeHint } from './editor-hints'
 import { ModelPill } from './model-pill'
 import { SpeedPill } from './speed-pill'
@@ -25,7 +16,7 @@ import { TokenSpeed } from './token-speed'
  * The footer stays one row at every composer width (the composer is `@container/composer`). The
  * steps are in em of the UI text size, so larger text compacts sooner:
  *   below 52em  Engine, Steer and Follow-up drop their labels and the send hint hides;
- *   below 40em  the Engine chip hides, thinking and speed keep only their glyphs and the context
+ *   below 40em  thinking and speed keep only their glyphs and the context
  *               meter keeps only its ring.
  * Between steps the model name truncates to absorb what is left.
  */
@@ -73,23 +64,7 @@ export function ComposerFooter({
         <IconButton label="Attach images or files" size="sm" onClick={onPickAttachments}>
           <Paperclip />
         </IconButton>
-        <Tooltip
-          content={`${ENGINE_LABELS[engine]} is running this session. Open its settings.`}
-          side="top"
-        >
-          <button
-            type="button"
-            aria-label={`${ENGINE_LABELS[engine]} session settings`}
-            onClick={() => openSettingsSection('engine', engine)}
-            className={cn(
-              'pressable inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium whitespace-nowrap text-fg-3 hover:bg-hover hover:text-fg-2',
-              '@max-[52em]/composer:w-7 @max-[52em]/composer:justify-center @max-[52em]/composer:px-0 @max-[40em]/composer:hidden'
-            )}
-          >
-            <Cpu className="size-3.5 shrink-0" />
-            <span className={compactLabel}>{ENGINE_LABELS[engine]}</span>
-          </button>
-        </Tooltip>
+        <SessionEngineMenu agentId={agentId} />
         {supportsEngineCommand(engine, 'set_model') && <ModelPill agentId={agentId} />}
         {supportsEngineCommand(engine, 'set_thinking_level') && <ThinkingPill agentId={agentId} />}
         <SpeedPill agentId={agentId} />
