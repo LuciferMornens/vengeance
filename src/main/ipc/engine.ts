@@ -231,6 +231,24 @@ export function registerEngineIpc(manager: EngineManager): void {
         : patch
     return maskAgentInfo(await manager.restart(agentId, resolved))
   })
+  handle('engine:switch', async (agentId, args) => {
+    const current = manager.get(agentId)
+    if (!current) throw new Error('This session is no longer open')
+    if (!args || !isEngineId(args.engine) || args.engine === current.engine) {
+      throw new Error('Choose a different engine for this session')
+    }
+    if (typeof args.cwd !== 'string' || !isAbsolute(args.cwd) || !samePath(args.cwd, current.cwd)) {
+      throw new Error('Engine switching must keep the current workspace')
+    }
+    if (args.engine === 'pi' && args.approve === undefined) {
+      const trust = await trustPreflight(engineOverridePath('pi'), current.cwd)
+      if (trust.needsDecision) throw new Error('Choose project trust before switching to Engine')
+    }
+    const resolved = resolveLaunchEnv(args, appState.getPrefs(), runningEnvs(manager, args.engine))
+    const switched = await manager.switchEngine(agentId, resolved)
+    configWatcher.sync()
+    return maskAgentInfo(switched)
+  })
   handle('engine:stderr', (agentId) => manager.stderr(agentId))
   handle('engine:info', () => engineInfo())
   handle('engine:backends', () => engineBackends())

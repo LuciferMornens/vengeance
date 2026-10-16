@@ -2,6 +2,7 @@ import { constants } from 'node:fs'
 import { copyFile, mkdir, rm } from 'node:fs/promises'
 import { basename, dirname, join, parse } from 'node:path'
 import { shell } from 'electron'
+import type { CreateAgentArgs } from '@shared/api/engine'
 import type {
   ForkPoint,
   ImportCandidate,
@@ -20,7 +21,31 @@ import { getPrimeAgentDir } from './locate'
 import { normalizeTree } from './normalize'
 import { nativePrimeSessionCommand } from './sessions-native'
 import { resolvePrimeSessionRoot, type PrimeSessionPathOptions } from './session-paths'
-import { asRecord, stringValue } from './transport'
+import { asRecord, stringValue, type PrimeRecord } from './transport'
+
+export function primeCreatePayload(args: CreateAgentArgs): PrimeRecord {
+  const launch = args.launch?.prime
+  return {
+    sessionPath: args.sessionPath,
+    noSession: args.noSession,
+    name: args.name,
+    lifecycle: args.noSession ? 'client_owned' : 'resident',
+    config: {
+      cwd: args.cwd,
+      sessionDir: args.sessionDir,
+      provider: args.provider,
+      model: args.model,
+      thinking: args.thinking,
+      systemPrompt: launch?.systemPrompt,
+      appendSystemPrompt: launch?.appendSystemPrompt ?? [],
+      skills: launch?.skills ?? [],
+      promptTemplates: launch?.promptTemplates ?? [],
+      models: launch?.models,
+      autonomous: launch?.autonomous,
+      executionMode: 'desktop'
+    }
+  }
+}
 
 const sessionIndex = new SessionIndex('prime')
 const knownRoots = new Set<string>()

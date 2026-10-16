@@ -8,6 +8,28 @@ import {
 
 const TERMINAL_SIDE_QUESTION_STATES = new Set(['complete', 'error', 'cancelled'])
 const sideQuestions = new Map<string, Map<string, Set<PrimeDaemonActivity>>>()
+const handoffGuards = new Map<string, number>()
+
+export function guardPrimeHandoff(socketPath: string): { assertIdle(): void; release(): void } {
+  const assertIdle = (): void => {
+    if (sideQuestions.get(socketPath)?.size) {
+      throw new Error('Wait for Engine 2 side questions to finish before switching engines')
+    }
+  }
+  assertIdle()
+  handoffGuards.set(socketPath, (handoffGuards.get(socketPath) ?? 0) + 1)
+  let released = false
+  return {
+    assertIdle,
+    release() {
+      if (released) return
+      released = true
+      const remaining = (handoffGuards.get(socketPath) ?? 1) - 1
+      if (remaining) handoffGuards.set(socketPath, remaining)
+      else handoffGuards.delete(socketPath)
+    }
+  }
+}
 
 export function assertPrimeSideQuestionsIdle(socketPath: string): void {
   if (sideQuestions.get(socketPath)?.size) {
@@ -37,6 +59,9 @@ export class PrimeDaemonActivity {
     if (starting && !this.client.connected) throw new Error('Engine 2 is disconnected')
     if (starting && this.restarting()) {
       throw new Error('Engine 2 is restarting; ask the side question after it reconnects')
+    }
+    if (starting && handoffGuards.has(this.client.socketPath)) {
+      throw new Error('Engine 2 is switching engines; ask the side question after it finishes')
     }
     const key = starting ? questionKey(payload.activeSessionId, payload.sideQuestionId) : undefined
     const tracked = key ? this.questions.has(key) : false

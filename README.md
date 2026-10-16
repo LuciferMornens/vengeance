@@ -63,3 +63,9 @@ exist. Use the lockfile and current guides for maintenance instructions.
 
 Installing a newer app does not replace a running Engine 2 resident. Its session notice offers an
 explicit guarded restart; **Close tab** leaves saved residents available in **Background sessions**.
+
+The composer engine menu can switch an idle saved conversation between Engine and Engine 2 while
+keeping the current tab, draft and selected branch's history. The destination uses its own model and
+settings. A recovery copy stays with the source engine; native goals, schedules and child workers do
+not transfer. Nonempty ephemeral sessions cannot switch. The same menu and the sidebar's new-session
+menu can start a conversation with either engine without changing the workspace default.

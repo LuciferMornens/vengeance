@@ -297,7 +297,7 @@ export function WorkspaceSwitcher() {
       <div className="mx-1 my-1.5 h-px bg-hairline" />
       {active && (
         <div className="mx-1 mb-1.5 flex items-center justify-between gap-3 px-1 py-1">
-          <span className="text-xs text-fg-2">New sessions</span>
+          <span className="text-xs text-fg-2">New session default</span>
           <EnginePicker
             value={normalizeEngineId(active.engine)}
             onValueChange={(engine) => useApp.getState().setWorkspaceEngine(active.path, engine)}

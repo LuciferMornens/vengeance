@@ -346,6 +346,8 @@ export interface EngineInvokeMap {
     patch: Partial<CreateAgentArgs> | undefined,
     result: AgentInfo
   ]
+  /** Switch an idle thread to another backend, carrying its selected history into a new native file. */
+  'engine:switch': [agentId: string, args: CreateAgentArgs, result: AgentInfo]
   'engine:stderr': [agentId: string, result: string]
   'engine:info': [result: EngineLocationInfo]
   /** Run a bridge operation; rejects when the bridge is not loaded (check `AgentInfo.bridge`). */

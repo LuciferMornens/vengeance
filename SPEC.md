@@ -363,6 +363,16 @@ without spending tokens. **The real engine is the default and must always work.*
   workspace default. A workspace's selector chooses the backend for new sessions. Resume, restore, fork,
   clone, import and resident attachment carry the session's provenance; changing a workspace default does
   not convert an existing session. Restart must reject changing an agent's backend.
+- An explicit **Switch engine** action can hand off an idle saved conversation to the other backend.
+  The current tab and draft stay in place. Each backend writes its own native session; the transfer
+  carries the selected branch's full message history, tool results, attachments and compaction
+  boundaries. Unsupported historical records remain clearly labeled history, never live commands.
+  The destination uses its own model, configuration, credentials and project trust. It must become
+  ready before the source stops; a failed preparation leaves the source available. The source file
+  remains a recovery copy. Native goals, schedules and child workers do not transfer. Nonempty
+  ephemeral sessions cannot switch until native in-memory history import is supported.
+- The composer engine menu distinguishes switching this conversation from starting a new one with
+  either engine. Neither action changes the workspace default; its selector is labeled separately.
 - Choosing an engine in Settings also saves the active workspace's default for new sessions. Without
   an active workspace, it saves the app default for newly opened folders. Other workspace defaults stay
   separate. Ordinary Settings and palette navigation use the saved workspace default; a session-specific
