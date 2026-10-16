@@ -257,10 +257,10 @@ export function registerEngineIpc(manager: EngineManager): void {
     if (engine === 'pi' || env.mock) return []
     return listPrimeBackground({ executablePath: engineOverridePath('prime') })
   })
-  handle('engine:background-stop', async (engine, nativeAgentId) => {
+  handle('engine:background-stop', async (engine, selector) => {
     if (engine !== 'prime') throw new Error('This engine does not keep background sessions')
     if (env.mock) return
-    await stopPrimeBackground(nativeAgentId, { executablePath: engineOverridePath('prime') })
+    await stopPrimeBackground(selector, { executablePath: engineOverridePath('prime') })
   })
   handle('engine:describe', (engine) => {
     if (!isEngineId(engine)) throw new Error('Choose a supported engine')

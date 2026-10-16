@@ -13,11 +13,26 @@ import type {
   Usage
 } from '@shared/engine-types'
 import { THINKING_LEVELS } from '@shared/engine-types'
+import type { SessionLineage } from '@shared/api/sessions'
 import { flattenSessionTree } from '../session-tree'
 import { asRecord, asRecords, stringValue, type PrimeRecord } from './transport'
 
 export function numberValue(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+}
+
+export function normalizePrimeLineage(state: PrimeRecord): SessionLineage | undefined {
+  const depth = state.rlmDepth
+  const lineage: SessionLineage = {
+    parentSessionPath: stringValue(state.parentSessionPath) || undefined,
+    parentSessionId: stringValue(state.parentSessionId) || undefined,
+    parentNativeAgentId: stringValue(state.parentActiveSessionId) || undefined,
+    depth:
+      typeof depth === 'number' && Number.isSafeInteger(depth) && depth >= 0 ? depth : undefined,
+    childId: stringValue(state.rlmChildId) || undefined,
+    runtimeKind: stringValue(state.runtimeKind) || undefined
+  }
+  return Object.values(lineage).some((value) => value !== undefined) ? lineage : undefined
 }
 
 export function thinkingLevel(value: unknown): ThinkingLevel {
@@ -172,6 +187,7 @@ export function normalizeState(snapshot: PrimeRecord, summary: PrimeRecord): Rpc
     sessionFile: stringValue(state.sessionFile),
     sessionId: stringValue(state.sessionId) ?? '',
     sessionName: stringValue(state.sessionName) ?? stringValue(state.name),
+    lineage: normalizePrimeLineage(state),
     autoCompactionEnabled: state.autoCompactionEnabled !== false,
     messageCount: numberValue(state.messageCount),
     pendingMessageCount: numberValue(actions.queuedCount)

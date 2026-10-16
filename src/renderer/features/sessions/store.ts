@@ -13,6 +13,7 @@ import type {
   SessionsPrefs
 } from '@shared/api/sessions'
 import { invoke, on } from '../../lib/ipc'
+import { sameSessionLineage } from '@shared/session-identity'
 import { normalizePath, samePath } from '../../lib/paths'
 import { useAgents } from '../../store/agents'
 import { useApp } from '../../store/app'
@@ -69,6 +70,7 @@ export function listKey(cwd: string | null): string {
 }
 
 export interface SessionList {
+  warning?: string
   /** The query this list was loaded for (null = every workspace). */
   cwd: string | null
   items: SessionListItem[]
@@ -192,7 +194,7 @@ export const useSessions = create<SessionsStore>()((set, get) => ({
       }
     }))
     const loading = listAllEngineSessions(cwd, current?.items ?? [])
-      .then(({ items, error }) => {
+      .then(({ items, error, warning }) => {
         set((state) => ({
           lists: trimLists(
             {
@@ -201,6 +203,7 @@ export const useSessions = create<SessionsStore>()((set, get) => ({
                 cwd,
                 items: shareListingItems(items, state.lists, key),
                 error,
+                warning,
                 loading: false,
                 loaded: true,
                 loadedAt: Date.now(),
@@ -283,13 +286,14 @@ export const useSessions = create<SessionsStore>()((set, get) => ({
 async function listAllEngineSessions(
   cwd: string | null,
   cached: SessionListItem[]
-): Promise<{ items: SessionListItem[]; error?: string }> {
+): Promise<{ items: SessionListItem[]; error?: string; warning?: string }> {
   const engines: EngineId[] = ['pi', 'prime']
   const results = await Promise.allSettled(
     engines.map((engine) => invoke('sessions:list', { cwd, engine }))
   )
   const items = new Map<string, SessionListItem>()
   const errors: string[] = []
+  const warnings: string[] = []
   results.forEach((result, index) => {
     const engine = engines[index]!
     const sessions =
@@ -297,6 +301,9 @@ async function listAllEngineSessions(
         ? result.value.sessions.map((session) => ({ ...session, engine }))
         : cached.filter((session) => normalizeEngineId(session.engine) === engine)
     for (const session of sessions) items.set(normalizePath(session.path), session)
+    if (result.status === 'fulfilled' && result.value.warning) {
+      warnings.push(`${ENGINE_LABELS[engine]}: ${result.value.warning}`)
+    }
     if (result.status === 'rejected') {
       const reason: unknown = result.reason
       errors.push(
@@ -306,7 +313,8 @@ async function listAllEngineSessions(
   })
   return {
     items: [...items.values()].sort((first, second) => second.modifiedAt - first.modifiedAt),
-    error: errors.length ? errors.join('\n') : undefined
+    error: errors.length ? errors.join('\n') : undefined,
+    warning: warnings.length ? warnings.join('\n') : undefined
   }
 }
 
@@ -325,6 +333,8 @@ function sameBackgroundAgents(
         agent.name === other.name &&
         agent.cwd === other.cwd &&
         agent.sessionPath === other.sessionPath &&
+        agent.sessionId === other.sessionId &&
+        sameSessionLineage(agent.lineage, other.lineage) &&
         agent.status === other.status &&
         agent.busy === other.busy
       )
@@ -360,6 +370,7 @@ function sameListing(first: SessionListItem, second: SessionListItem): boolean {
   >)
   for (const key of keys) {
     if (first[key] === second[key]) continue
+    if (key === 'lineage' && sameSessionLineage(first.lineage, second.lineage)) continue
     if (
       key !== 'subagentRun' ||
       first.subagentRun?.parentPath !== second.subagentRun?.parentPath ||

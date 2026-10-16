@@ -9,18 +9,29 @@ import type {
   ImportSessionArgs,
   ImportSessionResult,
   SessionExportFormat,
+  SessionLineage,
   SessionListQuery,
   SessionListResult,
   WorkspaceDiscovery
 } from '@shared/api/sessions'
 import type { FlatSessionTree } from '@shared/engine-types'
 import { mapSessionFiles, SessionIndex, sessionFilesIn } from '../../features/sessions/index'
-import { comparablePath, directoryExists, isInside, samePath } from '../../paths'
+import { comparablePath, directoryExists, samePath } from '../../paths'
 import { connectPrimeResident, primeDaemonCommand, withPrimeServiceSession } from './daemon'
 import { getPrimeAgentDir } from './locate'
 import { normalizeTree } from './normalize'
-import { nativePrimeSessionCommand } from './sessions-native'
-import { resolvePrimeSessionRoot, type PrimeSessionPathOptions } from './session-paths'
+import { deletePrimeChildSession } from './session-delete'
+import {
+  nativePrimeSessionCommand,
+  nativePrimeSessionLineage,
+  type PrimeSavedLineage
+} from './sessions-native'
+import {
+  resolvePrimeSessionRoot,
+  primeSessionPathValidator,
+  supportedPrimeSessionPath,
+  type PrimeSessionPathOptions
+} from './session-paths'
 import { asRecord, stringValue, type PrimeRecord } from './transport'
 
 export function primeCreatePayload(args: CreateAgentArgs): PrimeRecord {
@@ -51,6 +62,31 @@ const sessionIndex = new SessionIndex('prime')
 const knownRoots = new Set<string>()
 const pendingListings = new Map<string, Promise<SessionListResult>>()
 const pendingDiscoveries = new Map<string, Promise<WorkspaceDiscovery[]>>()
+const pendingLineage = new Map<string, Promise<PrimeSavedLineage>>()
+
+async function savedLineage(directories: string[]): Promise<PrimeSavedLineage> {
+  const agentDir = getPrimeAgentDir()
+  const key = JSON.stringify([agentDir, directories.map(comparablePath).sort()])
+  const pending = pendingLineage.get(key)
+  if (pending) return pending
+  const request = nativePrimeSessionLineage(agentDir, directories).catch((): PrimeSavedLineage => ({
+    sessions: [],
+    excludedPaths: [],
+    warning:
+      'Saved child sessions are unavailable. Restart Vengeance or repair its Engine 2 helper.'
+  }))
+  pendingLineage.set(key, request)
+  try {
+    return await request
+  } finally {
+    pendingLineage.delete(key)
+  }
+}
+
+function savedExclusions(lineage: PrimeSavedLineage): (path: string) => boolean {
+  const paths = new Set(lineage.excludedPaths.map(comparablePath))
+  return (path) => paths.has(comparablePath(path))
+}
 
 export async function primeSessionRoot(
   cwd?: string | null,
@@ -78,18 +114,41 @@ function validPrimeId(identifier: string): boolean {
   )
 }
 
+interface PrimeSavedSessionIdentity {
+  cwd: string
+  engine: 'prime'
+  lineage?: SessionLineage
+}
+
 export async function primeSessionIdentity(
   path: string
-): Promise<{ cwd: string; engine: 'prime' } | null> {
+): Promise<PrimeSavedSessionIdentity | null> {
   if (!path.toLowerCase().endsWith('.jsonl')) return null
   const result = await sessionIndex.header(path)
   if (!result || !validPrimeId(result.header.id)) return null
   const roots = await primeSessionRoots(result.header.cwd ? [result.header.cwd] : [])
-  if (!roots.some((root) => !samePath(root, path) && isInside(root, path))) return null
-  return { cwd: result.header.cwd, engine: 'prime' }
+  const kind = await supportedPrimeSessionPath(path, roots)
+  if (!kind) return null
+  // Native spawned children always have positive depth; ordinary roots need no topology replay.
+  if (kind === 'session' && result.header.rlmDepth === 0) {
+    return { cwd: result.header.cwd, engine: 'prime', lineage: { depth: 0 } }
+  }
+  const lineage = await savedLineage(roots)
+  const child = lineage.sessions.find((session) => samePath(session.path, path))
+  const verified = child !== undefined
+  if (lineage.warning && (result.header.rlmDepth ?? 0) > 0 && !verified) return null
+  if (savedExclusions(lineage)(path)) return null
+  if (kind === 'artifact' && !verified) return null
+  return {
+    cwd: result.header.cwd,
+    engine: 'prime',
+    lineage:
+      child?.lineage ??
+      (result.header.rlmDepth !== undefined ? { depth: result.header.rlmDepth } : undefined)
+  }
 }
 
-async function requirePrimeSession(path: string): Promise<{ cwd: string; engine: 'prime' }> {
+async function requirePrimeSession(path: string): Promise<PrimeSavedSessionIdentity> {
   const identity = await primeSessionIdentity(path)
   if (!identity) throw new Error('This file is not in an Engine 2 session folder')
   return identity
@@ -114,16 +173,39 @@ export async function listPrimeSessions(
 async function loadPrimeSessions(query: SessionListQuery): Promise<SessionListResult> {
   const sessionDir = await primeSessionRoot(query.cwd)
   const directories = query.cwd ? [sessionDir] : await primeSessionRoots()
-  const sessions = await sessionIndex.list(directories)
+  const [roots, lineage] = await Promise.all([
+    sessionIndex.list(directories),
+    savedLineage(directories)
+  ])
+  const sessions = new Map(roots.map((session) => [comparablePath(session.path), session]))
+  const excluded = savedExclusions(lineage)
+  const verifiedChildren = new Set(lineage.sessions.map((session) => comparablePath(session.path)))
+  const supportedPath = await primeSessionPathValidator(directories)
+  await mapSessionFiles(lineage.sessions, async (child) => {
+    if (!(await supportedPath(child.path))) return
+    const session = await sessionIndex.summary(child.path)
+    if (!session) return
+    sessions.set(comparablePath(session.path), {
+      ...session,
+      name: session.name ?? child.name,
+      lineage: child.lineage
+    })
+  })
   return {
     sessionDir,
-    sessions: sessions
+    warning: lineage.warning,
+    sessions: [...sessions.values()]
       .filter(
         (session) =>
           validPrimeId(session.id) &&
+          !excluded(session.path) &&
+          (!lineage.warning ||
+            (session.lineage?.depth ?? 0) === 0 ||
+            verifiedChildren.has(comparablePath(session.path))) &&
           (!query.cwd || (!!session.cwd && samePath(session.cwd, query.cwd)))
       )
-      .map((session) => ({ ...session, engine: 'prime' }))
+      .map((session) => ({ ...session, engine: 'prime' as const }))
+      .sort((first, second) => second.modifiedAt - first.modifiedAt)
   }
 }
 
@@ -145,11 +227,28 @@ export async function discoverPrimeWorkspaces(
 }
 
 async function loadPrimeWorkspaces(directories: string[]): Promise<WorkspaceDiscovery[]> {
-  const files = (await mapSessionFiles(directories, sessionFilesIn)).flat()
+  const [rootFiles, lineage] = await Promise.all([
+    mapSessionFiles(directories, sessionFilesIn),
+    savedLineage(directories)
+  ])
+  const files = [
+    ...new Set([...rootFiles.flat(), ...lineage.sessions.map((session) => session.path)])
+  ]
+  const excluded = savedExclusions(lineage)
+  const supportedPath = await primeSessionPathValidator(directories)
+  const verifiedChildren = new Set(lineage.sessions.map((session) => comparablePath(session.path)))
   const workspaces = new Map<string, WorkspaceDiscovery>()
   await mapSessionFiles(files, async (path) => {
     const result = await sessionIndex.header(path)
     if (!result?.header.cwd || !validPrimeId(result.header.id)) return
+    if (excluded(path)) return
+    if (
+      lineage.warning &&
+      (result.header.rlmDepth ?? 0) > 0 &&
+      !verifiedChildren.has(comparablePath(path))
+    )
+      return
+    if (!(await supportedPath(path))) return
     const key = comparablePath(result.header.cwd)
     const workspace = workspaces.get(key)
     if (!workspace || workspace.lastActivityAt < result.modifiedAt) {
@@ -203,7 +302,14 @@ export async function deletePrimeSession(
   path: string,
   overridePath?: string | null
 ): Promise<void> {
-  await requirePrimeSession(path)
+  const { cwd, lineage } = await requirePrimeSession(path)
+  const directories = await primeSessionRoots([cwd])
+  if (lineage?.childId) {
+    const header = await sessionIndex.header(path)
+    if (!header) throw new Error('Engine 2 could not read this child session')
+    await deletePrimeChildSession(path, header.header.id, lineage, directories, overridePath)
+    return
+  }
   const resident = await connectPrimeResident(
     { sessionPath: path },
     { executablePath: overridePath }

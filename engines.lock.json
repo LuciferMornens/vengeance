@@ -3,16 +3,16 @@
   "platform": "win32-x64",
   "pi": {
     "repository": "https://github.com/earendil-works/pi.git",
-    "tag": "v1.2.0",
-    "revision": "06a466935536f8c9bcacb2d5efc0fc021be1bdff",
-    "version": "1.2.0+vengeance.4",
+    "tag": "v1.3.0",
+    "revision": "71023aec1546d6d677a65669c5665c0927ce0dd0",
+    "version": "1.3.0+vengeance.1",
     "patches": [
       "patches/pi/0001-vengeance-distribution.patch",
       "patches/pi/0002-preserve-extension-runtime-version.patch",
       "patches/pi/0003-native-runtime-qualification.patch",
-      "patches/pi/0004-model-catalog-qualification.patch",
       "patches/pi/0005-windows-native-fixtures.patch",
-      "patches/pi/0006-abliteration-provider.patch"
+      "patches/pi/0006-abliteration-provider.patch",
+      "patches/pi/0007-native-session-sharing.patch"
     ],
     "packageDir": "pi/node_modules/@earendil-works/pi-coding-agent",
     "entry": "pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
@@ -21,7 +21,7 @@
     "repository": "https://github.com/PrimeIntellect-ai/prime-agent.git",
     "tag": "v0.10.0",
     "revision": "763094e1b6a7c17450ee8399b06cda1853847ca5",
-    "version": "0.10.0+vengeance.6",
+    "version": "0.10.0+vengeance.8",
     "patches": [
       "patches/prime-agent/0001-fix-cancel-provider-HTTP-streams-when-compaction-is-.patch",
       "patches/prime-agent/0002-fix-synchronize-persisted-user-shell-output-with-liv.patch",
@@ -37,7 +37,11 @@
       "patches/prime-agent/0012-live-model-image-capabilities.patch",
       "patches/prime-agent/0013-pin-session-model-selection.patch",
       "patches/prime-agent/0014-upstream-settings-preservation.patch",
-      "patches/prime-agent/0015-openai-native-compaction.patch"
+      "patches/prime-agent/0015-openai-native-compaction.patch",
+      "patches/prime-agent/0016-read-only-session-lineage.patch",
+      "patches/prime-agent/0017-rustls-maintenance.patch",
+      "patches/prime-agent/0018-oauth-refresh-persistence-flight.patch",
+      "patches/prime-agent/0019-native-fixture-coordination.patch"
     ],
     "catalogRevision": "b90e08807c37ccdfab04eb31b23de6a86dd6e7fe",
     "rustVersion": "1.98.1",

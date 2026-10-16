@@ -552,7 +552,8 @@ async function refreshModelState(agentId: string, allowPending = false): Promise
     model: state.model,
     thinkingLevel: state.thinkingLevel,
     thinkingLevels: levels,
-    sessionName: state.sessionName
+    sessionName: state.sessionName,
+    info: { ...current.info, lineage: state.lineage }
   })
 }
 
@@ -587,7 +588,8 @@ function applySessionState(
     ...(agent.modelRevision === modelRevision && !agent.modelChangePending
       ? { session: state, model: state.model, thinkingLevel: state.thinkingLevel }
       : {}),
-    sessionName: state.sessionName
+    sessionName: state.sessionName,
+    info: { ...agent.info, lineage: state.lineage }
   })
 }
 
@@ -616,6 +618,7 @@ function applyCapabilities(
     ),
     info: {
       ...agent.info,
+      lineage: state.lineage,
       bridge: agent.info.engine === 'pi' ? hasBridgeCommands(commands) : agent.info.bridge
     }
   })

@@ -347,6 +347,14 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
         )
       case 'get_session_stats':
         return this.ok(command, this.stats())
+      case 'share_readiness':
+        return this.ok(command, { ready: true, destination: 'gist' })
+      case 'share_session':
+        return this.ok(command, {
+          destination: 'gist',
+          url: 'https://pi.dev/session/#mock-share',
+          gistUrl: 'https://gist.github.com/dev/mock-share'
+        })
       case 'export_html':
         return this.ok(command, {
           path: command.outputPath ?? join(tmpdir(), `vengeance-mock-${this.sessionId}.html`)

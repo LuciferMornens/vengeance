@@ -18,6 +18,8 @@ const TOOL_CALL = {
   arguments: { code: 'print("ok")' }
 }
 
+const MESSAGE_TIMESTAMP = Date.parse('2026-10-16T00:00:00.000Z')
+
 function assistant(content: AssistantMessage['content']): PrimeRecord {
   return {
     role: 'assistant',
@@ -26,7 +28,7 @@ function assistant(content: AssistantMessage['content']): PrimeRecord {
     provider: 'openai-codex',
     model: 'gpt-6.1-sol',
     stopReason: 'pending',
-    timestamp: Date.now()
+    timestamp: MESSAGE_TIMESTAMP
   }
 }
 

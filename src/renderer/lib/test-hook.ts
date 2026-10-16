@@ -1,5 +1,11 @@
 import type { AppPersistedState } from '@shared/api/app'
-import type { CreateAgentArgs, MockPlayArgs } from '@shared/api/engine'
+import type {
+  BackgroundAgentInfo,
+  CreateAgentArgs,
+  EngineId,
+  MockPlayArgs
+} from '@shared/api/engine'
+import { closeAgent, openSessionFile, resumeBackgroundAgent } from '../features/sessions/actions'
 import { openWorkspace } from '../features/shell/workspace'
 import type { AgentState } from '../store/agent-state'
 import { useAgents } from '../store/agents'
@@ -13,6 +19,9 @@ import { invoke } from './ipc'
 export interface VengeanceTestHook {
   /** Open a workspace and start a session; resolves with the agent id once the engine is ready. */
   openWorkspace(path: string, args?: Partial<CreateAgentArgs>): Promise<string>
+  openSession(path: string, engine: EngineId): Promise<string | null>
+  resumeBackground(resident: BackgroundAgentInfo): Promise<void>
+  closeSession(agentId: string): Promise<void>
   /** Mock mode: drive a scripted run on the active agent. Resolves once the run reached `pauseAt` (or settled). */
   mockPlay(args: MockPlayArgs): Promise<void>
   /** Answer the active agent's first pending extension dialog (default: first option / confirm / empty). */
@@ -42,7 +51,8 @@ function waitFor(predicate: () => boolean, timeoutMs: number, label: string): Pr
     const started = Date.now()
     const tick = () => {
       if (predicate()) return resolve()
-      if (Date.now() - started > timeoutMs) return reject(new Error(`Timed out waiting for ${label}`))
+      if (Date.now() - started > timeoutMs)
+        return reject(new Error(`Timed out waiting for ${label}`))
       setTimeout(tick, 50)
     }
     tick()
@@ -53,14 +63,18 @@ function waitFor(predicate: () => boolean, timeoutMs: number, label: string): Pr
 function waitForQuiet(quietMs = 300, timeoutMs = 30_000): Promise<void> {
   let last = -1
   let since = Date.now()
-  return waitFor(() => {
-    const marker = active()?.lastEventAt ?? 0
-    if (marker !== last) {
-      last = marker
-      since = Date.now()
-    }
-    return Date.now() - since >= quietMs
-  }, timeoutMs, 'quiet engine')
+  return waitFor(
+    () => {
+      const marker = active()?.lastEventAt ?? 0
+      if (marker !== last) {
+        last = marker
+        since = Date.now()
+      }
+      return Date.now() - since >= quietMs
+    },
+    timeoutMs,
+    'quiet engine'
+  )
 }
 
 function active() {
@@ -70,10 +84,19 @@ function active() {
 
 export function installTestHook(): void {
   window.__vengeanceTest = {
+    openSession: (path, engine) => openSessionFile(path, { engine }),
+    resumeBackground: (resident) => resumeBackgroundAgent(resident),
+    closeSession: (agentId) => closeAgent(agentId),
     async openWorkspace(path, args) {
       const id = await openWorkspace(path, args)
       if (!id) throw new Error('Could not open workspace')
-      await waitFor(() => useAgents.getState().agents[id]?.status === 'ready' && !!useAgents.getState().agents[id]?.session, 120_000, 'engine ready')
+      await waitFor(
+        () =>
+          useAgents.getState().agents[id]?.status === 'ready' &&
+          !!useAgents.getState().agents[id]?.session,
+        120_000,
+        'engine ready'
+      )
       return id
     },
     async mockPlay(args) {
@@ -88,16 +111,25 @@ export function installTestHook(): void {
       if (args.pauseAt) {
         // A paused run stops emitting: wait until the stream has been quiet for a poll interval.
         let last = -1
-        await waitFor(() => {
-          const a = active()
-          const marker = (a?.lastEventAt ?? 0) + (a?.entries.length ?? 0)
-          const quiet = marker === last && progressed()
-          last = marker
-          return quiet
-        }, 30_000, 'mock pause')
+        await waitFor(
+          () => {
+            const a = active()
+            const marker = (a?.lastEventAt ?? 0) + (a?.entries.length ?? 0)
+            const quiet = marker === last && progressed()
+            last = marker
+            return quiet
+          },
+          30_000,
+          'mock pause'
+        )
       } else {
         // Settled, or blocked on an extension dialog.
-        await waitFor(() => progressed() && (active()?.phase === 'idle' || (active()?.ext.dialogs.length ?? 0) > 0), 120_000, 'mock run')
+        await waitFor(
+          () =>
+            progressed() && (active()?.phase === 'idle' || (active()?.ext.dialogs.length ?? 0) > 0),
+          120_000,
+          'mock run'
+        )
       }
     },
     async answerDialog(value) {
@@ -107,7 +139,11 @@ export function installTestHook(): void {
       const response =
         request.method === 'confirm'
           ? { type: 'extension_ui_response' as const, id: request.id, confirmed: value !== 'no' }
-          : { type: 'extension_ui_response' as const, id: request.id, value: value ?? (request.method === 'select' ? (request.options[0] ?? '') : '') }
+          : {
+              type: 'extension_ui_response' as const,
+              id: request.id,
+              value: value ?? (request.method === 'select' ? (request.options[0] ?? '') : '')
+            }
       await useAgents.getState().respondUi(agent.id, response)
       await waitForQuiet()
     },

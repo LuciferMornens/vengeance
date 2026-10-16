@@ -3,7 +3,7 @@
 Follow [UPSTREAM.md](../../UPSTREAM.md) for reconstruction and qualification.
 
 Vengeance ships a source build of stable `v0.10.0`, upstream commit
-`763094e1b6a7c17450ee8399b06cda1853847ca5`, identified as `0.10.0+vengeance.5`.
+`763094e1b6a7c17450ee8399b06cda1853847ca5`, identified as `0.10.0+vengeance.8`.
 The exact source, catalog revision, toolchain and patch order live in
 [engines.lock.json](../../engines.lock.json). The native helper links this same stable base.
 
@@ -23,6 +23,11 @@ The exact source, catalog revision, toolchain and patch order live in
 | 0012  | Refresh native prompt and kernel image capabilities after changing models.                                |
 | 0013  | Pin the resolved creation model to its session so another worker's default changes cannot alter it.       |
 | 0014  | Backport upstream settings/MCP save preservation, retaining concurrent and unknown settings.              |
+| 0015  | Carry validated OpenAI native compaction checkpoints through transport and saved-session replay.          |
+| 0016  | Read native lineage without legacy migration; resolve endpoints and tombstones from one ledger snapshot.  |
+| 0017  | Backport the upstream rustls 0.23.46 lockfile maintenance without changing other dependency pins.         |
+| 0018  | Keep each OAuth refresh flight through credential persistence so waiting callers reuse its token.         |
+| 0019  | Coordinate native coalescing, queued goal pause and telemetry retry fixtures without wall-clock races.    |
 
 Patch 0014 comes from upstream commit
 [`7b89c111da0f1d9e67849b34f10552bbb4bd1bd1`](https://github.com/PrimeIntellect-ai/prime-agent/commit/7b89c111da0f1d9e67849b34f10552bbb4bd1bd1).
@@ -30,6 +35,21 @@ Its service-tier hunk is rebased around patch 0005's `Ultrafast` variant; that v
 The upstream persistence and CLI MCP regression tests travel with the patch. Patch 0013 has a native
 session/default isolation regression and app coverage in `scripts/qa/engines/model-isolation.qa.mjs`.
 See [the October 2026 audit](../../docs/ENGINE-AUDIT-2026-10-14.md) for selection and qualification evidence.
+
+The [16 October stable audit](../../docs/PRIME-STABLE-AUDIT-2026-10-16.md) records the latest release
+and tag checks, patch retirement candidates and helper qualification boundaries. Patch 0015's protocol,
+persistence and transport evidence is in [OpenAI native compaction](../../docs/openai-native-compaction.md).
+Patch 0016 adds a read-only ledger constructor and an endpoint-resolution snapshot; ordinary native
+ledger construction and migration keep their upstream behavior. The helper uses bounded native headers
+for topology and leaves transcript summaries to the app's cached session index.
+Patch 0018 fixes a stable-base concurrency race: releasing a provider's refresh gate before saving
+its credential could spend a single-use refresh token twice. The gate covers persistence and reload;
+token HTTP stays outside the document lock. A regression pauses the first credential write while
+a second public resolver attempts to refresh. Existing peer-writer and refresh tests also qualify it.
+Patch 0019 changes tests only: virtual timer ticks verify coalescing and retry expiry, while a native
+admission barrier verifies that goal pause withdraws an actual queued continuation. The retry-broadcast
+fixture shuts down its native worker before dropping its runtime, closing subprocess pipe readers.
+Assertions keep their behavioral contracts rather than relying on provider speed or scheduler timing.
 
 The first three patches originated on development commit
 `fa20be8e487b1889c2395ea33906149aef983ca0`. Patch 0002 was rebased onto stable source:

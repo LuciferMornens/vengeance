@@ -91,8 +91,14 @@ export function serveSdkHost(config: SdkHostConfig): void {
     importEngineFile<Pick<PiSdkSurface, K>>(config.packageDir, ...segments)
   const modelRuntime = () => engineFile<'ModelRuntime'>('core', 'model-runtime.js')
   const settingsManager = () => engineFile<'SettingsManager'>('core', 'settings-manager.js')
-  const packageManagerModule = () => engineFile<'DefaultPackageManager'>('core', 'package-manager.js')
+  const packageManagerModule = () =>
+    engineFile<'DefaultPackageManager'>('core', 'package-manager.js')
   const resourceLoader = () => engineFile<'loadProjectContextFiles'>('core', 'resource-loader.js')
+  const savedSessionShare = () =>
+    importEngineFile<{
+      getSavedSessionShareReadiness: Operation<'share-readiness'>
+      shareSavedSession: Operation<'share-session'>
+    }>(config.packageDir, 'core', 'saved-session-share.js')
 
   function send(message: SdkHostMessage): void {
     process.send?.(message)
@@ -168,6 +174,13 @@ export function serveSdkHost(config: SdkHostConfig): void {
   }
 
   const operations: { [K in SdkHostOp]: Operation<K> } = {
+    async 'share-readiness'(args) {
+      return (await savedSessionShare()).getSavedSessionShareReadiness(args)
+    },
+
+    async 'share-session'(args) {
+      return (await savedSessionShare()).shareSavedSession(args)
+    },
     async catalog({ agentDir, extraModels, extraProviderIds }) {
       const [runtime, levelsOf, envVarsOf] = await Promise.all([
         createRuntime(agentDir),
@@ -175,14 +188,18 @@ export function serveSdkHost(config: SdkHostConfig): void {
         envVarNames()
       ])
       const available = new Set(runtime.getAvailableSnapshot().map(modelKey))
-      const providers = runtime.getProviders().map((provider) => describeProvider(runtime, provider))
+      const providers = runtime
+        .getProviders()
+        .map((provider) => describeProvider(runtime, provider))
       const providerIds = [...providers.map((provider) => provider.id), ...extraProviderIds]
       return {
         providers,
         models: runtime
           .getModels()
           .map((model) => catalogModel(model, available.has(modelKey(model)), levelsOf(model))),
-        envVars: Object.fromEntries(providerIds.map((providerId) => [providerId, envVarsOf(providerId)])),
+        envVars: Object.fromEntries(
+          providerIds.map((providerId) => [providerId, envVarsOf(providerId)])
+        ),
         extraLevels: extraModels.map(levelsOf),
         error: runtime.getError()
       }
@@ -215,14 +232,21 @@ export function serveSdkHost(config: SdkHostConfig): void {
     async 'npm-view'({ name, ...scope }) {
       // SAFETY: both members are checked with typeof before use; an engine without them yields no answer.
       const runner = (await packageManager(scope)) as unknown as Partial<EngineNpmRunner>
-      if (typeof runner.getNpmCommand !== 'function' || typeof runner.runCommandCapture !== 'function')
+      if (
+        typeof runner.getNpmCommand !== 'function' ||
+        typeof runner.runCommandCapture !== 'function'
+      )
         return null
       const npm = runner.getNpmCommand()
       return runner
-        .runCommandCapture(npm.command, [...npm.args, 'view', name, 'version', 'dist.tarball', '--json'], {
-          cwd: scope.cwd,
-          timeoutMs: NPM_VIEW_TIMEOUT_MS
-        })
+        .runCommandCapture(
+          npm.command,
+          [...npm.args, 'view', name, 'version', 'dist.tarball', '--json'],
+          {
+            cwd: scope.cwd,
+            timeoutMs: NPM_VIEW_TIMEOUT_MS
+          }
+        )
         .catch(() => null)
     },
 

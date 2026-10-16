@@ -216,3 +216,15 @@ index 0000000..0160b00
 +		expect(largeV2.input).toEqual(["text"]);
 +	});
 +});
+diff --git a/packages/coding-agent/src/core/model-resolver.ts b/packages/coding-agent/src/core/model-resolver.ts
+index 0e93120..5de97df 100644
+--- a/packages/coding-agent/src/core/model-resolver.ts
++++ b/packages/coding-agent/src/core/model-resolver.ts
+@@ -59,6 +59,7 @@ export const defaultModelPerProvider: Partial<Record<KnownProvider, string>> = {
+ 	"xiaomi-token-plan-cn": "mimo-v2.5-pro",
+ 	"xiaomi-token-plan-ams": "mimo-v2.5-pro",
+ 	"xiaomi-token-plan-sgp": "mimo-v2.5-pro",
++	abliteration: "abliterated-model",
+ };
+ 
+ export interface ScopedModel {

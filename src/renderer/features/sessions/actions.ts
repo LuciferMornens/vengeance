@@ -47,11 +47,15 @@ export function activateAgent(agentId: string, activationRevision?: number): voi
 }
 
 /** The open agent currently on this session file, if any. */
-export function findAgentForFile(path: string): string | undefined {
+export function findAgentForFile(path: string, engine?: EngineId): string | undefined {
   const { agents, order } = useAgents.getState()
   return order.find((id) => {
     const agent = agents[id]
-    return !!agent && samePath(agentSessionFile(agent), path)
+    return (
+      !!agent &&
+      (!engine || agent.info.engine === engine) &&
+      samePath(agentSessionFile(agent), path)
+    )
   })
 }
 
@@ -82,6 +86,7 @@ interface OpenSessionOptions {
   cwd?: string
   engine?: EngineId
   activationRevision?: number
+  nativeAgentId?: string
 }
 
 /**
@@ -95,15 +100,24 @@ export async function openSessionFile(
   options: OpenSessionOptions = {}
 ): Promise<string | null> {
   const activationRevision = options.activationRevision ?? useAgents.getState().requestActivation()
-  const open = findAgentForFile(path)
+  let engine = options.engine
+  if (!engine) {
+    try {
+      engine = (await invoke('sessions:describe', path)).engine
+    } catch (error) {
+      fail('Could not open the session', error)
+      return null
+    }
+  }
+  const open = findAgentForFile(path, engine)
   if (open) {
     activateAgent(open, activationRevision)
     return open
   }
-  const key = normalizePath(path)
+  const key = `${engine}:${normalizePath(path)}`
   let opening = pendingOpens.get(key)
   if (!opening) {
-    opening = resumeSessionFile(path, { ...options, activationRevision }).finally(() =>
+    opening = resumeSessionFile(path, { ...options, engine, activationRevision }).finally(() =>
       pendingOpens.delete(key)
     )
     pendingOpens.set(key, opening)
@@ -132,7 +146,7 @@ async function resumeSessionFile(
     const cwd = description.cwd || options.cwd || useApp.getState().prefs.activeWorkspace
     if (!cwd) throw new Error('Choose a workspace to open this session.')
     return startAgent(
-      { cwd, engine, sessionPath: path },
+      { cwd, engine, sessionPath: path, nativeAgentId: options.nativeAgentId },
       'Could not open the session',
       options.activationRevision
     )
@@ -149,6 +163,25 @@ export async function openSession(item: SessionListItem): Promise<void> {
 
 export async function resumeBackgroundAgent(resident: BackgroundAgentInfo): Promise<void> {
   const activationRevision = useAgents.getState().requestActivation()
+  if (!resident.sessionPath) {
+    const paths = new Set(
+      useSessions
+        .getState()
+        .background.filter(
+          (candidate) => candidate.engine === resident.engine && candidate.id === resident.id
+        )
+        .flatMap((candidate) =>
+          candidate.sessionPath ? [normalizePath(candidate.sessionPath)] : []
+        )
+    )
+    if (paths.size > 1) {
+      fail(
+        'Could not resume the background agent',
+        new Error('This Engine identity matches several sessions. Select its saved conversation.')
+      )
+      return
+    }
+  }
   const key = `resident:${resident.engine}:${resident.id}`
   const pending = pendingOpens.get(key)
   if (pending) {
@@ -161,7 +194,9 @@ export async function resumeBackgroundAgent(resident: BackgroundAgentInfo): Prom
     const agent = state.agents[id]
     return (
       agent?.info.engine === resident.engine &&
-      (agent.info.nativeAgentId ?? agent.info.args.nativeAgentId) === resident.id
+      (resident.sessionPath
+        ? samePath(agentSessionFile(agent), resident.sessionPath)
+        : (agent.info.nativeAgentId ?? agent.info.args.nativeAgentId) === resident.id)
     )
   })
   if (open) {
@@ -169,11 +204,12 @@ export async function resumeBackgroundAgent(resident: BackgroundAgentInfo): Prom
     return
   }
   if (resident.sessionPath) {
-    const attached = findAgentForFile(resident.sessionPath)
-    if (attached) {
-      activateAgent(attached, activationRevision)
-      return
-    }
+    await openSessionFile(resident.sessionPath, {
+      cwd: resident.cwd,
+      engine: resident.engine,
+      activationRevision
+    })
+    return
   }
   const opening = startAgent(
     {
@@ -499,8 +535,8 @@ export function revealSession(path: string): void {
 }
 
 export async function deleteSession(target: SessionTarget & { path: string }): Promise<void> {
-  const open = findAgentForFile(target.path)
   const engine = sessionTargetEngine(target)
+  const open = findAgentForFile(target.path, engine)
   try {
     if (open && engine !== 'prime') await useAgents.getState().disposeAgent(open)
     await invoke('sessions:trash', target.path)

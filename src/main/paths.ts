@@ -1,5 +1,6 @@
 import { stat } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
+import { stripWindowsPathPrefix } from '@shared/session-identity'
 
 /**
  * Path comparisons for the main process. Windows paths compare case-insensitively; everything is
@@ -8,7 +9,7 @@ import { isAbsolute, relative, resolve } from 'node:path'
 
 /** Canonical form of a path for comparisons (resolved; case-folded on Windows). */
 export function comparablePath(path: string): string {
-  const resolved = resolve(path)
+  const resolved = resolve(stripWindowsPathPrefix(path))
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved
 }
 

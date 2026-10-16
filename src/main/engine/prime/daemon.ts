@@ -4,10 +4,12 @@ import { mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import type { BackgroundAgentInfo } from '@shared/api/engine'
+import type { BackgroundAgentInfo, BackgroundAgentSelector } from '@shared/api/engine'
 import { getPrimeAgentDir, locatePrimeEngine, type PrimeEngineLocation } from './locate'
 import { expandPrimePath } from './configuration-store'
 import { resolvePrimeSessionRoot } from './session-paths'
+import { normalizePrimeLineage } from './normalize'
+import { comparablePath } from '../../paths'
 import {
   primeEnvironmentHash,
   restorePrimeDaemonEnvironment,
@@ -481,7 +483,7 @@ export async function connectPrimeResident(
     if (!connection) continue
     try {
       const roster = await connection.request('list', { all: false, includeClientOwned: true })
-      const expected = selector.sessionPath ? resolve(selector.sessionPath) : undefined
+      const expected = selector.sessionPath ? comparablePath(selector.sessionPath) : undefined
       const resident = asRecords(roster.sessions ?? roster.agents).find((session) => {
         if (selector.nativeAgentId) {
           return (
@@ -491,9 +493,7 @@ export async function connectPrimeResident(
         }
         const path = stringValue(session.sessionFile)
         if (!path || !expected) return false
-        return process.platform === 'win32'
-          ? resolve(path).toLowerCase() === expected.toLowerCase()
-          : resolve(path) === expected
+        return comparablePath(path) === expected
       })
       const nativeAgentId = stringValue(resident?.activeSessionId) ?? stringValue(resident?.id)
       if (!nativeAgentId) continue
@@ -537,11 +537,7 @@ function matchesRestartSession(
 ): boolean {
   if (selector.nativeAgentId) return session.nativeAgentId === selector.nativeAgentId
   if (!selector.sessionPath || typeof session.sessionPath !== 'string') return false
-  const actual = resolve(session.sessionPath)
-  const expected = resolve(selector.sessionPath)
-  return process.platform === 'win32'
-    ? actual.toLowerCase() === expected.toLowerCase()
-    : actual === expected
+  return comparablePath(session.sessionPath) === comparablePath(selector.sessionPath)
 }
 
 async function knownDaemonSockets(options: PrimeDaemonOptions): Promise<string[]> {
@@ -575,6 +571,8 @@ export async function listPrimeBackground(
             name: stringValue(session.name) ?? stringValue(session.sessionName),
             cwd: stringValue(session.cwd) ?? '',
             sessionPath: stringValue(session.sessionFile),
+            sessionId: stringValue(session.sessionId),
+            lineage: normalizePrimeLineage(session),
             status: stringValue(session.activity) ?? stringValue(session.lifecycle) ?? 'idle',
             busy:
               session.isStreaming === true ||
@@ -587,31 +585,75 @@ export async function listPrimeBackground(
       }
     })
   )
-  return results.flat()
+  const residents = new Map<string, BackgroundAgentInfo>()
+  for (const resident of results.flat()) {
+    const keys = [
+      ...(resident.sessionPath ? [`path:${comparablePath(resident.sessionPath)}`] : []),
+      `native:${resident.id}`
+    ]
+    const known = keys
+      .map((key) => residents.get(key))
+      .find(
+        (candidate) =>
+          candidate &&
+          (!candidate.sessionPath ||
+            !resident.sessionPath ||
+            comparablePath(candidate.sessionPath) === comparablePath(resident.sessionPath))
+      )
+    const merged = known ?? resident
+    if (known) {
+      known.sessionPath ??= resident.sessionPath
+      known.sessionId ??= resident.sessionId
+      known.lineage ??= resident.lineage
+      known.busy ||= resident.busy
+    }
+    for (const key of keys) residents.set(key, merged)
+  }
+  return [...new Set(residents.values())]
 }
 
 export async function stopPrimeBackground(
-  nativeAgentId: string,
+  selector: string | BackgroundAgentSelector,
   options: PrimeDaemonOptions = {}
 ): Promise<void> {
-  for (const socketPath of await knownDaemonSockets(options)) {
-    await restartBarriers.get(socketPath)
-    const client = await probe(socketPath)
-    if (!client) continue
-    try {
-      const result = await client.request('list', { all: false, includeClientOwned: false })
-      const matched = asRecords(result.sessions ?? result.agents).some(
-        (session) => session.activeSessionId === nativeAgentId || session.id === nativeAgentId
-      )
-      if (matched) {
-        await client.request('kill', { activeSessionId: nativeAgentId }, 0)
-        return
+  const nativeAgentId = typeof selector === 'string' ? selector : selector.id
+  const expectedPath = typeof selector === 'string' ? undefined : selector.sessionPath
+  const matches: Array<{ client: PrimeTransport; path?: string }> = []
+  try {
+    for (const socketPath of await knownDaemonSockets(options)) {
+      await restartBarriers.get(socketPath)
+      const client = await probe(socketPath)
+      if (!client) continue
+      let retained = false
+      try {
+        const result = await client.request('list', { all: false, includeClientOwned: false })
+        const matched = asRecords(result.sessions ?? result.agents).find((session) => {
+          if (session.activeSessionId !== nativeAgentId && session.id !== nativeAgentId)
+            return false
+          const path = stringValue(session.sessionFile)
+          return !expectedPath || (!!path && comparablePath(path) === comparablePath(expectedPath))
+        })
+        if (matched) {
+          matches.push({ client, path: stringValue(matched.sessionFile) })
+          retained = true
+        }
+      } finally {
+        if (!retained) client.close()
       }
-    } finally {
-      client.close()
     }
+    if (!matches.length) throw new Error('This background session is no longer running')
+    const identities = new Set(
+      matches.map((match) => (match.path ? comparablePath(match.path) : ''))
+    )
+    if (identities.size > 1) {
+      throw new Error(
+        'This Engine identity matches several sessions. Select its saved conversation.'
+      )
+    }
+    await matches[0]!.client.request('kill', { activeSessionId: nativeAgentId }, 0)
+  } finally {
+    for (const match of matches) match.client.close()
   }
-  throw new Error('This background session is no longer running')
 }
 
 export async function withPrimeServiceSession<Result>(
@@ -632,10 +674,10 @@ export async function withPrimeServiceSession<Result>(
     }
     if (sessionPath && !activeSessionId) {
       const roster = await client.request('list', { all: false, includeClientOwned: true })
-      const expectedPath = resolve(sessionPath).toLowerCase()
+      const expectedPath = comparablePath(sessionPath)
       const existing = asRecords(roster.sessions ?? roster.agents).find((session) => {
         const path = stringValue(session.sessionFile)
-        return path && resolve(path).toLowerCase() === expectedPath
+        return path && comparablePath(path) === expectedPath
       })
       activeSessionId = stringValue(existing?.activeSessionId) ?? stringValue(existing?.id)
       if (activeSessionId && options.requireOwnedSession) {

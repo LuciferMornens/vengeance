@@ -1,7 +1,7 @@
 {
   "name": "vengeance",
   "productName": "Vengeance",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "description": "Vengeance — a premium desktop coding agent.",
   "main": "./out/main/index.js",
   "author": "Vengeance",

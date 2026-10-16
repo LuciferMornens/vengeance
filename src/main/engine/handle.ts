@@ -93,7 +93,8 @@ const NO_TIMEOUT = new Set<RpcCommandType>([
   'switch_session',
   'fork',
   'clone',
-  'export_html'
+  'export_html',
+  'share_session'
 ])
 
 /** Default per-command response timeout in ms (0 = none). */

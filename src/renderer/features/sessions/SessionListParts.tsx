@@ -108,6 +108,7 @@ export function SectionHeader({
 interface SessionListFeedbackProps {
   loading: boolean
   error?: string
+  warning?: string
   empty: boolean
   query: string
   scope: SessionScope
@@ -117,6 +118,7 @@ interface SessionListFeedbackProps {
 export function SessionListFeedback({
   loading,
   error,
+  warning,
   empty,
   query,
   scope,
@@ -149,6 +151,13 @@ export function SessionListFeedback({
           </div>
         ))}
       </div>
+    )
+  }
+  if (warning) {
+    return (
+      <p role="status" className="mx-4 mt-3 break-words text-xs leading-relaxed text-fg-3">
+        {warning}
+      </p>
     )
   }
   if (!empty) return null

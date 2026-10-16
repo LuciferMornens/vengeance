@@ -30,6 +30,20 @@ node scripts/qa/settings/thinking.qa.mjs   # one suite directly
   openai-codex) and refresh tokens rotate.
 - **Suites live in `scripts/qa/<domain>/<name>.qa.mjs`**. Shared helpers only in `scripts/qa/lib/`.
 - The user may have their own Vengeance open. The harness never touches processes it did not start.
+- Run native Rust qualification and package builds serially on memory-constrained machines.
+  `QA_NATIVE_JOBS=1` limits the native workspace runner; `VENGEANCE_NATIVE_BUILD_JOBS=1` limits
+  Engine 2 and helper package builds. Both accept 1–32 jobs and default to four. For native tests,
+  `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0` omits debug symbols while keeping test
+  assertions, reducing GNU linker memory use on Windows.
+- The Engine workspace runner builds the locked `packages/env` Rust daemon before the full suite
+  or a targeted `env` run, matching upstream CI. `QA_NATIVE_JOBS` also limits this prerequisite.
+  The standalone Env package is outside the bundled SDK's runtime dependency graph.
+  On Windows the isolated runner adds Git Bash utilities to its child PATH, including targeted runs
+  launched from PowerShell.
+- Native workspace runners default to a 15-minute process deadline. `QA_NATIVE_TIMEOUT_MS` sets
+  that deadline in milliseconds for a slower qualification host. Both runners accept integers from 1
+  through 2147483647, the Node timer limit. This changes the outer process deadline only; native
+  test assertions and their time limits still apply.
 - Finish renderer builds before launching QA. Run GUI suites serially: rebuilding `out/` beneath a
   running app can invalidate lazy chunks, and concurrent UI suites can compete for focus. Inspect
   failure PNGs and renderer-error output; `scripts/shots.mjs` reports errors even on scenario failure.
@@ -321,6 +335,20 @@ binding until the user explicitly restarts the idle resident.
 `node scripts/qa/engines/resident-close.qa.mjs` checks Close tab versus Stop session. Idle and working
 saved sessions remain available in Background sessions, including future scheduled work. Resume
 keeps native identity, worker and history; explicit Stop ends the worker without deleting saved history.
+
+`node scripts/qa/performance/prime-long-history.qa.mjs` transfers 3,000 tool calls through public
+engine switching and Engine 2's native session writer. The resulting depth-zero history then passes
+three cold file opens, resident reopens and cached workspace roundtrips. Reports include native
+executable identity, open/switch timings, frame gaps, mounted segments, retained renderer/main heap
+and zero local-provider requests. Run after native builds and workspace tests finish so CPU contention
+does not distort the 8-second open and 2-second cached-switch gates. The shared renderer's
+`performance/long-tools.qa.mjs` also checks 1,000, 3,000 and 10,000 tool calls through Engine.
+
+`node scripts/qa/performance/workspace-scale.qa.mjs` checks 8,300 mixed Engine/Engine 2 histories
+across 65 workspaces, including search, keyboard navigation, native reopening, hidden workspaces and
+heap retention. Run its default full mode for qualification. The depth-zero opening path's zero native
+lineage-helper calls are proved separately by `scripts/checks/prime-lineage-binding.check.ts` and
+`scripts/checks/prime-saved-sessions.check.ts`; GUI timings do not count helper invocations.
 
 Fast offline `npm run checks` covers exact model identity, explicit text-only overrides and unknown
 capabilities. `node scripts/checks/prime-state-model.mjs` drives test-owned native protocol sockets for

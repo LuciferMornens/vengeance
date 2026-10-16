@@ -12,7 +12,11 @@ const WORKSPACES = [
 /** Launch options of the first session, so Overview shows real engine arguments. */
 const LAUNCH = {
   approve: true,
-  launch: { tools: ['read', 'bash', 'edit', 'write', 'todo'], appendSystemPrompt: ['Prefer small, reviewable diffs.'], extensionFlags: { 'no-lens': true } }
+  launch: {
+    tools: ['read', 'bash', 'edit', 'write', 'todo'],
+    appendSystemPrompt: ['Prefer small, reviewable diffs.'],
+    extensionFlags: { 'no-lens': true }
+  }
 }
 
 /** Main button of the first session row whose text contains `text`. */
@@ -20,7 +24,8 @@ const row = (page, text) => page.locator('[data-session-row]', { hasText: text }
 
 /** Close transient toasts so they do not cover the inspector. */
 async function dismissToasts(page) {
-  for (const button of await page.getByRole('button', { name: 'Dismiss' }).all()) await button.click().catch(() => undefined)
+  for (const button of await page.getByRole('button', { name: 'Dismiss' }).all())
+    await button.click().catch(() => undefined)
 }
 
 export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
@@ -28,7 +33,9 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   const settle = async () => {
     await dismissToasts(page)
     await page.mouse.move(760, 520)
-    await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
+    await page.evaluate(
+      () => document.activeElement instanceof HTMLElement && document.activeElement.blur()
+    )
   }
   /** Close a menu/dialog and let Radix finish restoring focus. */
   const escape = async () => {
@@ -39,14 +46,21 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   const treeNode = (text) => panel().locator('button[aria-expanded]', { hasText: text }).first()
   const dialog = () => page.getByRole('dialog')
 
-  await test('setPrefs', { workspaces: WORKSPACES, activeWorkspace: MOCK_WORKSPACE, features: { sessions: { pinned: [], scope: 'workspace', collapsed: [] } } })
+  await test('setPrefs', {
+    workspaces: WORKSPACES,
+    activeWorkspace: MOCK_WORKSPACE,
+    features: { sessions: { pinned: [], scope: 'workspace', collapsed: [] } }
+  })
   await test('openWorkspace', MOCK_WORKSPACE, LAUNCH)
   await row(page, 'Theme tokens audit').waitFor()
 
   // A child subagent session reads as its role and task; the generated name is only in the tooltip.
   const child = row(page, 'Worker subagent')
   const childText = await child.innerText()
-  if (!childText.includes('Worker subagent · Fix the session-tree jump on fork') || /subagent-worker-|[0-9a-f]{8}-[0-9a-f]{4}-/.test(childText)) {
+  if (
+    !childText.includes('Worker subagent · Fix the session-tree jump on fork') ||
+    /subagent-worker-|[0-9a-f]{8}-[0-9a-f]{4}-/.test(childText)
+  ) {
     throw new Error(`child subagent session row reads "${childText}"`)
   }
   await child.locator('span.truncate').first().hover()
@@ -57,7 +71,11 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   // Pin two sessions through the hover action.
   for (const title of ['Release 0.9 checklist', 'Migrate to React 19']) {
     await row(page, title).hover()
-    await page.locator('div.group\\/row', { hasText: title }).first().getByRole('button', { name: 'Pin' }).click()
+    await page
+      .locator('div.group\\/row', { hasText: title })
+      .first()
+      .getByRole('button', { name: 'Pin' })
+      .click()
   }
 
   // A complete showcase run in agent A (tools, files, abandoned branch, extension status/widgets).
@@ -125,7 +143,12 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   await page.locator('section[aria-label="Open sessions"] [data-session-row]').nth(1).waitFor()
   await test('waitForIdle')
   await wait(300)
-  await test('mockPlay', { script: 'short', prompt: 'Also check the chart palette tokens', instant: true, pauseAt: 'short-text' })
+  await test('mockPlay', {
+    script: 'short',
+    prompt: 'Also check the chart palette tokens',
+    instant: true,
+    pauseAt: 'short-text'
+  })
   await shot('sessions-two-agents-b', { settleMs: 500 })
   await row(page, 'fix dropped session writes').click()
   await settle()
@@ -162,7 +185,9 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   await row(page, 'Write integration tests').click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Browse session tree…' }).click()
   await dialog().getByText('Can you also add a regression test').waitFor()
-  await dialog().locator('button[aria-expanded]', { hasText: 'Can you also add a regression test' }).click()
+  await dialog()
+    .locator('button[aria-expanded]', { hasText: 'Can you also add a regression test' })
+    .click()
   await dialog().getByRole('button', { name: 'Add label' }).click()
   await dialog().getByRole('textbox', { name: 'Label' }).fill('tests requested')
   await page.keyboard.press('Enter')
@@ -182,6 +207,41 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   await dialog().getByRole('button', { name: 'Done' }).click()
   await wait(300)
 
+  const shareDestination = async (value) =>
+    page.evaluate(
+      (destination) =>
+        window.vengeance.invoke('engine:settings', {
+          engine: 'pi',
+          channel: 'settings:set',
+          args: [
+            { scope: 'global', cwd: null, path: ['sessionShareDestination'], value: destination }
+          ]
+        }),
+      value
+    )
+  await shareDestination('radius')
+  await row(page, 'fix dropped session writes').click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Share…' }).click()
+  await dialog()
+    .getByText('Uploads this session to your Radius organization and copies its link.')
+    .waitFor()
+  await shot('sessions-share-radius-review', { settleMs: 400 })
+
+  await shareDestination('gist')
+  await dialog().getByRole('button', { name: 'Create link' }).click()
+  await dialog().getByRole('alert').filter({ hasText: 'destination changed' }).waitFor()
+  await shot('sessions-share-destination-changed', { settleMs: 400 })
+  await shareDestination('radius')
+  await dialog().getByRole('button', { name: 'Check destination again' }).click()
+  await dialog().getByRole('button', { name: 'Create link' }).click()
+  await dialog().getByText('Shared with your Radius organization.').waitFor()
+  if (await dialog().getByText('Anyone with the link', { exact: false }).count()) {
+    throw new Error('Radius success uses gist visibility copy')
+  }
+  await shot('sessions-share-radius-done', { settleMs: 400 })
+  await dialog().getByRole('button', { name: 'Done' }).click()
+  await shareDestination(undefined)
+
   // Import: pick (mock file) → review → open.
   await page.getByRole('button', { name: 'More ways to start' }).click()
   await shot('sessions-new-menu', { settleMs: 300 })
@@ -189,7 +249,11 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   await dialog().getByText('Offline sync design review').waitFor()
   await shot('sessions-import', { settleMs: 400 })
   await dialog().getByRole('button', { name: 'Import and open' }).click()
-  await page.locator('section[aria-label="Open sessions"] [data-session-row]', { hasText: 'Offline sync design review' }).waitFor()
+  await page
+    .locator('section[aria-label="Open sessions"] [data-session-row]', {
+      hasText: 'Offline sync design review'
+    })
+    .waitFor()
   await test('waitForIdle')
   await settle()
   await shot('sessions-imported', { settleMs: 600 })
@@ -207,7 +271,9 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   await page.getByRole('textbox', { name: 'Search sessions' }).fill('websocket')
   await shot('sessions-search', { settleMs: 400 })
   await page.getByRole('textbox', { name: 'Search sessions' }).fill('')
-  await test('setPrefs', { features: { sessions: { pinned: [], scope: 'workspace', collapsed: [] } } })
+  await test('setPrefs', {
+    features: { sessions: { pinned: [], scope: 'workspace', collapsed: [] } }
+  })
 
   // ── Go to an earlier point in place, with the branch-summary prompt ──
   await row(page, 'fix dropped session writes').click()
@@ -216,13 +282,20 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   await settle()
   await treeNode('Sessions are written by').click()
   await panel().getByRole('button', { name: 'Go to this point' }).click()
-  await dialog().getByRole('radio', { name: /No summary/ }).waitFor()
+  await dialog()
+    .getByRole('radio', { name: /No summary/ })
+    .waitFor()
   await shot('inspector-navigate-prompt', { settleMs: 400 })
-  await dialog().getByRole('radio', { name: /Summarize with instructions/ }).click()
+  await dialog()
+    .getByRole('radio', { name: /Summarize with instructions/ })
+    .click()
   await dialog().getByRole('textbox').fill('Keep the debounce findings and the dirty-set idea.')
   await shot('inspector-navigate-instructions', { settleMs: 300 })
   await dialog().getByRole('button', { name: 'Go to this point' }).click()
-  await panel().getByText(/Explored the debounced persist path/).first().waitFor()
+  await panel()
+    .getByText(/Explored the debounced persist path/)
+    .first()
+    .waitFor()
   await settle()
   await shot('inspector-branches-moved', { settleMs: 700 })
 

@@ -9,6 +9,7 @@ import type {
   ThinkingLevel
 } from '../engine-types'
 import type { SubagentInspectReply, SubagentInspectRequest } from '../subagents'
+import type { SessionLineage } from './sessions'
 import type { LaunchOptions } from './launch'
 import type { EngineSettingsRequest, EngineSettingsResult } from './settings'
 import type { SpeedMode, SpeedState } from './speed'
@@ -70,8 +71,15 @@ export interface BackgroundAgentInfo {
   name?: string
   cwd: string
   sessionPath?: string
+  sessionId?: string
+  lineage?: SessionLineage
   status: string
   busy: boolean
+}
+
+export interface BackgroundAgentSelector {
+  id: string
+  sessionPath?: string
 }
 
 /** Lifecycle of one session's engine connection. */
@@ -129,6 +137,7 @@ export interface AgentInfo {
   sessionFile?: string
   sessionId?: string
   sessionName?: string
+  lineage?: SessionLineage
   /** True between `agent_start` and `agent_settled`. */
   busy: boolean
   /** The engine provides Vengeance bridge operations for trees, tools, and labels. */
@@ -314,7 +323,11 @@ export interface BridgeCallOptions {
 
 export interface EngineInvokeMap {
   'engine:background-list': [engine: EngineId, result: BackgroundAgentInfo[]]
-  'engine:background-stop': [engine: EngineId, nativeAgentId: string, result: void]
+  'engine:background-stop': [
+    engine: EngineId,
+    selector: string | BackgroundAgentSelector,
+    result: void
+  ]
   'engine:backends': [result: EngineDescriptor[]]
   'engine:describe': [engine: EngineId, result: EngineLocationInfo]
   'engine:settings': [request: EngineSettingsRequest, result: EngineSettingsResult]

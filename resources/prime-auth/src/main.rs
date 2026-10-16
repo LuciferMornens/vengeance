@@ -1,3 +1,4 @@
+mod lineage;
 mod mcp;
 mod prime_inference;
 mod resources;
@@ -395,6 +396,25 @@ async fn handle_input(mut input: mpsc::Receiver<Input>, bridge: BridgeUi) {
 async fn main() {
     // Provider failures may carry response bodies; neither panics nor errors expose those bodies.
     std::panic::set_hook(Box::new(|_| {}));
+    if std::env::args().any(|value| value == "--session-delete") {
+        let result = match tokio::task::spawn_blocking(lineage::run_delete).await {
+            Ok(Ok(result)) => json!({ "ok": true, "result": result }),
+            Ok(Err(error)) => json!({ "ok": false, "error": error.to_string() }),
+            Err(_) => {
+                json!({ "ok": false, "error": "Engine 2 child deletion could not complete." })
+            }
+        };
+        let _ = write_event(&result);
+        return;
+    }
+    if std::env::args().any(|value| value == "--session-lineage") {
+        let result = match tokio::task::spawn_blocking(lineage::run).await {
+            Ok(Ok(result)) => json!({ "ok": true, "result": result }),
+            _ => json!({ "ok": false, "error": "Engine 2 session discovery could not complete." }),
+        };
+        let _ = write_event(&result);
+        return;
+    }
     if std::env::args().any(|value| value == "--restart-config") {
         let result = match tokio::task::spawn_blocking(restart::run).await {
             Ok(Ok(result)) => json!({ "ok": true, "result": result }),
@@ -450,6 +470,8 @@ async fn main() {
         "restartConfig": true,
         "restartCapture": true,
         "sessions": true,
+        "sessionLineage": true,
+        "sessionDelete": true,
         "traces": true
     });
     if write_event(&metadata).is_err() || std::env::args().any(|value| value == "--version") {

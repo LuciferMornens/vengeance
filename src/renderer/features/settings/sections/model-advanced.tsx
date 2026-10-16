@@ -9,7 +9,8 @@ import { PrimeModelFields, PrimeRoutingFields } from './prime-model-fields'
 
 /**
  * Visual editors for the advanced models.json fields of a provider, custom model or model override:
- * Headers, compatibility and model metadata follow each engine's schema. Unknown keys stay untouched.
+ * Headers, compatibility and model metadata follow each engine's schema.
+ * Unknown keys stay untouched.
  */
 
 type CompatField =
@@ -123,6 +124,12 @@ const OPENAI_RESPONSES_COMPAT: CompatField[] = [
     label: 'Long cache retention',
     hint: 'The endpoint accepts 24-hour prompt cache retention.',
     kind: 'switch'
+  },
+  {
+    key: 'supportsMidConvoEffort',
+    label: 'Keep cache when thinking changes',
+    hint: 'Send effort changes inside the conversation. Ignored with ChatGPT sign-in.',
+    kind: 'switch'
   }
 ]
 
@@ -213,7 +220,7 @@ const PRIME_RESPONSES_COMPAT: CompatField[] = [
   ...OPENAI_RESPONSES_COMPAT.filter((field) => field.key === 'supportsLongCacheRetention')
 ]
 
-/** Compatibility switches of a wire protocol; empty for protocols without any. Unset `api` means OpenAI completions. */
+/** Compatibility switches of a wire protocol. Unset `api` means OpenAI completions. */
 function compatFields(api: string | undefined, engine: EngineId): CompatField[] {
   if (engine === 'prime') {
     if (!api || api === 'openai-completions') return PRIME_COMPLETIONS_COMPAT
@@ -228,7 +235,9 @@ function compatFields(api: string | undefined, engine: EngineId): CompatField[] 
     return []
   }
   if (!api || api === 'openai-completions') return OPENAI_COMPLETIONS_COMPAT
-  if (api === 'openai-responses' || api === 'azure-openai-responses') return OPENAI_RESPONSES_COMPAT
+  if (api === 'openai-responses') return OPENAI_RESPONSES_COMPAT
+  if (api === 'azure-openai-responses')
+    return OPENAI_RESPONSES_COMPAT.filter((field) => field.key !== 'supportsMidConvoEffort')
   if (api === 'anthropic-messages') return ANTHROPIC_COMPAT
   return []
 }
@@ -260,7 +269,10 @@ function CompatRow({
   onRemove: () => void
 }) {
   return (
-    <div className="flex min-h-10 items-center gap-3 border-b border-hairline-soft py-1.5 last:border-b-0">
+    <div
+      className="flex min-h-10 items-center gap-3 border-b border-hairline-soft
+        py-1.5 last:border-b-0"
+    >
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm text-fg">{field.label}</div>
         <div className="truncate text-xs text-fg-3" title={field.hint}>
@@ -298,7 +310,7 @@ function CompatRow({
   )
 }
 
-/** Only the switches that are set show as rows (everything else stays automatic); "Add setting" offers the rest. */
+/** Set switches show as rows; "Add setting" offers the automatic ones. */
 function CompatEditor({
   engine,
   api,
@@ -347,7 +359,8 @@ function CompatEditor({
           trigger={
             <button
               type="button"
-              className="mt-1 flex h-7 items-center gap-1.5 rounded-md px-2 text-sm text-fg-3 transition-colors hover:bg-hover hover:text-fg [&_svg]:size-3.5"
+              className="mt-1 flex h-7 items-center gap-1.5 rounded-md px-2 text-sm
+                text-fg-3 transition-colors hover:bg-hover hover:text-fg [&_svg]:size-3.5"
             >
               <Plus />
               Add setting
@@ -363,7 +376,7 @@ function CompatEditor({
   )
 }
 
-/** Sampling values shown as text: numbers, booleans and JSON round-trip back to their type, the rest stays a string. */
+/** Numbers, booleans and JSON round-trip from sampling text back to their type. */
 function samplingText(value: JsonValue): string {
   return typeof value === 'string' ? value : JSON.stringify(value)
 }
@@ -406,7 +419,7 @@ function Block({
 export interface AdvancedModelFieldsProps {
   /** A provider entry, a custom model or a model override. */
   target: JsonObject
-  /** Wire protocol in effect (picks the compatibility switches); undefined means OpenAI completions. */
+  /** Wire protocol for compatibility switches; undefined means OpenAI completions. */
   api: string | undefined
   kind?: 'provider' | 'model' | 'override'
   onChange: (next: JsonObject) => void

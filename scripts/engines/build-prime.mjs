@@ -36,6 +36,10 @@ async function verifyRuntimeLibraries(executable) {
 }
 
 export async function buildPrime(source, output, engine) {
+  const buildJobs = Number(process.env.VENGEANCE_NATIVE_BUILD_JOBS ?? 4)
+  if (!Number.isSafeInteger(buildJobs) || buildJobs < 1 || buildJobs > 32) {
+    throw new Error('VENGEANCE_NATIVE_BUILD_JOBS must be an integer between 1 and 32')
+  }
   const cargo = cargoPath()
   const version = run(cargo, ['--version'], { stdio: 'pipe' })
   if (!version.startsWith(`cargo ${engine.rustVersion} `)) {
@@ -52,7 +56,7 @@ export async function buildPrime(source, output, engine) {
       engine.target,
       '--target-dir',
       targetDir,
-      '-j4',
+      `-j${buildJobs}`,
       '-p',
       'pa-cli',
       '--bin',

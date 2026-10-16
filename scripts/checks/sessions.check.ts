@@ -101,11 +101,12 @@ await check(
       const fourth = file('fourth')
       const missing = join(root, 'never-prompted.jsonl')
       const goneFolder = file('gone-folder')
+      const lineage = { childId: 'sub-review', depth: 1, parentSessionPath: first }
       const stored = {
         openSessions: [
           { path: first, cwd },
           { path: missing, cwd },
-          { path: goneFolder, cwd: join(root, 'deleted-workspace'), engine: 'prime' },
+          { path: goneFolder, cwd: join(root, 'deleted-workspace'), engine: 'prime', lineage },
           { path: third, cwd },
           { bad: true },
           { path: fourth, cwd }
@@ -115,7 +116,7 @@ await check(
       assert.deepEqual(restorableOpenSessions(stored), {
         openSessions: [
           { path: first, cwd, engine: 'pi' },
-          { path: goneFolder, cwd: join(root, 'deleted-workspace'), engine: 'prime' },
+          { path: goneFolder, cwd: join(root, 'deleted-workspace'), engine: 'prime', lineage },
           { path: third, cwd, engine: 'pi' },
           { path: fourth, cwd, engine: 'pi' }
         ],

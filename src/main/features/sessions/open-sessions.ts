@@ -21,7 +21,12 @@ export function restorableOpenSessions(
   let activeSession: string | null = null
   entries.forEach((entry, index) => {
     if (!existsSync(entry.path)) return
-    openSessions.push({ path: entry.path, cwd: entry.cwd, engine: normalizeEngineId(entry.engine) })
+    openSessions.push({
+      path: entry.path,
+      cwd: entry.cwd,
+      engine: normalizeEngineId(entry.engine),
+      ...(entry.lineage ? { lineage: entry.lineage } : {})
+    })
     if (activeIndex >= 0 && index >= activeIndex && activeSession === null)
       activeSession = entry.path
   })

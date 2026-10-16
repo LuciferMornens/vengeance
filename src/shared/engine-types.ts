@@ -8,6 +8,8 @@
  * message roles, content blocks and tool names (render generically, never crash).
  */
 
+import type { SessionLineage, ShareReadiness, ShareSessionResult } from './api/sessions'
+
 // ─── Thinking ────────────────────────────────────────────────────────────────
 
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -50,6 +52,8 @@ export interface ToolCall {
   name: string
   // Tool arguments are tool-specific JSON (protocol boundary).
   arguments: Record<string, unknown>
+  /** Native parser error when the final tool arguments are malformed. */
+  argumentsError?: string
   thoughtSignature?: string
   namespace?: string
 }
@@ -382,6 +386,7 @@ export interface RpcSessionState {
   sessionFile?: string
   sessionId: string
   sessionName?: string
+  lineage?: SessionLineage
   autoCompactionEnabled: boolean
   messageCount: number
   pendingMessageCount: number
@@ -457,6 +462,8 @@ export type RpcCommand = WithId<
   | { type: 'abort_bash' }
   | { type: 'get_session_stats' }
   | { type: 'export_html'; outputPath?: string }
+  | { type: 'share_readiness' }
+  | { type: 'share_session'; expectedDestination?: 'gist' | 'radius' }
   | { type: 'switch_session'; sessionPath: string }
   | { type: 'fork'; entryId: string }
   | { type: 'clone' }
@@ -505,6 +512,8 @@ export interface RpcResponseDataMap {
   abort_bash: undefined
   get_session_stats: SessionStats
   export_html: { path: string }
+  share_readiness: ShareReadiness
+  share_session: ShareSessionResult
   switch_session: { cancelled: boolean }
   fork: { text: string; cancelled: boolean }
   clone: { cancelled: boolean }
