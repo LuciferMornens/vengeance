@@ -15,6 +15,7 @@ const CHILD_TASK = 'Review the isolated lineage fixture.'
 const GRANDCHILD_TASK = 'Verify the isolated lineage fixture.'
 const CREATE_ROOT_TASK = 'Create the isolated independent session.'
 const ROOT_TASK = 'Reply for the isolated independent session.'
+const ROOT_ANSWER = 'Independent session completed.'
 const CHILD_ANSWER = 'Lineage reviewer completed.'
 const KERNEL_TIMEOUT_MS = 120_000
 const fixture = await createEngineFixture()
@@ -91,7 +92,8 @@ try {
   ].join('\n')
   const spawnGrandchild = [
     'import rlm',
-    `child = await rlm.spawn(${JSON.stringify(GRANDCHILD_TASK)}, name=${JSON.stringify(GRANDCHILD_NAME)})`,
+    `child = await rlm.spawn(${JSON.stringify(GRANDCHILD_TASK)}, ` +
+      `name=${JSON.stringify(GRANDCHILD_NAME)})`,
     'print(child.rlm_child_id)'
   ].join('\n')
   fixture.primeServer.queue(
@@ -175,13 +177,14 @@ try {
       {
         code: [
           'import rlm',
-          `root = await rlm.create_session(${JSON.stringify(ROOT_TASK)}, name=${JSON.stringify(ROOT_NAME)})`,
+          `root = await rlm.create_session(${JSON.stringify(ROOT_TASK)}, ` +
+            `name=${JSON.stringify(ROOT_NAME)})`,
           'print(root.active_session_id)'
         ].join('\n')
       },
       { when: matchesTask(CREATE_ROOT_TASK) }
     ),
-    turn.text('Independent session completed.', { when: matchesTask(ROOT_TASK) }),
+    turn.text(ROOT_ANSWER, { when: matchesTask(ROOT_TASK) }),
     turn.text('Independent session created.', { when: matchesTask(CREATE_ROOT_TASK) })
   )
   await application.send(CREATE_ROOT_TASK)
@@ -196,6 +199,11 @@ try {
   assert.equal(independent.lineage.depth, 0)
   assert.equal(independent.lineage.runtimeKind, 'top-level')
   await application.test('resumeBackground', independent)
+  await application.page
+    .locator('[data-transcript-scroll]')
+    .getByText(ROOT_ANSWER, { exact: true })
+    .waitFor({ timeout: KERNEL_TIMEOUT_MS })
+  await application.waitForSettle({ timeoutMs: KERNEL_TIMEOUT_MS })
   assert.equal(
     await application.page.locator('[data-prime-subagent]', { hasText: ROOT_NAME }).count(),
     0
@@ -220,6 +228,19 @@ try {
   assert.equal((await application.invoke('engine:list')).length, 0)
   await fixture.stopNativeDaemon()
   const providerRequests = fixture.primeServer.requests.length
+  assert.ok(independent.sessionPath, 'the independent native root has saved history')
+  assert.equal(
+    (await listedSessions(cwd)).some((entry) => samePath(entry.path, independent.sessionPath)),
+    false,
+    'the custom-folder listing excludes the native default-folder root'
+  )
+  const savedIndependent = (await listedSessions(null)).find((entry) =>
+    samePath(entry.path, independent.sessionPath)
+  )
+  assert.ok(savedIndependent, 'All workspaces discovers the stopped independent root')
+  assert.equal(savedIndependent.name, ROOT_NAME)
+  assert.equal(savedIndependent.lineage?.depth, 0)
+  assert.equal(savedIndependent.lineage?.childId, undefined)
   await requireSavedFamily(
     cwd,
     parentState.sessionFile,
@@ -251,7 +272,8 @@ try {
   assert.equal(fixture.primeServer.requests.length, providerRequests)
   assert.equal((await application.invoke('engine:background-list', 'prime')).length, 0)
   console.log(
-    'PASS offline and missing-parent discovery keeps child work recoverable without workers or model calls.'
+    'PASS offline and missing-parent discovery keeps child work recoverable ' +
+      'without workers or model calls.'
   )
   await application.test('openSession', childResident.sessionPath, 'prime')
   const reopenedOrphan = (await application.invoke('engine:list')).find((entry) =>
@@ -269,6 +291,30 @@ try {
   console.log(
     'PASS reopening an orphan in a fresh daemon retains ledger identity and committed output.'
   )
+
+  await application.page.getByRole('textbox', { name: 'Search sessions' }).fill('')
+  const reopenedIndependentId = await application.test(
+    'openSession',
+    savedIndependent.path,
+    'prime'
+  )
+  assert.ok(reopenedIndependentId, 'the root discovered through All workspaces reopens')
+  const independentState = await application.rpc({ type: 'get_state' }, reopenedIndependentId)
+  assert.ok(samePath(independentState.sessionFile, independent.sessionPath))
+  assert.equal(independentState.lineage?.depth, 0)
+  assert.equal(independentState.lineage?.childId, undefined)
+  assert.ok(
+    JSON.stringify(await application.rpc({ type: 'get_messages' }, reopenedIndependentId)).includes(
+      ROOT_ANSWER
+    )
+  )
+  assert.equal(
+    await application.page.locator('[data-prime-subagent]', { hasText: ROOT_NAME }).count(),
+    0
+  )
+  assert.equal(fixture.primeServer.requests.length, providerRequests)
+  await application.screenshot('reopened-independent-root-all-workspaces')
+  console.log('PASS All workspaces recovers an independent native root without a provider request.')
   application.assertNoErrors()
 } catch (error) {
   failure = error
