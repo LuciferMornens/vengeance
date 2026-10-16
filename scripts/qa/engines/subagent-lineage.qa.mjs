@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
-import { rename } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { readFile, rename } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
 import { launchApp, reportShotsDir } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
+import { isAlive, processTable } from '../lib/processes.mjs'
 import { until } from '../chat/helpers.mjs'
-import { createEngineFixture } from './integration-fixture.mjs'
+import { createEngineFixture, processIdentity } from './integration-fixture.mjs'
 
 const PARENT_NAME = 'Lineage parent'
 const CHILD_NAME = 'Lineage reviewer'
@@ -20,6 +21,7 @@ const ROOT_ANSWER = 'Independent session completed.'
 const CHILD_ANSWER = 'Lineage reviewer completed.'
 const KERNEL_TIMEOUT_MS = 120_000
 const fixture = await createEngineFixture()
+const reopenedNativePids = new Set()
 let application
 let failure
 let missingParent
@@ -289,6 +291,40 @@ try {
     samePath(entry.sessionFile, childResident.sessionPath)
   )
   assert.ok(reopenedOrphan, 'the saved orphan can open in a fresh daemon')
+  assert.equal(reopenedOrphan.status, 'ready')
+  const replacementResidents = await application.invoke('engine:background-list', 'prime')
+  assert.deepEqual(
+    replacementResidents.map((entry) => entry.id),
+    [reopenedOrphan.nativeAgentId],
+    'first saved reopen creates exactly one native resident'
+  )
+  const replacementWorker = await processIdentity(reopenedOrphan.pid)
+  const replacementDaemon = await processIdentity(replacementWorker.parentPid)
+  reopenedNativePids.add(replacementWorker.pid)
+  reopenedNativePids.add(replacementDaemon.pid)
+  const processes = await processTable()
+  const registry = JSON.parse(
+    await readFile(join(fixture.primeDirectory, 'vengeance-daemons.json'), 'utf8')
+  )
+  assert.deepEqual(
+    processes
+      .filter((entry) => registry.some((record) => entry.commandLine.includes(record.socketPath)))
+      .map((entry) => entry.pid),
+    [replacementDaemon.pid],
+    'one replacement daemon owns the isolated endpoints'
+  )
+  assert.deepEqual(
+    processes
+      .filter(
+        (entry) =>
+          entry.ppid === replacementDaemon.pid &&
+          entry.name.toLowerCase() === basename(replacementWorker.executablePath).toLowerCase()
+      )
+      .map((entry) => entry.pid),
+    [replacementWorker.pid],
+    'the replacement daemon has exactly one native worker'
+  )
+  console.log(JSON.stringify({ replacementDaemon, replacementWorker }))
   assert.equal(reopenedOrphan.lineage.childId, child.id)
   assert.ok(
     JSON.stringify(
@@ -322,6 +358,9 @@ try {
     0
   )
   assert.equal(fixture.primeServer.requests.length, providerRequests)
+  for (const entry of await application.invoke('engine:list')) {
+    if (entry.pid) reopenedNativePids.add(entry.pid)
+  }
   await application.screenshot('reopened-independent-root-all-workspaces')
   console.log('PASS All workspaces recovers an independent native root without a provider request.')
   application.assertNoErrors()
@@ -336,6 +375,18 @@ try {
   await fixture.cleanup().catch((error) => {
     failure ??= error
   })
+  try {
+    for (const pid of reopenedNativePids) {
+      assert.equal(isAlive(pid), false, `reopened native process ${pid} exits during cleanup`)
+    }
+    if (reopenedNativePids.size) {
+      console.log(
+        `PASS cleanup stopped reopened native PIDs: ${[...reopenedNativePids].join(', ')}`
+      )
+    }
+  } catch (error) {
+    failure ??= error
+  }
 }
 
 if (failure) {
