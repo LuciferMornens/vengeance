@@ -169,6 +169,12 @@ async function continueConversation(agentId, engine, expectedProvider, expectedM
 }
 
 try {
+  // Native account startup creates an empty auth store on first use.
+  await writeFile(join(fixture.primeDirectory, 'auth.json'), '{}', { flag: 'wx' }).catch(
+    (error) => {
+      if (error.code !== 'EEXIST') throw error
+    }
+  )
   const modelsPath = join(fixture.primeDirectory, 'models.json')
   const models = JSON.parse(await readFile(modelsPath, 'utf8'))
   for (const model of models.providers[PRIME_PROVIDER].models) model.input = ['text', 'image']

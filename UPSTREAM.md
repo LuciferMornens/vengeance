@@ -210,6 +210,16 @@ When app/helper source changes, run `npm run typecheck`, `npm run build`, `npm r
 code. Record commands, final results and exact artifact identities. Expand coverage for changed upstream
 contracts; a passing historical test count is not a substitute for that review.
 
+Cross-engine handoff uses each destination's native session writer. Requalify
+`scripts/checks/engine-handoff.check.ts`, `scripts/checks/engine-switch.check.ts` and
+`scripts/qa/engines/engine-switch.qa.mjs` when either session format changes. The active branch must
+include pre-compaction history, remapped retained-entry anchors, tool results, images and context
+edits. Prime custom-message timestamps are ISO strings in `get_messages`; normalize them
+deterministically before comparing snapshots. Native resident summaries, input-pause leases and
+side-question tracking must still prevent stopping active work. Imported assistant metadata must not
+replace the destination's own default model. Runtime goals, schedules, kernel state and credentials
+are outside the history transfer; source files remain recovery copies.
+
 Qualify the reconstructed native workspaces as well:
 
 ```sh
