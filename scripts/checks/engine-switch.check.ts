@@ -9,6 +9,7 @@ import type { AgentMessage, SessionEntry } from '../../src/shared/engine-types'
 import type { EngineManager } from '../../src/main/engine/manager'
 import { createEngineHandoff } from '../../src/main/engine/mock-handoff'
 import { MOCK_MODELS } from '../../src/main/engine/mock-data'
+import { normalizeMessage } from '../../src/main/engine/prime/normalize'
 import { guardPrimeHandoff, PrimeDaemonActivity } from '../../src/main/engine/prime/daemon-activity'
 import { PrimeTransport } from '../../src/main/engine/prime/transport'
 import {
@@ -134,6 +135,19 @@ const historyEntry: SessionEntry = {
   timestamp,
   message: historyMessage
 }
+
+await check('engine switch: native custom history keeps its ISO timestamp across snapshots', () => {
+  const nativeMessage = {
+    role: 'custom',
+    customType: 'vengeance-engine-history',
+    content: 'Historical entry imported from the other engine',
+    display: true,
+    timestamp
+  }
+  const normalized = normalizeMessage(nativeMessage)
+  assert.equal(normalized.timestamp, Date.parse(timestamp))
+  assert.deepEqual(normalizeMessage(nativeMessage), normalized)
+})
 
 await check(
   'engine switch: native summary blocks active children after the parent settles',

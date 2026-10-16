@@ -130,6 +130,15 @@ function sanitizeNativeValue(value: unknown): unknown {
   return changed ?? value
 }
 
+function messageTimestamp(value: unknown): number {
+  // Native custom-message history uses the entry's ISO timestamp on its message wire form.
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return numberValue(value, Date.now())
+}
+
 export function normalizeMessage(value: unknown): AgentMessage {
   const message = asRecord(value)
   if (message.role === 'assistant') {
@@ -143,11 +152,11 @@ export function normalizeMessage(value: unknown): AgentMessage {
       model: stringValue(message.model) ?? '',
       usage: normalizeUsage(message.usage),
       stopReason: message.stopReason ?? 'pending',
-      timestamp: numberValue(message.timestamp, Date.now())
+      timestamp: messageTimestamp(message.timestamp)
     } as AssistantMessage
   }
   // Session storage may add new message roles; generic renderers retain their native payload.
-  return { ...message, timestamp: numberValue(message.timestamp, Date.now()) } as AgentMessage
+  return { ...message, timestamp: messageTimestamp(message.timestamp) } as AgentMessage
 }
 
 export function normalizeState(snapshot: PrimeRecord, summary: PrimeRecord): RpcSessionState {
