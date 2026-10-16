@@ -1,0 +1,68 @@
+// Chat: fenced code in an answer gets syntax colors. Tokenizing runs in a worker loaded from the app bundle
+// (file:// inside asar when packaged), and any failure there falls back to plain text silently, so this suite
+// asserts the colors themselves: keywords, strings and comments in TypeScript, and a second language.
+//
+//   node scripts/qa/chat/code-highlight.qa.mjs
+import assert from 'node:assert/strict'
+import { turn } from '../lib/fake-llm.mjs'
+import { runSuite } from '../lib/suite.mjs'
+import { until } from './helpers.mjs'
+
+const TYPESCRIPT_ANSWER = [
+  'Here is the loader:',
+  '',
+  '```ts',
+  '// Reads the store from disk.',
+  'export async function loadStore(path: string): Promise<number> {',
+  "  const text = await readFile(path, 'utf8')",
+  '  return JSON.parse(text).count',
+  '}',
+  '```'
+].join('\n')
+
+const PYTHON_ANSWER = [
+  'And in Python:',
+  '',
+  '```python',
+  'def load_store(path):',
+  '    with open(path) as handle:',
+  '        return len(handle.read())',
+  '```'
+].join('\n')
+
+/** Class lists of the colored runs inside the code block that contains `marker`, once it has some. */
+async function coloredRuns(app, marker) {
+  return until(
+    () =>
+      app.page.evaluate((text) => {
+        const block = [...document.querySelectorAll('[data-transcript-scroll] pre')].find((pre) =>
+          pre.textContent.includes(text)
+        )
+        const runs = block ? [...block.querySelectorAll('[class*="syn-"]')] : []
+        return runs.length ? runs.map((run) => run.className) : null
+      }, marker),
+    { label: `colors in the block with "${marker}"` }
+  )
+}
+
+await runSuite('chat-code-highlight', async ({ server, app, step }) => {
+  await step('open a workspace', () => app.openWorkspace())
+
+  await step('a TypeScript block gets keyword, string and comment colors', async () => {
+    server.queue(turn.text(TYPESCRIPT_ANSWER))
+    await app.send('Show the loader')
+    await app.waitForSettle()
+    const classes = (await coloredRuns(app, 'loadStore')).join(' ')
+    for (const kind of ['syn-keyword', 'syn-string', 'syn-comment']) {
+      assert.ok(classes.includes(kind), `${kind} in the TypeScript block (got: ${classes})`)
+    }
+  })
+
+  await step('a Python block gets colors too', async () => {
+    server.queue(turn.text(PYTHON_ANSWER))
+    await app.send('And in Python?')
+    await app.waitForSettle()
+    const classes = (await coloredRuns(app, 'load_store')).join(' ')
+    assert.ok(classes.includes('syn-keyword'), `syn-keyword in the Python block (got: ${classes})`)
+  })
+})

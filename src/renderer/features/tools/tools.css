@@ -1,0 +1,76 @@
+/* Tool row and detail tokens (owned by the tools lane). */
+
+:root,
+:root[data-theme='dark'] {
+  --console-bg: color-mix(in oklab, #08080b 78%, transparent);
+  --console-fg: #e6e6ec;
+  --console-out: #b9b9c4;
+  --console-dim: #75757f;
+  --console-prompt: var(--accent-2);
+  /* Text drawn on an ANSI background color (inverse tags such as vitest's " RUN "). */
+  --console-ink: #0b0b0e;
+  --ansi-0: #3a3a44;
+  --ansi-1: #ff6b7d;
+  --ansi-2: #3ddc97;
+  --ansi-3: #f5b84b;
+  --ansi-4: #6ca8ff;
+  --ansi-5: #c084fc;
+  --ansi-6: #5eead4;
+  --ansi-7: #d4d4dc;
+  --ansi-8: #75757f;
+  --ansi-9: #ff8a95;
+  --ansi-10: #7ef0bd;
+  --ansi-11: #ffd38a;
+  --ansi-12: #9cc4ff;
+  --ansi-13: #d8b4fe;
+  --ansi-14: #99f6e4;
+  --ansi-15: #ededf2;
+  --diff-add-bg: color-mix(in oklab, var(--success) 6%, transparent);
+  --diff-add-word: color-mix(in oklab, var(--success) 34%, transparent);
+  --diff-add-edge: color-mix(in oklab, var(--success) 70%, transparent);
+  --diff-del-bg: color-mix(in oklab, var(--danger) 6%, transparent);
+  --diff-del-word: color-mix(in oklab, var(--danger) 34%, transparent);
+  --diff-del-edge: color-mix(in oklab, var(--danger) 70%, transparent);
+  --diff-gutter: var(--fg-4);
+}
+
+/* Bone: a paper console (never a near-black well on a light page). */
+:root[data-theme='light'] {
+  --console-bg: #f3f0ea;
+  --console-fg: #2a2724;
+  --console-out: #45413c;
+  --console-dim: #8a857e;
+  --console-prompt: #c2410c;
+  --console-ink: #fbfaf7;
+  --ansi-0: #3f3b37;
+  --ansi-1: #c8314e;
+  --ansi-2: #13804f;
+  --ansi-3: #a36207;
+  --ansi-4: #2563c9;
+  --ansi-5: #8b3fc9;
+  --ansi-6: #0f7f86;
+  --ansi-7: #6b665f;
+  --ansi-8: #8a857e;
+  --ansi-9: #d93a5c;
+  --ansi-10: #178a57;
+  --ansi-11: #b45309;
+  --ansi-12: #2f6fd6;
+  --ansi-13: #9a4ad8;
+  --ansi-14: #0e8a92;
+  --ansi-15: #2a2724;
+  --diff-add-bg: color-mix(in oklab, var(--success) 8%, transparent);
+  --diff-add-word: color-mix(in oklab, var(--success) 26%, transparent);
+  --diff-add-edge: color-mix(in oklab, var(--success) 75%, transparent);
+  --diff-del-bg: color-mix(in oklab, var(--danger) 7%, transparent);
+  --diff-del-word: color-mix(in oklab, var(--danger) 22%, transparent);
+  --diff-del-edge: color-mix(in oklab, var(--danger) 75%, transparent);
+  --diff-gutter: var(--fg-3);
+}
+
+.v-console {
+  background: var(--console-bg);
+}
+
+:root[data-theme='light'] .v-console {
+  box-shadow: inset 0 1px 0 var(--hairline-soft);
+}

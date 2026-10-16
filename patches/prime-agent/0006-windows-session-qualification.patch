@@ -1,0 +1,544 @@
+diff --git a/crates/pa-core/src/cron/store/state.rs b/crates/pa-core/src/cron/store/state.rs
+index 30e85e7..9082376 100644
+--- a/crates/pa-core/src/cron/store/state.rs
++++ b/crates/pa-core/src/cron/store/state.rs
+@@ -113,7 +113,9 @@ pub(crate) fn resolve_path(path: &str) -> String {
+     for component in components {
+         resolved.push(component);
+     }
+-    resolved.to_string_lossy().to_string()
++    pa_types::platform::paths::canonical_path(&resolved)
++        .to_string_lossy()
++        .to_string()
+ }
+ 
+ pub(crate) fn compare_optional_iso(left: Option<&str>, right: Option<&str>) -> std::cmp::Ordering {
+diff --git a/crates/pa-core/src/session/window.rs b/crates/pa-core/src/session/window.rs
+index 4f43f82..761ab05 100644
+--- a/crates/pa-core/src/session/window.rs
++++ b/crates/pa-core/src/session/window.rs
+@@ -204,13 +204,33 @@ impl WindowedSessionStore {
+     ///
+     /// The two internal `expect`s cannot fire (rows parse first; the header is proven).
+     pub fn open(path: &Path) -> io::Result<Option<Self>> {
+-        // The generation certificate anchors on unix inode identity; a
+-        // same-length replace is indistinguishable under weak non-unix metadata.
+-        if !cfg!(unix) {
++        const ERROR_SHARING_VIOLATION: i32 = 32;
++        const ERROR_LOCK_VIOLATION: i32 = 33;
++        // Unsupported platforms have no durable file identity for certification.
++        if !cfg!(any(unix, windows)) {
+             return Ok(None);
+         }
+-        let mut file = std::fs::File::open(path)?;
+-        let generation = Generation::of(&file.metadata()?);
++        let mut file = match window_cache::open_certified(path) {
++            Ok(file) => file,
++            // A Windows writer may still hold deferred timestamps. The ordinary
++            // reader remains available while a certified window cannot be served.
++            Err(error)
++                if cfg!(windows)
++                    && matches!(
++                        error.raw_os_error(),
++                        Some(ERROR_SHARING_VIOLATION | ERROR_LOCK_VIOLATION)
++                    ) =>
++            {
++                return Ok(None);
++            }
++            Err(error) => return Err(error),
++        };
++        let generation = match Generation::of_file(&file) {
++            Ok(generation) => generation,
++            // Filesystems without Windows file-id/change-time support use the full reader.
++            Err(_) if cfg!(windows) => return Ok(None),
++            Err(error) => return Err(error),
++        };
+         let size = file.metadata()?.len();
+         let mut reads = WindowReadStats::default();
+         if let Some(snapshot) = window_cache::load(path, &file, &mut reads) {
+diff --git a/crates/pa-core/src/session/window_cache.rs b/crates/pa-core/src/session/window_cache.rs
+index 5fff3f2..f04e562 100644
+--- a/crates/pa-core/src/session/window_cache.rs
++++ b/crates/pa-core/src/session/window_cache.rs
+@@ -2,7 +2,9 @@
+ use super::window::{WindowReadStats, WindowStats};
+ use serde::{Deserialize, Serialize};
+ use std::collections::HashMap;
+-use std::fs::{File, Metadata};
++use std::fs::File;
++#[cfg(not(windows))]
++use std::fs::Metadata;
+ use std::io::{self, Write};
+ use std::path::{Path, PathBuf};
+ use std::sync::{Mutex, OnceLock};
+@@ -12,6 +14,8 @@ pub(super) struct Generation {
+     len: u64,
+     dev: u64,
+     ino: u64,
++    #[serde(default)]
++    ino_high: u64,
+     mtime: i64,
+     mtime_ns: i64,
+     ctime: i64,
+@@ -25,30 +29,72 @@ impl Generation {
+             len: meta.len(),
+             dev: meta.dev(),
+             ino: meta.ino(),
++            ino_high: 0,
+             mtime: meta.mtime(),
+             mtime_ns: meta.mtime_nsec(),
+             ctime: meta.ctime(),
+             ctime_ns: meta.ctime_nsec(),
+         }
+     }
+-    #[cfg(not(unix))]
++    #[cfg(not(any(unix, windows)))]
+     pub(super) fn of(meta: &Metadata) -> Self {
+         Self {
+             len: meta.len(),
+             dev: 0,
+             ino: 0,
++            ino_high: 0,
+             mtime: 0,
+             mtime_ns: 0,
+             ctime: 0,
+             ctime_ns: 0,
+         }
+     }
++    pub(super) fn of_file(file: &File) -> io::Result<Self> {
++        #[cfg(windows)]
++        {
++            let information = pa_types::platform::windows_file::information(file)?;
++            Ok(Self {
++                len: information.len,
++                dev: information.identity.volume_serial_number,
++                ino: information.identity.file_id[0],
++                ino_high: information.identity.file_id[1],
++                mtime: information.last_write_time,
++                mtime_ns: 0,
++                ctime: information.change_time,
++                ctime_ns: information.creation_time,
++            })
++        }
++        #[cfg(not(windows))]
++        {
++            Ok(Self::of(&file.metadata()?))
++        }
++    }
++    #[cfg(windows)]
++    pub(super) fn valid(&self, file: &File, path: &Path) -> io::Result<bool> {
++        Ok(*self == Self::of_file(file)? && *self == Self::of_file(&open_certified(path)?)?)
++    }
++    #[cfg(not(windows))]
+     pub(super) fn valid(&self, file: &File, path: &Path) -> io::Result<bool> {
+         Ok(cfg!(unix)
+             && *self == Self::of(&file.metadata()?)
+             && *self == Self::of(&std::fs::metadata(path)?))
+     }
+ }
++
++pub(super) fn open_certified(path: &Path) -> io::Result<File> {
++    let mut options = File::options();
++    options.read(true);
++    #[cfg(windows)]
++    {
++        use std::os::windows::fs::OpenOptionsExt;
++        // A writer can defer Windows timestamps until close. Deny writes during
++        // certification; a concurrent rename is caught by the file-id comparison.
++        const FILE_SHARE_READ: u32 = 1;
++        const FILE_SHARE_DELETE: u32 = 4;
++        options.share_mode(FILE_SHARE_READ | FILE_SHARE_DELETE);
++    }
++    options.open(path)
++}
+ /// The snapshot format version: a sidecar serves only at exactly this
+ /// version (any other version is rebuilt by the full walk). A served
+ /// snapshot's `WindowStats` already folds the child usage attributions,
+@@ -198,7 +244,7 @@ fn file_tail_is_newline(path: &Path) -> io::Result<bool> {
+ ///
+ /// The durable append's I/O error; a failed incremental certification is dropped.
+ pub fn append_cached(path: &Path, bytes: &[u8], ownership: AppendOwnership) -> io::Result<()> {
+-    let mut file = std::fs::OpenOptions::new().append(true).open(path)?;
++    let mut file = open_append(path)?;
+     // The torn-tail boundary (the append-only reopen's belt): an
+     // unterminated final row - a crashed append the repair failed to
+     // re-terminate, its errors swallowed - must not merge with the first
+@@ -217,7 +263,16 @@ pub fn append_cached(path: &Path, bytes: &[u8], ownership: AppendOwnership) -> i
+         }
+         return Ok(());
+     }
+-    let generation = Generation::of(&file.metadata()?);
++    // Windows publishes the final write timestamp when the writer closes.
++    #[cfg(windows)]
++    drop(file);
++    #[cfg(windows)]
++    let Ok(file) = open_certified(path) else {
++        return Ok(());
++    };
++    let Ok(generation) = Generation::of_file(&file) else {
++        return Ok(());
++    };
+     let Ok(text) = std::str::from_utf8(bytes) else {
+         return Ok(());
+     };
+@@ -257,6 +312,30 @@ pub fn append_cached(path: &Path, bytes: &[u8], ownership: AppendOwnership) -> i
+     Ok(())
+ }
+ 
++fn open_append(path: &Path) -> io::Result<File> {
++    #[cfg(windows)]
++    {
++        const ERROR_SHARING_VIOLATION: i32 = 32;
++        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
++        loop {
++            let result = File::options().append(true).open(path);
++            if result
++                .as_ref()
++                .is_err_and(|error| error.raw_os_error() == Some(ERROR_SHARING_VIOLATION))
++                && std::time::Instant::now() < deadline
++            {
++                // A certified window reader briefly denies writes. Keep the durable
++                // append ahead of cache maintenance, including concurrent readers.
++                std::thread::sleep(std::time::Duration::from_millis(5));
++                continue;
++            }
++            return result;
++        }
++    }
++    #[cfg(not(windows))]
++    File::options().append(true).open(path)
++}
++
+ // JSON decimal parsing need not round-trip every IEEE value. The subtotal must
+ // retain its bits so continuing chronological additions matches the full reader.
+ pub(super) mod float_bits {
+diff --git a/crates/pa-core/tests/windows_session_window.rs b/crates/pa-core/tests/windows_session_window.rs
+new file mode 100644
+index 0000000..0df0bb9
+--- /dev/null
++++ b/crates/pa-core/tests/windows_session_window.rs
+@@ -0,0 +1,112 @@
++#![cfg(windows)]
++
++use pa_core::session::window::WindowedSessionStore;
++use serde_json::json;
++use std::fs::{File, FileTimes};
++
++fn session_text() -> String {
++    let rows = [
++        json!({"type":"session","version":3,"id":"s","cwd":"test","timestamp":"2026-10-13T00:00:00Z"}),
++        json!({"type":"message","id":"old","parentId":null,"timestamp":"2026-10-13T00:00:01Z",
++            "message":{"role":"user","content":"earlier","timestamp":0}}),
++        json!({"type":"message","id":"kept","parentId":"old","timestamp":"2026-10-13T00:00:02Z",
++            "message":{"role":"user","content":"alpha","timestamp":0}}),
++        json!({"type":"compaction","id":"compact","parentId":"kept","summary":"summary",
++            "firstKeptEntryId":"kept","tokensBefore":100}),
++        json!({"type":"message","id":"leaf","parentId":"compact","timestamp":"2026-10-13T00:00:03Z",
++            "message":{"role":"user","content":"latest","timestamp":0}}),
++    ];
++    rows.into_iter().map(|row| row.to_string() + "\n").collect()
++}
++
++#[test]
++fn a_same_length_rewrite_with_restored_mtime_invalidates_the_window() {
++    let root = tempfile::tempdir().unwrap();
++    let path = root.path().join("session.jsonl");
++    std::fs::write(&path, session_text()).unwrap();
++    let original_mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
++    let cold = WindowedSessionStore::open(&path).unwrap().unwrap();
++    assert!(!cold.read_stats().cache_hit);
++    let warm = WindowedSessionStore::open(&path).unwrap().unwrap();
++    assert!(warm.read_stats().cache_hit);
++    std::fs::write(&path, session_text().replace("alpha", "bravo")).unwrap();
++    File::options()
++        .write(true)
++        .open(&path)
++        .unwrap()
++        .set_times(FileTimes::new().set_modified(original_mtime))
++        .unwrap();
++    let changed = WindowedSessionStore::open(&path).unwrap().unwrap();
++    assert!(!changed.read_stats().cache_hit);
++    assert!(changed
++        .raw_entries()
++        .iter()
++        .any(|line| line.contains("bravo")));
++    assert!(!changed
++        .raw_entries()
++        .iter()
++        .any(|line| line.contains("alpha")));
++}
++
++#[test]
++fn an_open_writer_keeps_a_window_from_certifying_deferred_timestamps() {
++    let root = tempfile::tempdir().unwrap();
++    let path = root.path().join("session.jsonl");
++    std::fs::write(&path, session_text()).unwrap();
++    let writer = File::options().write(true).open(&path).unwrap();
++    assert!(WindowedSessionStore::open(&path).unwrap().is_none());
++    drop(writer);
++    assert!(WindowedSessionStore::open(&path).unwrap().is_some());
++}
++
++#[test]
++fn a_certifying_reader_cannot_lose_a_durable_append() {
++    use pa_core::session::window::{append_cached, AppendOwnership};
++    use std::os::windows::fs::OpenOptionsExt;
++    use std::time::Duration;
++
++    const FILE_SHARE_READ: u32 = 1;
++    const FILE_SHARE_DELETE: u32 = 4;
++
++    let root = tempfile::tempdir().unwrap();
++    let path = root.path().join("session.jsonl");
++    let initial = session_text();
++    std::fs::write(&path, &initial).unwrap();
++    let reader = File::options()
++        .read(true)
++        .share_mode(FILE_SHARE_READ | FILE_SHARE_DELETE)
++        .open(&path)
++        .unwrap();
++    let appended = b"{\"type\":\"message\",\"id\":\"next\",\"parentId\":\"leaf\",\"message\":{\"role\":\"user\",\"content\":\"durable\"}}\n";
++    let (started_tx, started_rx) = std::sync::mpsc::channel();
++    let (done_tx, done_rx) = std::sync::mpsc::channel();
++    let append_path = path.clone();
++    let writer = std::thread::spawn(move || {
++        started_tx.send(()).unwrap();
++        done_tx
++            .send(append_cached(
++                &append_path,
++                appended,
++                AppendOwnership::SessionLeaseHeld,
++            ))
++            .unwrap();
++    });
++    started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
++    assert!(
++        matches!(
++            done_rx.recv_timeout(Duration::from_millis(30)),
++            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
++        ),
++        "the reader must not turn an append into an I/O failure"
++    );
++    drop(reader);
++    done_rx
++        .recv_timeout(Duration::from_secs(5))
++        .unwrap()
++        .unwrap();
++    writer.join().unwrap();
++    assert_eq!(
++        std::fs::read_to_string(&path).unwrap(),
++        initial + std::str::from_utf8(appended).unwrap()
++    );
++}
+diff --git a/crates/pa-daemon/src/lease.rs b/crates/pa-daemon/src/lease.rs
+index cd01924..9cb1643 100644
+--- a/crates/pa-daemon/src/lease.rs
++++ b/crates/pa-daemon/src/lease.rs
+@@ -69,14 +69,9 @@ impl SessionAlreadyActiveError {
+     }
+ }
+ 
++#[must_use]
+ pub fn canonical_session_path(path: &Path) -> PathBuf {
+-    match path.canonicalize() {
+-        Ok(canonical) => canonical,
+-        Err(_) => match path.parent().map(std::path::Path::canonicalize) {
+-            Some(Ok(parent)) => parent.join(path.file_name().unwrap_or_default()),
+-            _ => path.to_path_buf(),
+-        },
+-    }
++    pa_types::platform::paths::canonical_path(path)
+ }
+ 
+ /// `proc:<starttime>` start identity (TS `getProcessStartId`); shared with
+@@ -578,11 +573,12 @@ mod tests {
+ 
+     #[test]
+     fn process_start_id_reflects_the_platform_ladder() {
+-        // Linux answers from /proc (`proc:`); macOS/BSD answer
+-        // `ps:<lstart>` - the same ladder TS `getProcessStartId` walks.
+         let start = get_process_start_id(std::process::id());
+         assert!(start.is_some());
+         let id = start.unwrap();
++        #[cfg(windows)]
++        assert!(id.starts_with("win:"));
++        #[cfg(unix)]
+         assert!(id.starts_with("proc:") || id.starts_with("ps:"));
+         assert!(get_process_start_id(0).is_none());
+     }
+diff --git a/crates/pa-daemon/tests/session_lease_paths.rs b/crates/pa-daemon/tests/session_lease_paths.rs
+new file mode 100644
+index 0000000..fe6e621
+--- /dev/null
++++ b/crates/pa-daemon/tests/session_lease_paths.rs
+@@ -0,0 +1,21 @@
++use pa_daemon::lease::{acquire_runtime_session_lease, canonical_session_path};
++
++#[test]
++fn missing_directories_keep_the_same_lease_identity_after_creation() {
++    let root = tempfile::tempdir().unwrap();
++    let session = root
++        .path()
++        .join("new")
++        .join("sessions")
++        .join("session.jsonl");
++    let account = root.path().join("account");
++    let identity = canonical_session_path(&session);
++    let lease = acquire_runtime_session_lease(&session, &account).unwrap();
++    std::fs::create_dir_all(session.parent().unwrap()).unwrap();
++    std::fs::write(&session, "{}\n").unwrap();
++    assert_eq!(canonical_session_path(&session), identity);
++    assert!(acquire_runtime_session_lease(&session, &account).is_err());
++    drop(lease);
++    let successor = acquire_runtime_session_lease(&session, &account).unwrap();
++    drop(successor);
++}
+diff --git a/crates/pa-types/src/platform/mod.rs b/crates/pa-types/src/platform/mod.rs
+index 2fb6e61..7c4ab23 100644
+--- a/crates/pa-types/src/platform/mod.rs
++++ b/crates/pa-types/src/platform/mod.rs
+@@ -5,11 +5,14 @@
+ 
+ pub mod dirs;
+ pub mod identity;
++pub mod paths;
+ pub mod process;
+ pub mod terminal;
+ pub mod transport;
+ pub mod windows_console;
+ #[cfg(windows)]
++pub mod windows_file;
++#[cfg(windows)]
+ pub(crate) mod windows_pipe;
+ 
+ pub use dirs::{agent_dir, home_dir};
+diff --git a/crates/pa-types/src/platform/paths.rs b/crates/pa-types/src/platform/paths.rs
+new file mode 100644
+index 0000000..4d1d7a4
+--- /dev/null
++++ b/crates/pa-types/src/platform/paths.rs
+@@ -0,0 +1,31 @@
++//! Stable file identities before and after missing parent directories are created.
++use std::path::{Path, PathBuf};
++
++/// Resolve the existing ancestor and append missing components. Windows canonical paths
++/// carry a verbatim prefix even before a new session file or its directories exist.
++#[must_use]
++pub fn canonical_path(path: &Path) -> PathBuf {
++    let mut ancestor = if path.is_absolute() {
++        path.to_path_buf()
++    } else {
++        std::env::current_dir()
++            .unwrap_or_else(|_| PathBuf::from("."))
++            .join(path)
++    };
++    let mut missing = Vec::new();
++    loop {
++        if let Ok(mut canonical) = ancestor.canonicalize() {
++            for component in missing.iter().rev() {
++                canonical.push(component);
++            }
++            return canonical;
++        }
++        let Some(name) = ancestor.file_name() else {
++            return path.to_path_buf();
++        };
++        missing.push(name.to_os_string());
++        if !ancestor.pop() {
++            return path.to_path_buf();
++        }
++    }
++}
+diff --git a/crates/pa-types/src/platform/windows_file.rs b/crates/pa-types/src/platform/windows_file.rs
+new file mode 100644
+index 0000000..6f163c6
+--- /dev/null
++++ b/crates/pa-types/src/platform/windows_file.rs
+@@ -0,0 +1,87 @@
++//! Windows handle-based file identities and change stamps.
++
++use std::ffi::c_void;
++use std::fs::File;
++use std::io;
++use std::os::windows::io::AsRawHandle;
++
++const FILE_BASIC_INFO_CLASS: i32 = 0;
++const FILE_ID_INFO_CLASS: i32 = 18;
++
++#[repr(C)]
++#[derive(Default)]
++struct FileBasicInfo {
++    creation_time: i64,
++    last_access_time: i64,
++    last_write_time: i64,
++    change_time: i64,
++    file_attributes: u32,
++}
++
++/// Stable across appends and renames; distinct for a replacement file.
++#[repr(C)]
++#[derive(Debug, Default, PartialEq, Eq)]
++pub struct FileIdentity {
++    pub volume_serial_number: u64,
++    // FILE_ID_128's sixteen bytes, split into two words without truncation.
++    pub file_id: [u64; 2],
++}
++
++pub struct FileInformation {
++    pub len: u64,
++    pub identity: FileIdentity,
++    pub creation_time: i64,
++    pub last_write_time: i64,
++    pub change_time: i64,
++}
++
++#[link(name = "kernel32")]
++extern "system" {
++    fn GetFileInformationByHandleEx(
++        file: *mut c_void,
++        information_class: i32,
++        information: *mut c_void,
++        buffer_size: u32,
++    ) -> i32;
++}
++
++fn query<T: Default>(file: &File, information_class: i32) -> io::Result<T> {
++    let mut information = T::default();
++    let buffer_size = u32::try_from(std::mem::size_of::<T>()).map_err(io::Error::other)?;
++    // SAFETY: callers select the Win32 class matching their repr(C) struct,
++    // and the borrowed File owns a live handle throughout this call.
++    let result = unsafe {
++        GetFileInformationByHandleEx(
++            file.as_raw_handle(),
++            information_class,
++            std::ptr::from_mut(&mut information).cast(),
++            buffer_size,
++        )
++    };
++    if result == 0 {
++        return Err(io::Error::last_os_error());
++    }
++    Ok(information)
++}
++
++/// # Errors
++///
++/// Returns the Win32 error if the handle or filesystem cannot supply a file ID.
++pub fn identity(file: &File) -> io::Result<FileIdentity> {
++    query(file, FILE_ID_INFO_CLASS)
++}
++
++/// # Errors
++///
++/// Returns the I/O error if the handle cannot supply metadata, identity or change stamps.
++pub fn information(file: &File) -> io::Result<FileInformation> {
++    let identity = identity(file)?;
++    let basic: FileBasicInfo = query(file, FILE_BASIC_INFO_CLASS)?;
++    Ok(FileInformation {
++        len: file.metadata()?.len(),
++        identity,
++        creation_time: basic.creation_time,
++        last_write_time: basic.last_write_time,
++        change_time: basic.change_time,
++    })
++}

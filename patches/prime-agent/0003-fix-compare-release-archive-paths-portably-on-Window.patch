@@ -1,0 +1,27 @@
+From 4040a6b63e31f77a2bdf8ba7488f421b4085549c Mon Sep 17 00:00:00 2001
+From: Vengeance <126121081+LuciferMornens@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 11:20:17 +0200
+Subject: [PATCH] fix: compare release archive paths portably on Windows
+
+---
+ scripts/package_release.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/scripts/package_release.py b/scripts/package_release.py
+index f60a1ad4d..df5b2e897 100644
+--- a/scripts/package_release.py
++++ b/scripts/package_release.py
+@@ -321,11 +321,11 @@ def write_tar(stage_dir, output):
+     # gzip default level 6 (the system `tar -czf` the TS packaging uses).
+     with tarfile.open(output, "w:gz", compresslevel=6) as tar:
+         for path in entries:
+-            tar.add(path, arcname=str(path.relative_to(stage_dir)), recursive=False)
++            tar.add(path, arcname=path.relative_to(stage_dir).as_posix(), recursive=False)
+     with tarfile.open(output) as tar:
+         listed = sorted(name for name in tar.getnames() if name.strip())
+     expected = sorted(
+-        str(path.relative_to(stage_dir))
++        path.relative_to(stage_dir).as_posix()
+         for path in stage_dir.rglob("*")
+         if path.is_file() or path.is_dir()
+     )

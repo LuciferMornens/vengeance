@@ -1,0 +1,76 @@
+diff --git a/crates/pa-cli/src/client_update.rs b/crates/pa-cli/src/client_update.rs
+index 7c820e9..42810da 100644
+--- a/crates/pa-cli/src/client_update.rs
++++ b/crates/pa-cli/src/client_update.rs
+@@ -14,6 +14,9 @@ pub struct ClientUpdate;
+ impl pa_tui::update_command::UpdateCommands for ClientUpdate {
+     fn run_update(&self) -> pa_tui::update_command::UpdateRunFuture {
+         Box::pin(async {
++            if option_env!("VENGEANCE_ENGINE_BUILD").is_some() {
++                return Err(crate::config::VENGEANCE_UPDATE_MESSAGE.to_string());
++            }
+             if let Some(kind) = std::env::current_exe()
+                 .ok()
+                 .as_deref()
+diff --git a/crates/pa-cli/src/config.rs b/crates/pa-cli/src/config.rs
+index 61442be..75f6798 100644
+--- a/crates/pa-cli/src/config.rs
++++ b/crates/pa-cli/src/config.rs
+@@ -46,10 +46,16 @@ pub const ENV_LEGACY_SESSION_DIR: &str = "PRIME_AGENT_CODING_AGENT_SESSION_DIR";
+ /// overrides it.
+ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+ 
++pub const VENGEANCE_UPDATE_MESSAGE: &str =
++    "This Engine is supplied by Vengeance. Update Vengeance to update the Engine.";
++
+ /// The product version: the packaged `package.json` manifest next to the
+ /// executable wins, falling back to the compiled-in version.
+ pub fn version() -> &'static str {
+     static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
++    if let Some(version) = option_env!("VENGEANCE_ENGINE_BUILD") {
++        return version;
++    }
+     VERSION.get_or_init(|| match packaged_manifest_version() {
+         Some(version) => version,
+         None => crate::config::VERSION.to_string(),
+diff --git a/crates/pa-cli/src/installer_update.rs b/crates/pa-cli/src/installer_update.rs
+index 0ecbbdd..5e9bb5a 100644
+--- a/crates/pa-cli/src/installer_update.rs
++++ b/crates/pa-cli/src/installer_update.rs
+@@ -84,6 +84,10 @@ pub fn requested_installer_channel(flag: Option<UpdateChannel>) -> &'static str
+ /// Run the update command: the funnel (the installer script owns the
+ /// whole move) or the `--check` report. Returns the process exit code.
+ pub fn run(options: &UpdateOptions) -> i32 {
++    if option_env!("VENGEANCE_ENGINE_BUILD").is_some() {
++        eprintln!("{}", crate::config::VENGEANCE_UPDATE_MESSAGE);
++        return 1;
++    }
+     // `--check` is read-only and remains available to Homebrew installs.
+     let homebrew_kind = if options.check {
+         None
+@@ -180,6 +184,10 @@ pub fn run(options: &UpdateOptions) -> i32 {
+ /// against the prefix the running binary was installed under. Returns the
+ /// process exit code.
+ pub fn run_local(prefix: &std::path::Path, archive: Option<&std::path::Path>) -> i32 {
++    if option_env!("VENGEANCE_ENGINE_BUILD").is_some() {
++        eprintln!("{}", crate::config::VENGEANCE_UPDATE_MESSAGE);
++        return 1;
++    }
+     let archive = match archive.map(std::path::absolute).transpose() {
+         Ok(archive) => archive,
+         Err(error) => {
+diff --git a/crates/pa-cli/src/self_update.rs b/crates/pa-cli/src/self_update.rs
+index e0b9275..81081bf 100644
+--- a/crates/pa-cli/src/self_update.rs
++++ b/crates/pa-cli/src/self_update.rs
+@@ -72,6 +72,10 @@ pub fn confirm_nightly_switch(
+ /// code; failures print the `Error: …` line and exit 1 (including the
+ /// installer-ownership message verbatim).
+ pub fn run(options: &SelfUpdateOptions, persisted_wire: Option<&str>) -> i32 {
++    if option_env!("VENGEANCE_ENGINE_BUILD").is_some() {
++        eprintln!("{}", crate::config::VENGEANCE_UPDATE_MESSAGE);
++        return 1;
++    }
+     // The effective channel: an explicit flag wins, else the persisted one, else the running
+     // version infers it.
+     let channel = options

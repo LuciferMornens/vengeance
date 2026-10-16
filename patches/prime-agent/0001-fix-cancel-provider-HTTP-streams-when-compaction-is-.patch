@@ -1,0 +1,314 @@
+From e1f16f9a0c6d34a04fa6b599d2e3152650490886 Mon Sep 17 00:00:00 2001
+From: Vengeance <126121081+LuciferMornens@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 10:41:19 +0200
+Subject: [PATCH 1/2] fix: cancel provider HTTP streams when compaction is
+ dropped
+
+---
+ .../src/session_engine/compaction_exec.rs     |   6 +
+ crates/pa-core/tests/compaction_http_abort.rs | 267 ++++++++++++++++++
+ 2 files changed, 273 insertions(+)
+ create mode 100644 crates/pa-core/tests/compaction_http_abort.rs
+
+diff --git a/crates/pa-core/src/session_engine/compaction_exec.rs b/crates/pa-core/src/session_engine/compaction_exec.rs
+index b27a3987b..796f821ad 100644
+--- a/crates/pa-core/src/session_engine/compaction_exec.rs
++++ b/crates/pa-core/src/session_engine/compaction_exec.rs
+@@ -9,6 +9,7 @@ use super::messages::convert_to_llm;
+ use pa_types::ai::{AssistantMessage, TextContent, UserContent, UserContentBlock, UserMessage};
+ use pa_types::session::{AgentMessage, CompactionEntry, FileEntry};
+ use std::fmt::Write as _;
++use tokio_util::sync::CancellationToken;
+ 
+ /// Details stored on the compaction entry for file tracking.
+ #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+@@ -153,11 +154,16 @@ pub async fn complete_summary_call(
+         messages,
+         tools: None,
+     };
++    // Provider streams run in their own tasks, so dropping the summary future must
++    // cancel their transport too, including both calls in a split compaction.
++    let cancellation = CancellationToken::new();
++    let _cancel_on_drop = cancellation.clone().drop_guard();
+     let stream_options =
+         pa_ai::types::SimpleStreamOptions::from_base(pa_ai::types::StreamOptions {
+             max_tokens: Some(max_tokens),
+             api_key,
+             headers: headers.map(|headers| headers.into_iter().collect()),
++            signal: Some(cancellation),
+             ..Default::default()
+         });
+     let assistant = match on_delta {
+diff --git a/crates/pa-core/tests/compaction_http_abort.rs b/crates/pa-core/tests/compaction_http_abort.rs
+new file mode 100644
+index 000000000..3c5f8b05c
+--- /dev/null
++++ b/crates/pa-core/tests/compaction_http_abort.rs
+@@ -0,0 +1,267 @@
++//! Compaction cancellation must close the provider's HTTP streams before it can finish.
++
++use std::sync::Arc;
++use std::time::Duration;
++
++use pa_agent::abort::{is_abort_error, race_with_abort, AbortController};
++use pa_agent::agent::{Agent, AgentOptions};
++use pa_core::session::manager::SessionManager;
++use pa_core::session_engine::compact_session::{prepare_compaction, CompactOutcome};
++use pa_core::session_engine::compaction::CompactionSettings;
++use pa_core::session_engine::AgentSession;
++use pa_types::ai::{Model, UserContent, UserMessage};
++use pa_types::session::{AgentMessage, FileEntry};
++use serde_json::json;
++use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
++use tokio::net::TcpListener;
++use tokio::sync::mpsc;
++use tokio::task::{JoinHandle, JoinSet};
++use tokio::time::timeout;
++
++const WAIT_LIMIT: Duration = Duration::from_secs(5);
++const KEEP_RECENT_TOKENS: u64 = 10;
++const LARGE_MESSAGE_CHARS: usize = 4_000;
++const SUMMARY: &str = "summary after cancellation";
++
++#[derive(Clone, Copy)]
++enum SummaryMode {
++    Completion,
++    SplitStreaming,
++}
++
++struct HeldProvider {
++    model: Model,
++    started: mpsc::UnboundedReceiver<()>,
++    closed: mpsc::UnboundedReceiver<()>,
++    task: JoinHandle<()>,
++}
++
++impl Drop for HeldProvider {
++    fn drop(&mut self) {
++        self.task.abort();
++    }
++}
++
++async fn held_provider(held_requests: usize) -> HeldProvider {
++    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
++    let address = listener.local_addr().unwrap();
++    let (started_sender, started) = mpsc::unbounded_channel();
++    let (closed_sender, closed) = mpsc::unbounded_channel();
++    let task = tokio::spawn(async move {
++        // Dropping this set closes every held socket, including on a failed assertion.
++        let mut connections = JoinSet::new();
++        let mut requests = 0;
++        loop {
++            tokio::select! {
++                accepted = listener.accept() => {
++                    let (socket, _) = accepted.unwrap();
++                    let hold_response = requests < held_requests;
++                    requests += 1;
++                    let started_sender = started_sender.clone();
++                    let closed_sender = closed_sender.clone();
++                    connections.spawn(async move {
++                        let mut reader = BufReader::new(socket);
++                        let mut content_length = None;
++                        loop {
++                            let mut line = String::new();
++                            assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
++                            if line == "\r\n" {
++                                break;
++                            }
++                            if let Some((_, value)) = line.split_once(':').filter(|(name, _)| {
++                                name.eq_ignore_ascii_case("content-length")
++                            }) {
++                                content_length = Some(value.trim().parse::<usize>().unwrap());
++                            }
++                        }
++                        let mut body = vec![0; content_length.expect("HTTP request body length")];
++                        reader.read_exact(&mut body).await.unwrap();
++                        let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
++                        assert_eq!(request["stream"], true);
++                        let mut socket = reader.into_inner();
++                        let delta = json!({
++                            "id": "summary", "object": "chat.completion.chunk", "model": "summary",
++                            "choices": [{"index": 0, "delta": {
++                                "role": "assistant", "content": SUMMARY
++                            }, "finish_reason": null}]
++                        });
++                        let headers = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
++                            Connection: close\r\n\r\n";
++                        let response = format!("{headers}data: {delta}\n\n");
++                        socket.write_all(response.as_bytes()).await.unwrap();
++                        socket.flush().await.unwrap();
++                        if hold_response {
++                            started_sender.send(()).unwrap();
++                            let mut byte = [0];
++                            let closed = match socket.read(&mut byte).await {
++                                Ok(0) => true,
++                                Err(error) => matches!(
++                                    error.kind(),
++                                    std::io::ErrorKind::ConnectionReset
++                                        | std::io::ErrorKind::ConnectionAborted
++                                ),
++                                Ok(_) => false,
++                            };
++                            assert!(closed, "the cancelled request must close its HTTP socket");
++                            closed_sender.send(()).unwrap();
++                        } else {
++                            socket.write_all(b"data: [DONE]\n\n").await.unwrap();
++                            socket.shutdown().await.unwrap();
++                        }
++                    });
++                }
++                completed = connections.join_next(), if !connections.is_empty() => {
++                    completed.unwrap().unwrap();
++                }
++            }
++        }
++    });
++    let model = serde_json::from_value(json!({
++        "id": "summary", "name": "Summary", "api": "openai-completions",
++        "provider": "test", "baseUrl": format!("http://{address}"),
++        "reasoning": false, "input": ["text"],
++        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
++        "contextWindow": 100_000, "maxTokens": 1_000
++    }))
++    .unwrap();
++    HeldProvider {
++        model,
++        started,
++        closed,
++        task,
++    }
++}
++
++fn user_message(text: &str) -> AgentMessage {
++    AgentMessage::User(UserMessage {
++        content: UserContent::Text(text.to_string()),
++        timestamp: 0,
++        rest: pa_types::JsonMap::default(),
++    })
++}
++
++fn assistant_message(text: &str) -> AgentMessage {
++    AgentMessage::Assistant(pa_ai::faux::faux_assistant_text_message(
++        text,
++        pa_ai::faux::FauxAssistantMessageOptions::default(),
++    ))
++}
++
++// Keep readiness, abort, socket closure, and successful reuse in one observable sequence.
++#[allow(clippy::too_many_lines)]
++async fn verify_compaction_abort(mode: SummaryMode) {
++    let expected_requests = match mode {
++        SummaryMode::Completion => 1,
++        SummaryMode::SplitStreaming => 2,
++    };
++    let mut provider = held_provider(expected_requests).await;
++    let directory = tempfile::tempdir().unwrap();
++    let mut manager = SessionManager::persisted(directory.path(), directory.path());
++    for message in [
++        user_message("turn one"),
++        assistant_message("reply one"),
++        user_message(&"x".repeat(LARGE_MESSAGE_CHARS)),
++        assistant_message(&"y".repeat(LARGE_MESSAGE_CHARS)),
++        user_message("turn three"),
++        assistant_message("reply three"),
++    ] {
++        manager.append_message(message).unwrap();
++    }
++    if matches!(mode, SummaryMode::Completion) {
++        manager
++            .append_message(user_message(&"z".repeat(LARGE_MESSAGE_CHARS)))
++            .unwrap();
++    }
++    let preparation = prepare_compaction(manager.retained_entries(), KEEP_RECENT_TOKENS).unwrap();
++    assert_eq!(
++        preparation.cut.is_split_turn,
++        matches!(mode, SummaryMode::SplitStreaming)
++    );
++    let engine = AgentSession::new(
++        Arc::new(Agent::new(AgentOptions::default())),
++        manager,
++        Vec::new(),
++    )
++    .await
++    .unwrap();
++    engine.set_compaction_settings(CompactionSettings {
++        keep_recent_tokens: KEEP_RECENT_TOKENS,
++        ..Default::default()
++    });
++    let (delta_sender, mut deltas) = mpsc::unbounded_channel();
++    if matches!(mode, SummaryMode::SplitStreaming) {
++        engine.set_compaction_summary_sink(Arc::new(move |delta| {
++            delta_sender.send(delta.to_string()).unwrap();
++        }));
++    }
++    let before = engine.entries().await;
++    let controller = AbortController::new();
++    let signal = controller.signal();
++    // Hosts race the public compaction future against their abort signal.
++    // Cancelling that future must also cancel pa-ai's independently spawned transport.
++    let compact = race_with_abort(
++        engine.compact(
++            None,
++            &provider.model,
++            Some("test-key".to_string()),
++            Some(&signal),
++        ),
++        &signal,
++    );
++    let abort = async {
++        for _ in 0..expected_requests {
++            timeout(WAIT_LIMIT, provider.started.recv())
++                .await
++                .expect("summary HTTP request started")
++                .expect("provider still running");
++        }
++        if matches!(mode, SummaryMode::SplitStreaming) {
++            assert_eq!(
++                timeout(WAIT_LIMIT, deltas.recv()).await.unwrap().unwrap(),
++                SUMMARY
++            );
++        }
++        controller.abort();
++    };
++    let (result, ()) = tokio::join!(compact, abort);
++    assert!(is_abort_error(&result.unwrap_err()));
++    assert_eq!(engine.entries().await, before);
++    for _ in 0..expected_requests {
++        timeout(WAIT_LIMIT, provider.closed.recv())
++            .await
++            .expect("abort must close every summary HTTP socket before the provider finishes")
++            .expect("provider still running");
++    }
++    assert_eq!(engine.entries().await, before, "no late compaction commit");
++
++    let outcome = timeout(
++        WAIT_LIMIT,
++        engine.compact(None, &provider.model, Some("test-key".to_string()), None),
++    )
++    .await
++    .expect("the session can compact after abort")
++    .unwrap();
++    let CompactOutcome::Ran(run) = outcome else {
++        panic!("the aborted compaction must leave its history available for the next run");
++    };
++    assert!(run.result.summary.contains(SUMMARY));
++    assert_eq!(
++        engine
++            .entries()
++            .await
++            .iter()
++            .filter(|entry| matches!(entry, FileEntry::Compaction { .. }))
++            .count(),
++        1
++    );
++}
++
++#[tokio::test]
++async fn abort_closes_completion_http_and_allows_the_next_compaction() {
++    verify_compaction_abort(SummaryMode::Completion).await;
++}
++
++#[tokio::test]
++async fn abort_closes_both_split_summary_streams_and_allows_the_next_compaction() {
++    verify_compaction_abort(SummaryMode::SplitStreaming).await;
++}

@@ -1,0 +1,10 @@
+node_modules/
+out/
+dist/
+release/
+.shots/
+*.log
+.env
+.engine-staging/
+.cache/prime-auth/
+resources/prime-auth/bin/

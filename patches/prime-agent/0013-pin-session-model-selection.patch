@@ -1,0 +1,99 @@
+diff --git a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
+--- a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
++++ b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
+@@ -246,6 +246,13 @@ impl SessionEngine for AgentSessionEngine {
+ 
+     fn creation_model(&self) -> Option<(String, String)> {
+-        let model = self.resolve_registry_model().ok()?;
++        let model = self.resolve_model().ok()?;
++        // The creation prefix selects this session's model. Other workers may
++        // change global defaults while this worker keeps its live provider target.
++        let mut selection = self.selection.write().expect("model selection lock");
++        if selection.model.is_none() {
++            selection.provider = Some(model.provider.clone());
++            selection.model = Some(model.id.clone());
++        }
+         Some((model.provider.clone(), model.id))
+     }
+ 
+diff --git a/crates/pa-daemon/tests/model_isolation.rs b/crates/pa-daemon/tests/model_isolation.rs
+new file mode 100644
+index 0000000..433a936
+--- /dev/null
++++ b/crates/pa-daemon/tests/model_isolation.rs
+@@ -0,0 +1,75 @@
++use pa_core::settings::SettingsManager;
++use pa_daemon::agent_engine::{AgentEngineConfig, AgentSessionEngine};
++use pa_daemon::engine::{EngineModelSelection, SessionEngine};
++use serde_json::json;
++
++#[test]
++fn a_created_session_keeps_its_model_when_another_session_changes_defaults() {
++    let directory = tempfile::tempdir().unwrap();
++    let agent_dir = directory.path().join("agent");
++    std::fs::create_dir_all(&agent_dir).unwrap();
++    std::fs::write(
++        agent_dir.join("models.json"),
++        json!({
++            "providers": {
++                "test-provider": {
++                    "api": "openai-completions",
++                    "baseUrl": "http://127.0.0.1:9",
++                    "apiKey": "test-key",
++                    "models": [
++                        { "id": "parent-model", "reasoning": true, "input": ["text", "image"] },
++                        { "id": "child-model", "reasoning": false, "input": ["text"] }
++                    ]
++                }
++            }
++        })
++        .to_string(),
++    )
++    .unwrap();
++    let mut settings = SettingsManager::create(directory.path(), &agent_dir);
++    settings
++        .set_default_model_and_provider("test-provider", "parent-model")
++        .unwrap();
++    let engine = AgentSessionEngine::new(AgentEngineConfig {
++        cwd: directory.path().to_path_buf(),
++        agent_dir,
++        provider: None,
++        model: None,
++        api_key: None,
++        thinking: Some(pa_types::ai::ModelThinkingLevel::High),
++        session_dir: None,
++        session_file: None,
++        faux_script: None,
++        supervisor_link: None,
++        telemetry_disabled: Some(true),
++        cron_store: None,
++        queued_steering_probe: None,
++    })
++    .unwrap();
++    let initial_metadata = engine.model_metadata();
++    let initial_thinking = engine.effective_thinking_level();
++    assert_eq!(
++        engine.creation_model(),
++        Some(("test-provider".to_string(), "parent-model".to_string()))
++    );
++
++    settings
++        .set_default_model_and_provider("test-provider", "child-model")
++        .unwrap();
++    assert_eq!(engine.model_metadata(), initial_metadata);
++    assert_eq!(engine.effective_thinking_level(), initial_thinking);
++    assert_eq!(
++        engine.model_identity(),
++        (
++            Some("test-provider".to_string()),
++            Some("parent-model".to_string())
++        )
++    );
++
++    engine.configure_model(EngineModelSelection {
++        provider: Some("test-provider".to_string()),
++        model: Some("child-model".to_string()),
++        ..Default::default()
++    });
++    assert_eq!(engine.model_metadata().unwrap()["id"], "child-model");
++}

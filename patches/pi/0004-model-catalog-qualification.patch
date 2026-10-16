@@ -1,0 +1,95 @@
+diff --git a/packages/ai/src/model-catalog.ts b/packages/ai/src/model-catalog.ts
+index 5edea99..aa7dbf6 100644
+--- a/packages/ai/src/model-catalog.ts
++++ b/packages/ai/src/model-catalog.ts
+@@ -1,3 +1,4 @@
++import { type QualifiedChatModels, qualifyChatCatalog } from "./providers/catalog-qualification.ts";
+ import type {
+ 	Api,
+ 	ClassifierApi,
+@@ -32,7 +33,7 @@ export type ChatModelCatalog<TGroups extends ModelGroups, TProvider extends Prov
+ 		id: ModelId<TKey>;
+ 		provider: TProvider;
+ 	};
+-};
++} & QualifiedChatModels<TProvider>;
+ 
+ export type ImageModelCatalog<TGroups extends ModelGroups, TProvider extends ProviderId> = {
+ 	[TKey in KeyForType<TGroups, "image"> as ModelId<TKey>]: ImageModel<ApiForKey<TGroups, TKey> & ImageApi> & {
+@@ -60,10 +61,13 @@ function flattenModelCatalog(groups: ModelGroups, type: ModelType): Record<strin
+ }
+ 
+ export function flattenChatModelCatalog<const TProvider extends ProviderId, const TGroups extends ModelGroups>(
+-	_provider: TProvider,
++	provider: TProvider,
+ 	groups: TGroups,
+ ): ChatModelCatalog<TGroups, TProvider> {
+-	return flattenModelCatalog(groups, "chat") as ChatModelCatalog<TGroups, TProvider>;
++	return qualifyChatCatalog(
++		provider,
++		flattenModelCatalog(groups, "chat") as Record<string, Model<Api>>,
++	) as ChatModelCatalog<TGroups, TProvider>;
+ }
+ 
+ export function flattenImageModelCatalog<const TProvider extends ProviderId, const TGroups extends ModelGroups>(
+diff --git a/packages/ai/src/providers/catalog-qualification.ts b/packages/ai/src/providers/catalog-qualification.ts
+new file mode 100644
+index 0000000..682752d
+--- /dev/null
++++ b/packages/ai/src/providers/catalog-qualification.ts
+@@ -0,0 +1,55 @@
++import type { Api, Model, ProviderId } from "../types.ts";
++
++export type QualifiedChatModels<TProvider extends ProviderId> = TProvider extends "anthropic"
++	? { "claude-haiku-5-5": Model<"anthropic-messages"> }
++	: object;
++
++// Temporary corrections to the pinned 1.2.0 catalog; requalify on every upstream base.
++// https://platform.claude.com/docs/en/models/haiku-5-5/overview
++const HAIKU_5_5: Model<"anthropic-messages"> = {
++	id: "claude-haiku-5-5",
++	name: "Claude Haiku 5.5",
++	api: "anthropic-messages",
++	provider: "anthropic",
++	baseUrl: "https://api.anthropic.com",
++	reasoning: true,
++	input: ["text", "image"],
++	contextWindow: 1_000_000,
++	maxTokens: 128_000,
++	cost: {
++		input: 0.1,
++		output: 0.5,
++		cacheRead: 0.01,
++		cacheWrite: 0.125,
++		tiers: [{ inputTokensAbove: 100_000, input: 0.5, output: 2.5, cacheRead: 0.05, cacheWrite: 0.625 }],
++	},
++	thinkingLevelMap: {
++		off: null,
++		minimal: null,
++		low: "low",
++		medium: "medium",
++		high: "high",
++		xhigh: "xhigh",
++		max: "max",
++	},
++	compat: { forceAdaptiveThinking: true, supportsTemperature: false, supportsStrictTools: true },
++	promptCache: { short: 300, long: 3600 },
++};
++
++export function qualifyChatCatalog(
++	provider: ProviderId,
++	models: Record<string, Model<Api>>,
++): Record<string, Model<Api>> {
++	if (provider !== "anthropic") return models;
++	const qualified: Record<string, Model<Api>> = {
++		...models,
++		"claude-haiku-5-5": models["claude-haiku-5-5"] ?? {
++			...HAIKU_5_5,
++			inputLimits: models["claude-sonnet-5-5"]?.inputLimits,
++		},
++	};
++	const sonnet = qualified["claude-sonnet-5-5"];
++	// https://platform.claude.com/docs/en/models/sonnet-5-5/whats-new-sonnet-5-5#pricing
++	if (sonnet) qualified[sonnet.id] = { ...sonnet, cost: { ...sonnet.cost, cacheRead: 0.1 } };
++	return qualified;
++}

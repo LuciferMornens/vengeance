@@ -1,0 +1,406 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+@custom-variant light (&:where([data-theme='light'], [data-theme='light'] *));
+/* Window in the background (native Windows apps dim their chrome). */
+@custom-variant window-blurred (&:where([data-window-blurred] *));
+/* A short window (laptop height, half-height snap): heroes drop secondary content and tighten. */
+@custom-variant short (@media (max-height: 760px));
+/* Near the minimum window height: heroes keep only their headings and actions. */
+@custom-variant cramped (@media (max-height: 640px));
+
+/* Tailwind utilities map onto design tokens only (default palette removed on purpose). */
+@theme inline {
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-white: #ffffff;
+  --color-black: #000000;
+  --color-bg: var(--bg);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-4: var(--surface-4);
+  --color-glass: var(--glass);
+  --color-overlay: var(--overlay);
+  --color-hairline-soft: var(--hairline-soft);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-fg-4: var(--fg-4);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-softer: var(--accent-softer);
+  --color-accent-border: var(--accent-border);
+  --color-accent-text: var(--accent-text);
+  --color-control-on: var(--control-on);
+  --color-pill: var(--pill-bg);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono);
+
+  --text-2xs: var(--text-2xs);
+  --text-xs: var(--text-xs);
+  --text-sm: var(--text-sm);
+  --text-ui: var(--text-ui);
+  --text-md: var(--text-md);
+  --text-title: var(--text-title);
+  --text-prose: var(--text-prose);
+  --text-lg: var(--text-lg);
+  --text-xl: var(--text-xl);
+  --text-2xl: var(--text-2xl);
+  --text-3xl: var(--text-3xl);
+
+  --radius-xs: var(--r-xs);
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-card: var(--r-card);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+  /* Legacy names (same values): chip = sm, dialog = lg. */
+  --radius-chip: var(--r-sm);
+  --radius-dialog: var(--r-lg);
+
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-highlight: var(--highlight);
+  --shadow-glow: var(--accent-glow);
+  --shadow-focus: var(--focus-ring);
+  --shadow-elev-0: var(--elev-0);
+  --shadow-elev-1: var(--elev-1);
+  --shadow-elev-2: var(--elev-2);
+  --shadow-elev-3: var(--elev-3);
+
+  --ease-out: var(--ease-out);
+  --ease-in-out: var(--ease-in-out);
+  --ease-spring: var(--ease-spring);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  html {
+    background: transparent;
+  }
+
+  body {
+    position: relative;
+    background: var(--bg-window);
+    color: var(--fg);
+    font-family: var(--font-ui);
+    font-size: var(--text-ui);
+    line-height: var(--leading-ui);
+    letter-spacing: var(--tracking-tight);
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* Desktop app: chrome text is not selectable (opt in with .selectable / prose). */
+    user-select: none;
+    cursor: default;
+    overscroll-behavior: none;
+  }
+
+  /* Very low-opacity grain over the window background. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: var(--noise-opacity);
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+
+  /*
+   * A modal's backdrop ([data-modal-backdrop], a direct child of <body> via its portal) already blocks every
+   * click behind it, so the pointer-events:none a Radix modal puts on <body> is kept from applying: toggling an
+   * inherited property restyles every element, a 25-30 ms frame each way on a long transcript.
+   */
+  body:has(> [data-modal-backdrop]) {
+    pointer-events: auto !important;
+  }
+
+  input,
+  textarea,
+  [contenteditable='true'],
+  .selectable,
+  .selectable * {
+    user-select: text;
+    cursor: auto;
+  }
+
+  a,
+  [role='link'] {
+    cursor: pointer;
+    -webkit-user-drag: none;
+  }
+
+  button,
+  [role='button'],
+  [role='tab'],
+  [role='menuitem'],
+  [role='option'] {
+    cursor: default;
+  }
+
+  img,
+  svg {
+    -webkit-user-drag: none;
+  }
+
+  ::selection {
+    background: var(--selection);
+  }
+
+  code,
+  kbd,
+  pre,
+  samp {
+    font-family: var(--font-mono);
+    font-feature-settings: 'calt' 0, 'liga' 0;
+  }
+
+  /* Titles weigh the same in both themes. */
+  h1,
+  h2,
+  h3,
+  .heading {
+    font-weight: var(--weight-title);
+  }
+  .heading {
+    letter-spacing: var(--tracking-heading);
+  }
+
+  /* No default browser focus rings; a neutral-bright ring on keyboard focus only. */
+  *:focus {
+    outline: none;
+  }
+  *:focus-visible {
+    outline: 2px solid var(--focus-color);
+    outline-offset: 2px;
+  }
+  /* Programmatic focus targets (dialog surfaces, scroll containers) never show a ring. */
+  [tabindex='-1']:focus-visible {
+    outline: none;
+  }
+
+  /* Thin overlay-style scrollbars. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+    background: transparent;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--hairline-strong);
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: padding-box;
+    min-height: 32px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--fg) 24%, transparent);
+  }
+
+  /* The session pane hosts the composer height; the Composer overwrites it inline (ResizeObserver). */
+  [data-session-pane] {
+    --composer-h: 132px;
+  }
+
+  /*
+   * Toast placement (read by <Toaster>). In the workbench: bottom-right, clear of the inspector and 24px above the
+   * composer (`--toast-inset-*`, mirrored by the shell). While a full sheet is open (<Sheet> sets data-sheet=full)
+   * the panes are covered, so toasts ignore those insets. A sheet with a 244px nav column (Settings sets
+   * data-sheet-nav) docks them bottom-left over the nav, never over its centered content; sheets without a nav
+   * keep them bottom-right and pad the end of their scroll column so every control scrolls clear.
+   * Defined on the toaster, never on :root: changing a custom property there restyles every element.
+   */
+  [data-toaster] {
+    --toast-w: 340px;
+    --toast-right: calc(var(--toast-inset-right, 0px) + 16px);
+    --toast-bottom: calc(var(--toast-inset-bottom, 0px) + 16px);
+  }
+  :root[data-sheet='full'] [data-toaster] {
+    --toast-w: 300px;
+    --toast-right: 16px;
+    --toast-bottom: 16px;
+  }
+  :root[data-sheet='full'][data-sheet-nav] [data-toaster] {
+    --toast-w: 212px;
+    --toast-right: calc(100vw - 212px - 16px);
+  }
+}
+
+@layer utilities {
+  .drag {
+    -webkit-app-region: drag;
+  }
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  .bg-accent-gradient {
+    background-image: var(--accent-gradient);
+  }
+  .glass {
+    background: var(--glass);
+    backdrop-filter: blur(24px) saturate(1.4);
+    box-shadow: var(--highlight), var(--shadow-lg);
+  }
+  /* Press feedback for buttons and pills (never rows). */
+  .pressable {
+    transition-property: background-color, color, box-shadow, transform, opacity, filter;
+    transition-duration: var(--dur-instant);
+    transition-timing-function: var(--ease-out);
+  }
+  .pressable:active:not(:disabled) {
+    transform: scale(var(--press-scale));
+  }
+  .weight-row {
+    font-weight: var(--weight-row);
+  }
+}
+
+@keyframes v-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@keyframes v-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes v-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+@keyframes v-caret {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+@keyframes v-progress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Enter/exit keyframes used by Radix primitives via data-state (exit waits for animationend). */
+@keyframes v-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes v-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes v-tip {
+  from {
+    opacity: 0;
+    transform: translateY(var(--tip-dy, 3px)) scale(0.96);
+  }
+}
+@keyframes v-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+}
+@keyframes v-pop-out {
+  to {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.98);
+  }
+}
+@keyframes v-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.965);
+  }
+}
+@keyframes v-dialog-out {
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+}
+@keyframes v-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+@keyframes v-sheet-out {
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes v-side-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+@keyframes v-side-out {
+  to {
+    transform: translateX(100%);
+  }
+}

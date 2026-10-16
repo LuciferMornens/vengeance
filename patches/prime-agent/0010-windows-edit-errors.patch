@@ -1,0 +1,131 @@
+diff --git a/crates/pa-core/src/platform/perms.rs b/crates/pa-core/src/platform/perms.rs
+index f4e34c1..647284a 100644
+--- a/crates/pa-core/src/platform/perms.rs
++++ b/crates/pa-core/src/platform/perms.rs
+@@ -113,7 +113,16 @@ pub fn is_readable_writable(path: &Path) -> bool {
+ #[must_use]
+ pub fn is_readable_writable(path: &Path) -> bool {
+     // Windows: a create-open probe is the equivalent permission test.
+-    OpenOptions::new().read(true).write(true).open(path).is_ok()
++    let mut options = OpenOptions::new();
++    options.read(true).write(true);
++    #[cfg(windows)]
++    {
++        use std::os::windows::fs::OpenOptionsExt;
++        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
++        // Directory handles need this flag even when their ACL permits access.
++        options.custom_flags(FILE_FLAG_BACKUP_SEMANTICS);
++    }
++    options.open(path).is_ok()
+ }
+ 
+ /// True when the current user may read the file, mirroring Node
+diff --git a/crates/pa-core/src/tools/edit.rs b/crates/pa-core/src/tools/edit.rs
+index cc5922c..26b4da3 100644
+--- a/crates/pa-core/src/tools/edit.rs
++++ b/crates/pa-core/src/tools/edit.rs
+@@ -86,7 +86,17 @@ pub struct LocalEditOperations;
+ 
+ impl EditOperations for LocalEditOperations {
+     fn read_file(&self, absolute_path: &str) -> std::io::Result<Vec<u8>> {
+-        std::fs::read(absolute_path)
++        std::fs::read(absolute_path).map_err(|error| {
++            // Windows reports access denied for directory reads; Node reports EISDIR.
++            if cfg!(windows)
++                && error.kind() == std::io::ErrorKind::PermissionDenied
++                && std::path::Path::new(absolute_path).is_dir()
++            {
++                std::io::ErrorKind::IsADirectory.into()
++            } else {
++                error
++            }
++        })
+     }
+ 
+     fn write_file(&self, absolute_path: &str, content: &str) -> std::io::Result<()> {
+diff --git a/crates/pa-core/src/tools/edit_diff.rs b/crates/pa-core/src/tools/edit_diff.rs
+index 1387f46..420f421 100644
+--- a/crates/pa-core/src/tools/edit_diff.rs
++++ b/crates/pa-core/src/tools/edit_diff.rs
+@@ -533,6 +533,7 @@ pub fn apply_edits_with_diff(
+ 
+ /// Map an io error to the errno name Node exposes as `error.code`.
+ pub fn errno_name(err: &std::io::Error) -> String {
++    #[cfg(not(windows))]
+     if let Some(raw) = err.raw_os_error() {
+         return match raw {
+             1 => "EPERM".to_string(),
+@@ -549,7 +550,12 @@ pub fn errno_name(err: &std::io::Error) -> String {
+     match err.kind() {
+         std::io::ErrorKind::NotFound => "ENOENT".to_string(),
+         std::io::ErrorKind::PermissionDenied => "EACCES".to_string(),
+-        _ => "EUNKNOWN".to_string(),
++        std::io::ErrorKind::NotADirectory => "ENOTDIR".to_string(),
++        std::io::ErrorKind::IsADirectory => "EISDIR".to_string(),
++        std::io::ErrorKind::ReadOnlyFilesystem => "EROFS".to_string(),
++        _ => err
++            .raw_os_error()
++            .map_or_else(|| "EUNKNOWN".to_string(), |raw| format!("E{raw}")),
+     }
+ }
+ 
+diff --git a/crates/pa-core/tests/windows_edit_tool.rs b/crates/pa-core/tests/windows_edit_tool.rs
+new file mode 100644
+index 0000000..1f30026
+--- /dev/null
++++ b/crates/pa-core/tests/windows_edit_tool.rs
+@@ -0,0 +1,54 @@
++#![cfg(windows)]
++
++use pa_core::create_edit_tool_definition;
++use serde_json::json;
++
++#[tokio::test]
++async fn editing_a_directory_reports_the_file_type_without_changing_its_contents() {
++    let fixture = tempfile::tempdir().unwrap();
++    let directory = fixture.path().join("directory");
++    std::fs::create_dir(&directory).unwrap();
++    std::fs::write(directory.join("child.txt"), "untouched").unwrap();
++    let tool = create_edit_tool_definition(fixture.path().to_str().unwrap());
++    let error = (tool.execute)(
++        "edit-directory",
++        json!({"path": "directory", "edits": [{"oldText": "a", "newText": "b"}]}),
++        None,
++        None,
++    )
++    .await
++    .unwrap_err();
++
++    assert_eq!(
++        error.to_string(),
++        "EISDIR: illegal operation on a directory, read"
++    );
++    assert_eq!(
++        std::fs::read_to_string(directory.join("child.txt")).unwrap(),
++        "untouched"
++    );
++}
++
++#[tokio::test]
++async fn editing_a_file_under_a_missing_parent_reports_not_found() {
++    let fixture = tempfile::tempdir().unwrap();
++    let path = std::path::Path::new("missing").join("file.txt");
++    let tool = create_edit_tool_definition(fixture.path().to_str().unwrap());
++    let error = (tool.execute)(
++        "edit-missing-parent",
++        json!({"path": path, "edits": [{"oldText": "a", "newText": "b"}]}),
++        None,
++        None,
++    )
++    .await
++    .unwrap_err();
++
++    assert_eq!(
++        error.to_string(),
++        format!(
++            "Could not edit file: {}. Error code: ENOENT.",
++            path.display()
++        )
++    );
++    assert!(!fixture.path().join(path).exists());
++}

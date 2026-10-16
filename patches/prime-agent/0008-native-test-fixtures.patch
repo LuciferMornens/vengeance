@@ -1,0 +1,1159 @@
+diff --git a/crates/pa-cli/tests/eval_composition_e2e.rs b/crates/pa-cli/tests/eval_composition_e2e.rs
+index ec1ff5e..14fbc13 100644
+--- a/crates/pa-cli/tests/eval_composition_e2e.rs
++++ b/crates/pa-cli/tests/eval_composition_e2e.rs
+@@ -62,7 +62,7 @@ fn make_executable(path: &Path) {
+ /// consults). Hermetic: only the fixture directory is touched.
+ fn pass_on_second_consult_verifier(home: &Path) -> PathBuf {
+     let script = home.join("verify.sh");
+-    let counter = home.join("verify-count").display().to_string();
++    let counter = "verify-count";
+     std::fs::write(
+         &script,
+         format!(
+@@ -153,6 +153,7 @@ fn parse_events(stdout: &str) -> Vec<Value> {
+ fn verifier_gate_pass_stops_the_run_with_structured_events_in_run() {
+     let home = isolated_home();
+     let verifier = pass_on_second_consult_verifier(home.path());
++    let verifier_command = format!("bash ./{}", verifier.file_name().unwrap().to_string_lossy());
+     let script = json!({ "responses": ["first attempt", "fixed it"] });
+     let (stdout, stderr, code) = run(
+         home.path(),
+@@ -163,7 +164,7 @@ fn verifier_gate_pass_stops_the_run_with_structured_events_in_run() {
+             "build the feature",
+             "--autonomous",
+             "--autonomous-gate",
+-            verifier.to_str().unwrap(),
++            &verifier_command,
+         ],
+         &script,
+     );
+@@ -274,6 +275,7 @@ fn verifier_gate_pass_stops_the_run_with_structured_events_in_run() {
+ fn verifier_gate_failure_exhausts_retries_and_exits_one() {
+     let home = isolated_home();
+     let verifier = always_failing_verifier(home.path());
++    let verifier_command = format!("bash ./{}", verifier.file_name().unwrap().to_string_lossy());
+     let script = json!({ "responses": ["attempt one", "attempt two"] });
+     let (stdout, stderr, code) = run(
+         home.path(),
+@@ -284,7 +286,7 @@ fn verifier_gate_failure_exhausts_retries_and_exits_one() {
+             "build the feature",
+             "--autonomous",
+             "--autonomous-gate",
+-            verifier.to_str().unwrap(),
++            &verifier_command,
+             "--autonomous-gate-retries",
+             "1",
+         ],
+@@ -331,6 +333,7 @@ fn verifier_gate_failure_exhausts_retries_and_exits_one() {
+ fn text_mode_verifier_pass_prints_the_final_answer() {
+     let home = isolated_home();
+     let verifier = pass_on_second_consult_verifier(home.path());
++    let verifier_command = format!("bash ./{}", verifier.file_name().unwrap().to_string_lossy());
+     let script = json!({ "responses": ["first attempt", "fixed it"] });
+     let (stdout, stderr, code) = run(
+         home.path(),
+@@ -339,7 +342,7 @@ fn text_mode_verifier_pass_prints_the_final_answer() {
+             "build the feature",
+             "--autonomous",
+             "--autonomous-gate",
+-            verifier.to_str().unwrap(),
++            &verifier_command,
+         ],
+         &script,
+     );
+diff --git a/crates/pa-cli/tests/package_resources_e2e.rs b/crates/pa-cli/tests/package_resources_e2e.rs
+index 96cdc73..cebdbee 100644
+--- a/crates/pa-cli/tests/package_resources_e2e.rs
++++ b/crates/pa-cli/tests/package_resources_e2e.rs
+@@ -112,8 +112,12 @@ fn package_provided_skill_appears_in_created_session_skill_list() {
+         "system prompt lists the package skill:\n{text}"
+     );
+     assert!(text.contains("<description>Greets from a package</description>"));
++    let skill_location = Path::new("fixture-pkg")
++        .join("skills")
++        .join("e-greeting")
++        .join("SKILL.md");
+     assert!(
+-        text.contains("fixture-pkg/skills/e-greeting/SKILL.md"),
++        text.contains(skill_location.to_string_lossy().as_ref()),
+         "location points into the package"
+     );
+ 
+diff --git a/crates/pa-cli/tests/packaged_layout_e2e.rs b/crates/pa-cli/tests/packaged_layout_e2e.rs
+index 89aba70..74139fb 100644
+--- a/crates/pa-cli/tests/packaged_layout_e2e.rs
++++ b/crates/pa-cli/tests/packaged_layout_e2e.rs
+@@ -64,6 +64,10 @@ fn packaged_binary_name() -> &'static str {
+     }
+ }
+ 
++fn expected_binary_version(manifest_version: &str) -> &str {
++    option_env!("VENGEANCE_ENGINE_BUILD").unwrap_or(manifest_version)
++}
++
+ /// Stage the packaged layout into `dir`: the binary, the version manifest,
+ /// and the shipped assets. `with_runtime` removes the sidecar.
+ fn stage_packaged_layout(dir: &Path, with_runtime: bool) {
+@@ -193,6 +197,7 @@ impl Sandbox {
+         let mut command = Command::new(staged.join(packaged_binary_name()));
+         command
+             .env("HOME", self.home.path())
++            .env("USERPROFILE", self.home.path())
+             .env("PRIME_AGENT_CODING_AGENT_DIR", &self.agent_dir)
+             .env_remove("PI_PACKAGE_DIR")
+             .env_remove("PRIME_AGENT_KERNEL_PYTHON")
+@@ -300,10 +305,9 @@ fn packaged_session_boots_kernel_without_pi_package_dir() {
+     );
+ }
+ 
+-/// The staged manifest reports the pinned version (TS `--version` reads the
+-/// packaged package.json at runtime).
++/// Distribution builds report their compiled identity; upstream builds read the manifest.
+ #[test]
+-fn packaged_binary_reports_manifest_version() {
++fn packaged_binary_reports_its_qualified_version() {
+     let _guard = serial_lock();
+     let dir = tempfile::TempDir::new().expect("stage dir");
+     let staged = dir.path();
+@@ -322,8 +326,8 @@ fn packaged_binary_reports_manifest_version() {
+     assert_eq!(output.status.code(), Some(0));
+     assert_eq!(
+         String::from_utf8_lossy(&output.stdout).trim(),
+-        "9.8.7-test",
+-        "the packaged manifest version must win"
++        expected_binary_version("9.8.7-test"),
++        "the packaged binary must report its qualified identity"
+     );
+ }
+ 
+@@ -402,7 +406,7 @@ fn hostile_child_assertions(staged: &Path) {
+     assert_eq!(output.status.code(), Some(0));
+     assert_eq!(
+         String::from_utf8_lossy(&output.stdout).trim(),
+-        HOSTILE_STAGED_VERSION,
++        expected_binary_version(HOSTILE_STAGED_VERSION),
+         "the hostile PI_PACKAGE_DIR must not win: {}",
+         String::from_utf8_lossy(&output.stderr)
+     );
+@@ -688,6 +692,8 @@ fn packaging_dry_run_produces_artifact() {
+         .arg(tree.path())
+         .arg("--binary")
+         .arg(&staged_binary)
++        .arg("--version")
++        .arg(expected_binary_version(env!("CARGO_PKG_VERSION")))
+         .arg("--catalog-assets")
+         .arg(assets.path())
+         .arg("--out-dir")
+@@ -703,7 +709,7 @@ fn packaging_dry_run_produces_artifact() {
+         String::from_utf8_lossy(&result.stderr)
+     );
+ 
+-    let version = env!("CARGO_PKG_VERSION");
++    let version = expected_binary_version(env!("CARGO_PKG_VERSION"));
+     let stage = out
+         .path()
+         .join(format!("prime-agent-{version}-{host_platform}"));
+diff --git a/crates/pa-cli/tests/print_runtime_e2e.rs b/crates/pa-cli/tests/print_runtime_e2e.rs
+index 6a6f80a..5d9ee56 100644
+--- a/crates/pa-cli/tests/print_runtime_e2e.rs
++++ b/crates/pa-cli/tests/print_runtime_e2e.rs
+@@ -16,12 +16,17 @@
+ 
+ use std::process::Command;
+ 
++// Windows command lines cannot carry two 48k prompts. These fixtures need
++// history above keepRecentTokens, rather than a particular byte count.
++const COMPACTION_PROMPT_BYTES: usize = if cfg!(windows) { 8_000 } else { 48_000 };
++
+ fn run(args: &[&str], script: &serde_json::Value) -> (String, String, i32) {
+     let home = tempfile::TempDir::new().unwrap();
+     let bin = env!("CARGO_BIN_EXE_prime-agent");
+     let output = Command::new(bin)
+         .args(args)
+         .env("HOME", home.path())
++        .env("USERPROFILE", home.path())
+         .env("PRIME_AGENT_AGENT_DIR", home.path().join("agent"))
+         .env("PRIME_AGENT_FAUX_SCRIPT", script.to_string())
+         .env_remove("RLM_DEPTH")
+@@ -114,6 +119,7 @@ fn run_in_home(
+     let output = Command::new(bin)
+         .args(args)
+         .env("HOME", home)
++        .env("USERPROFILE", home)
+         .env("PRIME_AGENT_FAUX_SCRIPT", script.to_string())
+         // Keep the isolated HOME authoritative: ambient dir overrides stay out.
+         .env_remove("PRIME_AGENT_CODING_AGENT_DIR")
+@@ -131,7 +137,7 @@ fn run_in_home(
+ }
+ 
+ fn session_files(home: &std::path::Path) -> Vec<std::path::PathBuf> {
+-    let dir = home.join(".prime/agent/sessions");
++    let dir = home.join(".prime").join("agent").join("sessions");
+     let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+         .map(|entries| {
+             entries
+@@ -158,7 +164,8 @@ fn read_entries(path: &std::path::Path) -> Vec<serde_json::Value> {
+ /// under the agent dir's `session-leases`).
+ fn leased_session_files(home: &std::path::Path) -> Vec<String> {
+     let mut leased = Vec::new();
+-    let Ok(entries) = std::fs::read_dir(home.join(".prime/agent/session-leases")) else {
++    let Ok(entries) = std::fs::read_dir(home.join(".prime").join("agent").join("session-leases"))
++    else {
+         return leased;
+     };
+     for entry in entries.flatten() {
+@@ -358,7 +365,7 @@ fn print_mode_thinking_clamps_to_off_for_non_reasoning_models() {
+ 
+ /// Compaction settings into the isolated home's agent dir.
+ fn write_compaction_settings(home: &std::path::Path, settings: &serde_json::Value) {
+-    let agent = home.join(".prime/agent");
++    let agent = home.join(".prime").join("agent");
+     std::fs::create_dir_all(&agent).unwrap();
+     std::fs::write(agent.join("settings.json"), settings.to_string()).unwrap();
+ }
+@@ -402,8 +409,8 @@ fn print_mode_overflow_compacts_retries_once_then_reports() {
+             overflow_error(50),
+         ]
+     });
+-    let seed = format!("seed turn {}", "x".repeat(48_000));
+-    let probe = format!("overflow probe {}", "x".repeat(48_000));
++    let seed = format!("seed turn {}", "x".repeat(COMPACTION_PROMPT_BYTES));
++    let probe = format!("overflow probe {}", "x".repeat(COMPACTION_PROMPT_BYTES));
+     let (stdout, stderr, code) = run_in_home(home.path(), &["-p", &seed, &probe], &script);
+     assert_eq!(code, 1, "stderr: {stderr}");
+     assert!(stdout.is_empty(), "stdout: {stdout}");
+@@ -458,8 +465,8 @@ fn print_mode_overflow_retry_recovers_the_turn() {
+             r#"{"shouldRefine": false, "rationale": "one-off tool output"}"#,
+         ]
+     });
+-    let seed = format!("seed turn {}", "x".repeat(48_000));
+-    let probe = format!("overflow probe {}", "x".repeat(48_000));
++    let seed = format!("seed turn {}", "x".repeat(COMPACTION_PROMPT_BYTES));
++    let probe = format!("overflow probe {}", "x".repeat(COMPACTION_PROMPT_BYTES));
+     let (stdout, stderr, code) = run_in_home(home.path(), &["-p", &seed, &probe], &script);
+     assert_eq!(code, 0, "stderr: {stderr}");
+     assert_eq!(stdout, "recovered reply\n");
+@@ -520,8 +527,8 @@ fn print_mode_overflow_json_streams_the_compaction_events() {
+             overflow_error(50),
+         ]
+     });
+-    let seed = format!("seed turn {}", "x".repeat(48_000));
+-    let probe = format!("overflow probe {}", "x".repeat(48_000));
++    let seed = format!("seed turn {}", "x".repeat(COMPACTION_PROMPT_BYTES));
++    let probe = format!("overflow probe {}", "x".repeat(COMPACTION_PROMPT_BYTES));
+     let (stdout, stderr, code) = run_in_home(
+         home.path(),
+         &["--mode", "json", "-p", &seed, &probe],
+@@ -619,8 +626,8 @@ fn print_mode_stale_overflow_recovers_before_the_next_prompt_after_a_resume() {
+     let script = serde_json::json!({
+         "responses": [{"text": "seed reply"}, overflow_error(0)]
+     });
+-    let seed = format!("seed turn {}", "x".repeat(48_000));
+-    let probe = format!("overflow probe {}", "x".repeat(48_000));
++    let seed = format!("seed turn {}", "x".repeat(COMPACTION_PROMPT_BYTES));
++    let probe = format!("overflow probe {}", "x".repeat(COMPACTION_PROMPT_BYTES));
+     let (stdout, stderr, code) = run_in_home(home.path(), &["-p", &seed, &probe], &script);
+     assert_eq!(code, 1, "stderr: {stderr}");
+     assert!(stdout.is_empty());
+@@ -778,11 +785,11 @@ fn print_mode_json_streams_the_threshold_compaction_pair() {
+             "compaction": { "enabled": true, "reserveTokens": 1, "keepRecentTokens": 10 }
+         }),
+     );
+-    // A small context window: the ~8.1k seed turn stays below the 15_808
+-    // ceiling (24k - 4_096 output - 4_096 headroom), and the ~12k-token
+-    // crossing turn pushes past it.
++    // The seed stays below the reserve ceiling; the crossing prompt pushes
++    // past it. The Windows ceiling accommodates its shorter command line.
++    let context_window = if cfg!(windows) { 18_000 } else { 24_000 };
+     let script = serde_json::json!({
+-        "contextWindow": 24000,
++        "contextWindow": context_window,
+         "responses": [
+             {"text": "seed reply"},
+             {"text": "crossing reply"},
+@@ -790,7 +797,7 @@ fn print_mode_json_streams_the_threshold_compaction_pair() {
+         ]
+     });
+     let first = "seed turn".to_string();
+-    let second = format!("crossing turn {}", "x".repeat(48_000));
++    let second = format!("crossing turn {}", "x".repeat(COMPACTION_PROMPT_BYTES));
+     let (stdout, stderr, code) = run_in_home(
+         home.path(),
+         &["--mode", "json", "-p", &first, &second],
+@@ -856,6 +863,7 @@ fn run_in_home_cwd(
+     let output = Command::new(bin)
+         .args(args)
+         .env("HOME", home)
++        .env("USERPROFILE", home)
+         .env("PRIME_AGENT_FAUX_SCRIPT", script.to_string())
+         .env_remove("PRIME_AGENT_CODING_AGENT_DIR")
+         .env_remove("PRIME_AGENT_SESSION_DIR")
+@@ -913,8 +921,8 @@ fn print_mode_fork_copies_the_session_into_a_new_file() {
+     let fork_entries = read_entries(fork);
+     assert_ne!(fork_entries[0]["id"], session_id.as_str());
+     assert_eq!(
+-        fork_entries[0]["parentSession"],
+-        source.display().to_string()
++        std::path::Path::new(fork_entries[0]["parentSession"].as_str().unwrap()),
++        source.as_path()
+     );
+     let texts: Vec<&str> = fork_entries
+         .iter()
+@@ -984,8 +992,8 @@ fn print_mode_fork_imports_a_global_session_into_this_cwd() {
+         "the fork adopts the TARGET cwd"
+     );
+     assert_eq!(
+-        fork_entries[0]["parentSession"],
+-        files[0].display().to_string()
++        std::path::Path::new(fork_entries[0]["parentSession"].as_str().unwrap()),
++        files[0].as_path()
+     );
+     let texts: Vec<&str> = fork_entries
+         .iter()
+@@ -1002,7 +1010,7 @@ fn print_mode_fork_imports_a_global_session_into_this_cwd() {
+ fn print_mode_fork_rejects_empty_sources_and_conflicting_flags() {
+     let home = isolated_home();
+     // An empty session file, addressed by path.
+-    let sessions = home.path().join(".prime/agent/sessions");
++    let sessions = home.path().join(".prime").join("agent").join("sessions");
+     std::fs::create_dir_all(&sessions).expect("sessions dir");
+     let empty = sessions.join("empty-session.jsonl");
+     std::fs::write(&empty, "").expect("empty session");
+diff --git a/crates/pa-cli/tests/rpc_mode_e2e.rs b/crates/pa-cli/tests/rpc_mode_e2e.rs
+index e75875a..41fc5c9 100644
+--- a/crates/pa-cli/tests/rpc_mode_e2e.rs
++++ b/crates/pa-cli/tests/rpc_mode_e2e.rs
+@@ -871,6 +871,7 @@ fn rpc_failed_replacement_restarts_the_queue_pump() {
+ 
+ /// The 143 exit must not queue behind the replacement's settle.
+ #[test]
++#[cfg(unix)]
+ fn rpc_sigterm_during_replacement_exits_promptly() {
+     let script = json!({ "responses": [ { "text": "slow", "delayMs": 30_000 } ] });
+     let mut client = RpcChild::spawn(&["--mode", "rpc", "--no-session"], &script);
+diff --git a/crates/pa-core/src/agent_traces/tests.rs b/crates/pa-core/src/agent_traces/tests.rs
+index 988fc34..fca1130 100644
+--- a/crates/pa-core/src/agent_traces/tests.rs
++++ b/crates/pa-core/src/agent_traces/tests.rs
+@@ -269,7 +269,7 @@ async fn an_oversize_session_reports_the_limit() {
+     .expect("header");
+     drop(file);
+     std::fs::File::options()
+-        .append(true)
++        .write(true)
+         .open(&session)
+         .expect("reopen")
+         .set_len(MAX_TRACE_BYTES + 1)
+@@ -372,10 +372,12 @@ async fn the_parent_chain_resolves_the_trace_id() {
+     let child = fixture.session_dir.join("child.jsonl");
+     std::fs::write(
+         &child,
+-        format!(
+-            "{{\"type\":\"session\",\"id\":\"child-id\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"cwd\":\"/w\",\"parentSession\":\"{}\",\"version\":3}}\n",
+-            parent.display()
+-        ),
++        serde_json::json!({
++            "type": "session", "id": "child-id", "timestamp": "2026-01-01T00:00:00.000Z",
++            "cwd": "/w", "parentSession": parent, "version": 3
++        })
++        .to_string()
++            + "\n",
+     )
+     .expect("child file");
+     let header = read_trace_session_header(&child).expect("header");
+diff --git a/crates/pa-core/src/auth/resolve_config_value.rs b/crates/pa-core/src/auth/resolve_config_value.rs
+index 10e9323..27faefc 100644
+--- a/crates/pa-core/src/auth/resolve_config_value.rs
++++ b/crates/pa-core/src/auth/resolve_config_value.rs
+@@ -135,7 +135,10 @@ mod tests {
+         // not disable the credential for the process lifetime).
+         let counter = std::env::temp_dir().join(format!("pa-resolve-retry-{}", std::process::id()));
+         let _ = std::fs::remove_file(&counter);
+-        let command = format!("echo x >> {} ; exit 1", counter.display());
++        let command = format!(
++            "echo x >> '{}' ; exit 1",
++            counter.display().to_string().replace('\\', "/")
++        );
+         for _ in 0..3 {
+             assert_eq!(resolve_config_value(&format!("!{command}")), None);
+         }
+diff --git a/crates/pa-core/src/kernel/orphan_journal.rs b/crates/pa-core/src/kernel/orphan_journal.rs
+index 809e68c..70ade91 100644
+--- a/crates/pa-core/src/kernel/orphan_journal.rs
++++ b/crates/pa-core/src/kernel/orphan_journal.rs
+@@ -217,7 +217,11 @@ mod tests {
+         // `ps:<lstart>` - the same ladder TS `getProcessStartId` walks.
+         let id = get_process_start_id(std::process::id() as i32);
+         let id = id.expect("own pid must be readable");
+-        assert!(id.starts_with("proc:") || id.starts_with("ps:"));
++        if cfg!(windows) {
++            assert!(id.starts_with("win:"));
++        } else {
++            assert!(id.starts_with("proc:") || id.starts_with("ps:"));
++        }
+     }
+ 
+     #[test]
+diff --git a/crates/pa-core/src/packages/tests.rs b/crates/pa-core/src/packages/tests.rs
+index 105fd4e..14f670a 100644
+--- a/crates/pa-core/src/packages/tests.rs
++++ b/crates/pa-core/src/packages/tests.rs
+@@ -15,9 +15,17 @@ use crate::settings::SettingsManager;
+ /// Minimal npm replacement: bash script with the fixture paths embedded, so
+ /// parallel tests never share state. Logs every call to `<root>/npm.log`.
+ fn write_npm_shim(dir: &Path) -> PathBuf {
+-    let global_root = dir.join("global-root").display().to_string();
+-    let fixtures = dir.join("fixtures").display().to_string();
+-    let log = dir.join("npm.log").display().to_string();
++    let global_root = dir
++        .join("global-root")
++        .display()
++        .to_string()
++        .replace('\\', "/");
++    let fixtures = dir
++        .join("fixtures")
++        .display()
++        .to_string()
++        .replace('\\', "/");
++    let log = dir.join("npm.log").display().to_string().replace('\\', "/");
+     std::fs::create_dir_all(&global_root).unwrap();
+     std::fs::create_dir_all(Path::new(&fixtures).join("fake-pkg")).unwrap();
+ 
+@@ -34,7 +42,7 @@ fn write_npm_shim(dir: &Path) -> PathBuf {
+ 
+     let script = format!(
+         r#"#!/usr/bin/env bash
+-echo "npm $*" >> {log}
++echo "npm $*" >> "{log}"
+ CMD="$1"; shift
+ VIEW_NAME="$1"
+ SPECS=()
+@@ -123,7 +131,7 @@ impl Sandbox {
+         std::fs::write(
+             agent_dir.join("settings.json"),
+             serde_json::to_string_pretty(&serde_json::json!({
+-                "npmCommand": [npm_shim.display().to_string()]
++                "npmCommand": ["bash", npm_shim.display().to_string().replace('\\', "/")]
+             }))
+             .unwrap(),
+         )
+diff --git a/crates/pa-core/src/tools/golden_replay.rs b/crates/pa-core/src/tools/golden_replay.rs
+index 5e8f4fa..2baa484 100644
+--- a/crates/pa-core/src/tools/golden_replay.rs
++++ b/crates/pa-core/src/tools/golden_replay.rs
+@@ -32,7 +32,9 @@ fn corpus(name: &str) -> serde_json::Value {
+ 
+ /// Normalize temp paths to the forms the recorded corpus uses.
+ fn norm_string(s: &str, tmp: &str) -> String {
+-    let out = s.replace(&format!("{tmp}/"), "<TMP>/");
++    let out = s
++        .replace(&format!("{tmp}/"), "<TMP>/")
++        .replace(&format!("{tmp}\\"), "<TMP>/");
+     let re = regex_lite("golden-[A-Za-z0-9_]{6}");
+     let out = re.replace_all(&out, "golden-<ID>").into_owned();
+     let re = regex_lite(r"pi-(?:bash|output)-[0-9a-f]+\.log");
+@@ -63,7 +65,7 @@ fn tmp_root() -> &'static str {
+         std::env::temp_dir()
+             .to_str()
+             .expect("utf-8 tmpdir")
+-            .trim_end_matches('/')
++            .trim_end_matches(['/', '\\'])
+             .to_string()
+     })
+ }
+@@ -91,9 +93,13 @@ fn make_fixture(case: &serde_json::Value) -> (tempfile::TempDir, String) {
+     if let Some(commands) = case.get("fixture").and_then(serde_json::Value::as_array) {
+         for command in commands {
+             let command = command.as_str().expect("fixture command");
+-            let status = std::process::Command::new("/bin/bash")
+-                .arg("-c")
++            let shell = crate::tools::shell_utils::get_shell_config(None).unwrap();
++            let status = std::process::Command::new(&shell.shell)
++                .args(&shell.args)
+                 .arg(command)
++                // The corpus commits use UTC dates and untranslated LF blobs.
++                .env("TZ", "UTC")
++                .env("GIT_CONFIG_NOSYSTEM", "1")
+                 .current_dir(dir.path())
+                 .status()
+                 .expect("run fixture command");
+@@ -217,6 +223,21 @@ async fn golden_bash_group_matches_ts() {
+             continue;
+         }
+         let (dir, dir_path) = make_fixture(case);
++        let command = case["command"].as_str().expect("command");
++        // The frozen Unix corpus uses python3 and LF output. Windows Python's
++        // launcher and newline defaults differ; the tested Python code does not.
++        let command = if cfg!(windows) {
++            command.strip_prefix("python3 -c \"").map_or_else(
++                || command.to_string(),
++                |code| {
++                    format!(
++                        "python -X utf8 -c \"import sys; sys.stdout.reconfigure(newline='\\n'); {code}"
++                    )
++                },
++            )
++        } else {
++            command.to_string()
++        };
+         if case
+             .get("envBypass")
+             .and_then(serde_json::Value::as_bool)
+@@ -227,7 +248,7 @@ async fn golden_bash_group_matches_ts() {
+         let result = bash::execute_bash(
+             &dir_path,
+             &BashToolOptions::default(),
+-            case["command"].as_str().expect("command"),
++            &command,
+             case.get("timeout").and_then(serde_json::Value::as_f64),
+             case.get("allowDestructiveGit")
+                 .and_then(serde_json::Value::as_bool),
+diff --git a/crates/pa-core/src/tools/path_utils.rs b/crates/pa-core/src/tools/path_utils.rs
+index 9a9d3d8..679c2b2 100644
+--- a/crates/pa-core/src/tools/path_utils.rs
++++ b/crates/pa-core/src/tools/path_utils.rs
+@@ -502,22 +502,32 @@ mod tests {
+ 
+     #[test]
+     fn expand_tilde() {
+-        assert_eq!(expand_path_platform("~", Some("/home/u")), "/home/u");
++        let home = if cfg!(windows) {
++            r"C:\home\u"
++        } else {
++            "/home/u"
++        };
++        let absolute = if cfg!(windows) { r"C:\abs" } else { "/abs" };
++        assert_eq!(expand_path_platform("~", Some(home)), home);
+         assert_eq!(
+-            expand_path_platform("~/sub/x", Some("/home/u")),
+-            "/home/u/sub/x"
++            expand_path_platform("~/sub/x", Some(home)),
++            Path::new(home).join("sub").join("x").to_string_lossy()
+         );
+-        assert_eq!(expand_path_platform("/abs", Some("/home/u")), "/abs");
+-        assert_eq!(expand_path_platform("rel", Some("/home/u")), "rel");
++        assert_eq!(expand_path_platform(absolute, Some(home)), absolute);
++        assert_eq!(expand_path_platform("rel", Some(home)), "rel");
+         assert_eq!(
+-            expand_path_platform("~/\u{00A0}x", Some("/home/u")),
+-            "/home/u/ x"
++            expand_path_platform("~/\u{00A0}x", Some(home)),
++            Path::new(home).join(" x").to_string_lossy()
+         );
+     }
+ 
+     #[test]
+     fn strips_at_prefix() {
+-        assert_eq!(expand_path_platform("@~/f", Some("/h")), "/h/f");
++        let home = if cfg!(windows) { r"C:\h" } else { "/h" };
++        assert_eq!(
++            expand_path_platform("@~/f", Some(home)),
++            Path::new(home).join("f").to_string_lossy()
++        );
+     }
+ 
+     /// POSIX dispatcher semantics; the win32 sibling lives below (the dispatcher is
+diff --git a/crates/pa-core/src/tools/shell_utils.rs b/crates/pa-core/src/tools/shell_utils.rs
+index 0b27d3c..872bfbf 100644
+--- a/crates/pa-core/src/tools/shell_utils.rs
++++ b/crates/pa-core/src/tools/shell_utils.rs
+@@ -112,7 +112,14 @@ mod tests {
+     #[test]
+     fn shell_config_prefers_bin_bash() {
+         let cfg = get_shell_config(None).unwrap();
+-        assert_eq!(cfg.shell, "/bin/bash");
++        if cfg!(windows) {
++            assert_eq!(
++                std::path::Path::new(&cfg.shell).file_name().unwrap(),
++                "bash.exe"
++            );
++        } else {
++            assert_eq!(cfg.shell, "/bin/bash");
++        }
+         assert_eq!(cfg.args, vec!["-c".to_string()]);
+     }
+ 
+@@ -121,7 +128,13 @@ mod tests {
+         let env = get_shell_env();
+         assert_eq!(env.get("GIT_TERMINAL_PROMPTS").unwrap(), "0");
+         assert_eq!(env.get("PAGER").unwrap(), "cat");
+-        assert!(env.get("PATH").unwrap().contains("/bin"));
++        let path = env
++            .iter()
++            .find(|(name, _)| name.eq_ignore_ascii_case("path"))
++            .unwrap()
++            .1;
++        assert!(std::env::split_paths(path)
++            .any(|directory| directory == std::path::Path::new(&get_bin_dir())));
+     }
+ 
+     #[test]
+diff --git a/crates/pa-core/tests/golden/system_prompt.rs b/crates/pa-core/tests/golden/system_prompt.rs
+index b28c8d7..a68e560 100644
+--- a/crates/pa-core/tests/golden/system_prompt.rs
++++ b/crates/pa-core/tests/golden/system_prompt.rs
+@@ -39,7 +39,21 @@ fn fixture_prompt() -> (String, usize) {
+         .skills
+         .sort_by(|left, right| left.name.cmp(&right.name));
+     let count = loaded.skills.len();
+-    let prompt = build_system_prompt(&BuildSystemPromptOptions {
++    let skill_paths: Vec<_> = loaded
++        .skills
++        .iter()
++        .map(|skill| {
++            let relative = skill.file_path.strip_prefix(&skills_dir).unwrap();
++            (
++                skill.file_path.display().to_string(),
++                format!(
++                    "<skills-dir>/{}",
++                    relative.to_string_lossy().replace('\\', "/")
++                ),
++            )
++        })
++        .collect();
++    let mut prompt = build_system_prompt(&BuildSystemPromptOptions {
+         cwd: "/w".to_string(),
+         messages_path: Some("/w/sessions/fixture-session.jsonl".to_string()),
+         skills: loaded.skills,
+@@ -47,9 +61,12 @@ fn fixture_prompt() -> (String, usize) {
+         allow_recursion: Some(true),
+         rlm_depth: Some(0),
+         ..Default::default()
+-    })
+-    .replace(skills_dir.to_string_lossy().as_ref(), "<skills-dir>");
+-    let normalized = regex_lite_replace(&prompt);
++    });
++    for (path, normalized) in skill_paths {
++        prompt = prompt.replace(&path, &normalized);
++    }
++    // Git checkout line endings do not change the prompt's content.
++    let normalized = regex_lite_replace(&prompt.replace("\r\n", "\n"));
+     (normalized, count)
+ }
+ 
+diff --git a/crates/pa-core/tests/kernel_prewarm.rs b/crates/pa-core/tests/kernel_prewarm.rs
+index 063df56..44b9b42 100644
+--- a/crates/pa-core/tests/kernel_prewarm.rs
++++ b/crates/pa-core/tests/kernel_prewarm.rs
+@@ -221,6 +221,7 @@ async fn prewarmed_kernel_lands_compaction_notice_without_tool_use() {
+         }),
+         "the notice must be durable"
+     );
++    engine.dispose_kernel().await;
+ }
+ 
+ /// The TS depth gate: subagent sessions (rlmDepth > 0) keep the lazy
+@@ -294,6 +295,7 @@ async fn subagent_sessions_stay_lazy_despite_the_prewarm_flag() {
+         );
+         tokio::time::sleep(Duration::from_millis(500)).await;
+     }
++    engine.dispose_kernel().await;
+ }
+ 
+ /// The live opt-out env is process-wide: the counters' switch test scrubs
+@@ -426,4 +428,5 @@ async fn an_off_switch_at_creation_keeps_the_prewarm_window_uncounted() {
+         "the off-window prewarm boot never counted:\n{:?}",
+         ended.properties
+     );
++    engine.dispose_kernel().await;
+ }
+diff --git a/crates/pa-daemon/src/agent_engine/tests/abort.rs b/crates/pa-daemon/src/agent_engine/tests/abort.rs
+index 8c981fc..427f768 100644
+--- a/crates/pa-daemon/src/agent_engine/tests/abort.rs
++++ b/crates/pa-daemon/src/agent_engine/tests/abort.rs
+@@ -10,22 +10,34 @@ fn abort_in_flight_turn_cancels_a_mid_provider_wait() {
+         .lock()
+         .unwrap_or_else(std::sync::PoisonError::into_inner);
+     let dir = tempfile::TempDir::new().unwrap();
++    let script = json!({
++        "responses": [{ "text": "held reply", "delayMs": 60000 }],
++    });
++    let parsed = pa_ai::faux::script::parse_faux_script(&script).unwrap();
++    let registration = pa_ai::faux::script::register_faux_provider_from_script(&parsed);
++    let agent_dir = dir.path().join("agent");
++    std::fs::create_dir_all(&agent_dir).unwrap();
++    std::fs::write(
++        agent_dir.join("models.json"),
++        json!({"providers": {"faux": {
++            "api": "faux",
++            "baseUrl": "http://127.0.0.1:0",
++            "apiKey": "sk-faux",
++            "models": [registration.get_model()],
++        }}})
++        .to_string(),
++    )
++    .unwrap();
+     let engine = AgentSessionEngine::new(AgentEngineConfig {
+         cwd: dir.path().to_path_buf(),
+-        agent_dir: dir.path().join("agent"),
+-        provider: None,
+-        model: None,
++        agent_dir,
++        provider: Some("faux".to_string()),
++        model: Some("faux-1".to_string()),
+         api_key: None,
+         thinking: None,
+         session_dir: None,
+         session_file: None,
+-        faux_script: Some(
+-            json!({
+-                "engine": "faux",
+-                "responses": [{ "text": "held reply", "delayMs": 60000 }],
+-            })
+-            .to_string(),
+-        ),
++        faux_script: None,
+         supervisor_link: None,
+         telemetry_disabled: None,
+         cron_store: None,
+@@ -54,19 +66,15 @@ fn abort_in_flight_turn_cancels_a_mid_provider_wait() {
+             },
+         );
+     });
+-    // Wait until the turn is live, so the abort lands mid-provider-wait.
++    // The request counter distinguishes the provider wait from early turn admission.
+     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+     loop {
+-        let agent = engine.turn_agent.lock().expect("turn agent lock").clone();
+-        if let Some(agent) = agent {
+-            let state = engine.runtime.block_on(agent.state());
+-            if state.is_streaming {
+-                break;
+-            }
++        if registration.call_count() > 0 {
++            break;
+         }
+         assert!(
+             std::time::Instant::now() < deadline,
+-            "the turn never started streaming"
++            "the provider never started streaming"
+         );
+         std::thread::sleep(std::time::Duration::from_millis(25));
+     }
+diff --git a/crates/pa-daemon/src/agent_engine/tests/autonomous.rs b/crates/pa-daemon/src/agent_engine/tests/autonomous.rs
+index 9f2b974..9531829 100644
+--- a/crates/pa-daemon/src/agent_engine/tests/autonomous.rs
++++ b/crates/pa-daemon/src/agent_engine/tests/autonomous.rs
+@@ -76,10 +76,7 @@ fn autonomous_gate_pass_and_failure_drive_the_loop() {
+         .unwrap_or_else(std::sync::PoisonError::into_inner);
+     // The gate passes only on its second run (a counter file in the cwd).
+     let dir = tempfile::TempDir::new().unwrap();
+-    let gate = format!(
+-        "n=$(cat {0}/cnt 2>/dev/null || echo 0); echo $((n+1)) > {0}/cnt; [ $n -ge 1 ]",
+-        dir.path().display()
+-    );
++    let gate = "n=$(cat cnt 2>/dev/null || echo 0); echo $((n+1)) > cnt; [ $n -ge 1 ]".to_string();
+     let engine = std::sync::Arc::new(
+         AgentSessionEngine::new(AgentEngineConfig {
+             cwd: dir.path().to_path_buf(),
+diff --git a/crates/pa-daemon/src/rlm_children/usage_emit_tests.rs b/crates/pa-daemon/src/rlm_children/usage_emit_tests.rs
+index b718fb5..aa715dd 100644
+--- a/crates/pa-daemon/src/rlm_children/usage_emit_tests.rs
++++ b/crates/pa-daemon/src/rlm_children/usage_emit_tests.rs
+@@ -189,9 +189,9 @@ async fn reseed_lists_live_ledger_children_settled_and_bills_only_after_a_delive
+         .unwrap();
+     }
+     let spawn = |child_id: &str, parent: &str, child: &str| {
+-        format!(
+-            r#"{{"v":1,"op":"spawn","at":"2026-09-30T00:00:00Z","childId":"{child_id}","parent":"{parent}","child":"{child}","depth":1,"name":"{child_id}"}}"#
+-        )
++        json!({"v":1,"op":"spawn","at":"2026-09-30T00:00:00Z",
++            "childId":child_id,"parent":parent,"child":child,"depth":1,"name":child_id})
++        .to_string()
+     };
+     let ledger_path = crate::rlm_ledger::rlm_ledger_path(&agent, &daemon_sessions);
+     std::fs::create_dir_all(ledger_path.parent().expect("ledger dir")).unwrap();
+@@ -204,9 +204,9 @@ async fn reseed_lists_live_ledger_children_settled_and_bills_only_after_a_delive
+             spawn("sub-b", &parent_one, &child_two).as_str(),
+             spawn("sub-legacy", &parent_one, &child_legacy).as_str(),
+             spawn("sub-c", &parent_one, &child_three).as_str(),
+-            format!(
+-                r#"{{"v":1,"op":"delete","at":"2026-09-30T00:00:01Z","childId":"sub-c","child":"{child_three}","reason":"user"}}"#
+-            )
++            json!({"v":1,"op":"delete","at":"2026-09-30T00:00:01Z",
++                "childId":"sub-c","child":child_three,"reason":"user"})
++            .to_string()
+             .as_str(),
+             spawn("sub-d", &parent_two, &child_four).as_str(),
+         ]
+diff --git a/crates/pa-daemon/src/rlm_ledger/tests.rs b/crates/pa-daemon/src/rlm_ledger/tests.rs
+index 5738d8e..943c3a2 100644
+--- a/crates/pa-daemon/src/rlm_ledger/tests.rs
++++ b/crates/pa-daemon/src/rlm_ledger/tests.rs
+@@ -28,9 +28,11 @@ fn legacy_registry_probe_reads_the_header_line_bounded() {
+     fs::write(&parent, content).unwrap();
+     let registry = legacy_registry_path(&parent).expect("registry path");
+     assert!(
+-        registry
+-            .to_string_lossy()
+-            .ends_with("session-artifacts/p1/rlm-subagents.jsonl"),
++        registry.ends_with(
++            Path::new("session-artifacts")
++                .join("p1")
++                .join("rlm-subagents.jsonl")
++        ),
+         "the header id resolves without reading the padded tail"
+     );
+ 
+@@ -57,9 +59,11 @@ fn legacy_registry_probe_resolves_a_readable_header_over_a_corrupt_tail() {
+     fs::write(&parent, bytes).unwrap();
+     let registry = legacy_registry_path(&parent).expect("registry path over a corrupt tail");
+     assert!(
+-        registry
+-            .to_string_lossy()
+-            .ends_with("session-artifacts/p1/rlm-subagents.jsonl"),
++        registry.ends_with(
++            Path::new("session-artifacts")
++                .join("p1")
++                .join("rlm-subagents.jsonl")
++        ),
+         "a torn-write tail no longer masks the readable header"
+     );
+ }
+@@ -250,8 +254,8 @@ fn moved_edge_paths_resolve_through_the_session_id() {
+     assert!(ledger.live_edges().unwrap().is_empty());
+     let raw = ledger.edges(false).unwrap();
+     assert_eq!(raw.len(), 1);
+-    assert_eq!(raw[0].parent, recorded_parent);
+-    assert_eq!(raw[0].child, recorded_child);
++    assert_eq!(raw[0].parent, canonical(Path::new(recorded_parent)));
++    assert_eq!(raw[0].child, canonical(Path::new(recorded_child)));
+ }
+ 
+ #[test]
+@@ -317,11 +321,11 @@ fn unknown_op_records_are_skipped_forward_compatible() {
+     fs::write(
+         &path,
+         format!(
+-            "{{\"v\":1,\"op\":\"meta\",\"at\":\"t\",\"sessionsDir\":\"x\"}}\n\
+-             {{\"v\":1,\"op\":\"future\",\"at\":\"t\"}}\n\
+-             {{\"v\":1,\"op\":\"spawn\",\"at\":\"t\",\"childId\":\"sub-1\",\"parent\":\"{}\",\"child\":\"{}\",\"depth\":1,\"name\":\"w\"}}\n",
+-            parent.to_string_lossy(),
+-            parent.to_string_lossy().replace("p.jsonl", "c.jsonl"),
++            "{}\n{}\n{}\n",
++            json!({"v":1,"op":"meta","at":"t","sessionsDir":"x"}),
++            json!({"v":1,"op":"future","at":"t"}),
++            json!({"v":1,"op":"spawn","at":"t","childId":"sub-1",
++                "parent":parent,"child":dir.join("c.jsonl"),"depth":1,"name":"w"}),
+         ),
+     )
+     .unwrap();
+@@ -347,10 +351,10 @@ fn seeds_from_legacy_registries_once_and_atomically() {
+     fs::write(&child, "{}").unwrap();
+     fs::write(
+         artifacts.join("rlm-subagents.jsonl"),
+-        format!(
+-            "{{\"type\":\"rlm_subagent\",\"childId\":\"sub-9\",\"sessionName\":\"w\",\"sessionFile\":\"{}\",\"rlmDepth\":1,\"status\":\"completed\",\"createdAt\":1}}\n",
+-            child.to_string_lossy()
+-        ),
++        json!({"type":"rlm_subagent","childId":"sub-9","sessionName":"w",
++            "sessionFile":child,"rlmDepth":1,"status":"completed","createdAt":1})
++        .to_string()
++            + "\n",
+     )
+     .unwrap();
+     let ledger = ledger_for(&dir);
+diff --git a/crates/pa-daemon/src/session_store_info_tests.rs b/crates/pa-daemon/src/session_store_info_tests.rs
+index 4feece8..e9e863e 100644
+--- a/crates/pa-daemon/src/session_store_info_tests.rs
++++ b/crates/pa-daemon/src/session_store_info_tests.rs
+@@ -648,9 +648,15 @@ fn zero_usage_states_are_capped_by_count_not_only_the_usage_budget() {
+         let info = read_session_info(&path).unwrap();
+         assert_eq!(info.message_count, 1);
+     }
+-    // The cache really populated past the cap and stayed capped: LRU-first eviction
+-    // dropped the earliest-written files, the latest stay resident.
+     let cache = super::session_info_cache().lock().unwrap();
++    // Only Unix supplies the metadata identity this scanner certifies. Other
++    // platforms still return fresh results and keep weak generations out of cache.
++    if !cfg!(unix) {
++        assert!(cache.states.is_empty());
++        assert!(cache.order.is_empty());
++        assert!(cache.ordinal_by_path.is_empty());
++        return;
++    }
+     assert_eq!(
+         super::SESSION_SCAN_MAX_CACHED_STATES,
+         cache.states.len(),
+diff --git a/crates/pa-daemon/src/supervisor/tests.rs b/crates/pa-daemon/src/supervisor/tests.rs
+index a45dff7..4d7acc0 100644
+--- a/crates/pa-daemon/src/supervisor/tests.rs
++++ b/crates/pa-daemon/src/supervisor/tests.rs
+@@ -1732,7 +1732,11 @@ async fn a_ledger_delete_never_tombstones_an_unrelated_edge_sharing_the_child_id
+         1,
+         "the unrelated edge sharing the child id must stay live: {live:?}"
+     );
+-    assert_eq!(live[0].child, file_b, "the survivor is child-b's edge");
++    assert_eq!(
++        live[0].child,
++        crate::lease::canonical_session_path(Path::new(&file_b)).to_string_lossy(),
++        "the survivor is child-b's edge"
++    );
+ }
+ 
+ #[tokio::test]
+diff --git a/crates/pa-daemon/src/supervisor_roster_seed.rs b/crates/pa-daemon/src/supervisor_roster_seed.rs
+index 05057f8..42ea4de 100644
+--- a/crates/pa-daemon/src/supervisor_roster_seed.rs
++++ b/crates/pa-daemon/src/supervisor_roster_seed.rs
+@@ -887,7 +887,9 @@ pub(crate) mod tests {
+         );
+         assert_eq!(
+             immediate.summary["cwd"],
+-            child_file.parent().unwrap().to_string_lossy().to_string(),
++            crate::lease::canonical_session_path(child_file.parent().unwrap())
++                .to_string_lossy()
++                .to_string(),
+             "the edge-only row carries the dirname fallback"
+         );
+         assert!(immediate.summary.get("model").is_none());
+diff --git a/crates/pa-daemon/src/worker/tests/abort_boundary_tests.rs b/crates/pa-daemon/src/worker/tests/abort_boundary_tests.rs
+index fe42266..e06eb34 100644
+--- a/crates/pa-daemon/src/worker/tests/abort_boundary_tests.rs
++++ b/crates/pa-daemon/src/worker/tests/abort_boundary_tests.rs
+@@ -117,7 +117,7 @@ async fn abort_and_send_queued_delivers_the_parked_queue_at_the_boundary() {
+     let created = worker
+         .dispatch(
+             "create",
+-            &json!({ "noSession": true, "cwd": "/tmp", "name": "abort-send" }),
++            &json!({ "noSession": true, "cwd": dir.to_string_lossy(), "name": "abort-send" }),
+         )
+         .await;
+     assert!(created.success, "create failed: {created:?}");
+@@ -249,6 +249,8 @@ async fn abort_and_send_queued_delivers_the_parked_queue_at_the_boundary() {
+         !worker.core.lock().unwrap().queued_input_suspended,
+         "the abort-and-send suspension never cleared"
+     );
++    let closed = worker.dispatch("shutdown", &json!({})).await;
++    assert!(closed.success, "shutdown failed: {closed:?}");
+     let _ = std::fs::remove_dir_all(&dir);
+ }
+ 
+@@ -302,7 +304,7 @@ async fn abort_and_send_queued_with_only_follow_ups_starts_the_oldest() {
+     let created = worker
+         .dispatch(
+             "create",
+-            &json!({ "noSession": true, "cwd": "/tmp", "name": "abort-fu" }),
++            &json!({ "noSession": true, "cwd": dir.to_string_lossy(), "name": "abort-fu" }),
+         )
+         .await;
+     assert!(created.success, "create failed: {created:?}");
+@@ -463,6 +465,8 @@ async fn abort_and_send_queued_with_only_follow_ups_starts_the_oldest() {
+             "the resume never cleared the suspension"
+         );
+     }
++    let closed = worker.dispatch("shutdown", &json!({})).await;
++    assert!(closed.success, "shutdown failed: {closed:?}");
+     let _ = std::fs::remove_dir_all(&dir);
+ }
+ 
+diff --git a/crates/pa-daemon/src/worker/tests/goal_tests.rs b/crates/pa-daemon/src/worker/tests/goal_tests.rs
+index 5c2b026..c4e8d8e 100644
+--- a/crates/pa-daemon/src/worker/tests/goal_tests.rs
++++ b/crates/pa-daemon/src/worker/tests/goal_tests.rs
+@@ -221,7 +221,7 @@ async fn goal_turn_end_loop_runs_to_completion() {
+     let created = worker
+         .dispatch(
+             "create",
+-            &json!({ "noSession": true, "cwd": "/tmp", "name": "goal-loop" }),
++            &json!({ "noSession": true, "cwd": dir.to_string_lossy(), "name": "goal-loop" }),
+         )
+         .await;
+     assert!(created.success, "create failed: {created:?}");
+@@ -314,6 +314,8 @@ async fn goal_turn_end_loop_runs_to_completion() {
+         )
+         .await;
+     assert!(plain.success, "a post-goal prompt failed: {plain:?}");
++    let closed = worker.dispatch("shutdown", &json!({})).await;
++    assert!(closed.success, "shutdown failed: {closed:?}");
+ }
+ 
+ #[allow(clippy::await_holding_lock)] // the faux registry is process-global: the guard must span the async flow
+diff --git a/crates/pa-daemon/src/worker/tests/kill_broadcast_tests.rs b/crates/pa-daemon/src/worker/tests/kill_broadcast_tests.rs
+index f564b24..396a8a5 100644
+--- a/crates/pa-daemon/src/worker/tests/kill_broadcast_tests.rs
++++ b/crates/pa-daemon/src/worker/tests/kill_broadcast_tests.rs
+@@ -32,7 +32,7 @@ async fn aborted_turn_row_broadcasts_and_persists_through_the_worker_gate() {
+     let created = worker
+         .dispatch(
+             "create",
+-            &json!({ "noSession": true, "cwd": "/tmp", "name": "aborted-row" }),
++            &json!({ "noSession": true, "cwd": dir.to_string_lossy(), "name": "aborted-row" }),
+         )
+         .await;
+     assert!(created.success, "create failed: {created:?}");
+@@ -174,6 +174,8 @@ async fn aborted_turn_row_broadcasts_and_persists_through_the_worker_gate() {
+         goal_before["continuationsUsed"]
+     );
+     assert_eq!(goal_after["objective"], goal_before["objective"]);
++    let closed = worker.dispatch("shutdown", &json!({})).await;
++    assert!(closed.success, "shutdown failed: {closed:?}");
+ }
+ 
+ /// The job's cancel is durable and the file archives, so no scheduled wake
+@@ -281,7 +283,7 @@ async fn kill_cancels_a_mid_provider_wait_turn_and_surfaces_the_aborted_row() {
+     let created = worker
+         .dispatch(
+             "create",
+-            &json!({ "noSession": true, "cwd": "/tmp", "name": "kill-path" }),
++            &json!({ "noSession": true, "cwd": dir.to_string_lossy(), "name": "kill-path" }),
+         )
+         .await;
+     assert!(created.success, "create failed: {created:?}");
+@@ -425,7 +427,7 @@ async fn compact_interrupt_swallows_the_aborted_row() {
+     let created = worker
+         .dispatch(
+             "create",
+-            &json!({ "noSession": true, "cwd": "/tmp", "name": "compact-abort" }),
++            &json!({ "noSession": true, "cwd": dir.to_string_lossy(), "name": "compact-abort" }),
+         )
+         .await;
+     assert!(created.success, "create failed: {created:?}");
+@@ -494,4 +496,6 @@ async fn compact_interrupt_swallows_the_aborted_row() {
+         aborted_store_rows, 0,
+         "the compact path never persists the aborted row"
+     );
++    let closed = worker.dispatch("shutdown", &json!({})).await;
++    assert!(closed.success, "shutdown failed: {closed:?}");
+ }
+diff --git a/crates/pa-daemon/src/worker/turn_stream_tests/queue.rs b/crates/pa-daemon/src/worker/turn_stream_tests/queue.rs
+index b55ef96..e8fe804 100644
+--- a/crates/pa-daemon/src/worker/turn_stream_tests/queue.rs
++++ b/crates/pa-daemon/src/worker/turn_stream_tests/queue.rs
+@@ -440,7 +440,7 @@ async fn abort_and_send_queued_delivers_the_steering_batch_then_the_follow_ups()
+     let created = worker
+         .dispatch(
+             "create",
+-            &json!({ "noSession": true, "cwd": "/tmp", "name": "abort-send-family" }),
++            &json!({ "noSession": true, "cwd": dir.to_string_lossy(), "name": "abort-send-family" }),
+         )
+         .await;
+     assert!(created.success, "create failed: {created:?}");
+@@ -598,6 +598,8 @@ async fn abort_and_send_queued_delivers_the_steering_batch_then_the_follow_ups()
+             "the default mode is the batched-at-the-boundary product default"
+         );
+     }
++    let closed = worker.dispatch("shutdown", &json!({})).await;
++    assert!(closed.success, "shutdown failed: {closed:?}");
+     let _ = std::fs::remove_dir_all(&dir);
+ }
+ 
+@@ -631,7 +633,7 @@ async fn abort_and_send_queued_acks_before_the_follow_up_delivery() {
+     let created = worker
+         .dispatch(
+             "create",
+-            &json!({ "noSession": true, "cwd": "/tmp", "name": "abort-ack" }),
++            &json!({ "noSession": true, "cwd": dir.to_string_lossy(), "name": "abort-ack" }),
+         )
+         .await;
+     assert!(created.success, "create failed: {created:?}");
+@@ -761,5 +763,7 @@ async fn abort_and_send_queued_acks_before_the_follow_up_delivery() {
+         ],
+         "the follow-up row survived the bare abort exactly once: {texts:?}"
+     );
++    let closed = worker.dispatch("shutdown", &json!({})).await;
++    assert!(closed.success, "shutdown failed: {closed:?}");
+     let _ = std::fs::remove_dir_all(&dir);
+ }
+diff --git a/crates/pa-tui/src/session_open_error.rs b/crates/pa-tui/src/session_open_error.rs
+index 8847b31..162d48e 100644
+--- a/crates/pa-tui/src/session_open_error.rs
++++ b/crates/pa-tui/src/session_open_error.rs
+@@ -272,7 +272,12 @@ mod tests {
+             file.display()
+         )));
+         assert!(text.contains("Holder: session holder-1 \u{201c}lane work\u{201d} \u{b7} cwd /w"));
+-        assert!(text.contains("Attach to it instead: prime-agent --resume 'holder-1'"));
++        let resume = if cfg!(windows) {
++            "Attach to it instead: prime-agent --resume \"holder-1\""
++        } else {
++            "Attach to it instead: prime-agent --resume 'holder-1'"
++        };
++        assert!(text.contains(resume));
+         assert!(text.contains("the file unlocks when that session exits"));
+     }
+ 
+@@ -285,9 +290,12 @@ mod tests {
+             model: None,
+         };
+         let text = already_active_error(&holder, Path::new("/s/a.jsonl"));
+-        assert!(text.contains(
++        let resume = if cfg!(windows) {
++            "Holder: session live-9\nAttach to it instead: prime-agent --resume \"live-9\""
++        } else {
+             "Holder: session live-9\nAttach to it instead: prime-agent --resume 'live-9'"
+-        ));
++        };
++        assert!(text.contains(resume));
+     }
+ 
+     #[test]
+@@ -381,10 +389,12 @@ mod decorate_tests {
+             text.contains("Holder: session abc123 \u{201c}lane work\u{201d} \u{b7} cwd /w"),
+             "{text}"
+         );
+-        assert!(
+-            text.contains("Attach instead: prime-agent --resume 'abc123'"),
+-            "{text}"
+-        );
++        let resume = if cfg!(windows) {
++            "Attach instead: prime-agent --resume \"abc123\""
++        } else {
++            "Attach instead: prime-agent --resume 'abc123'"
++        };
++        assert!(text.contains(resume), "{text}");
+     }
+ 
+     /// A session-id holder the roster cannot see gets guidance that never
+@@ -414,8 +424,7 @@ mod decorate_tests {
+     /// break the suggestion (or smuggle a second argument into it).
+     #[test]
+     fn the_resume_suggestion_quotes_a_hostile_holder_id() {
+-        // The Some arm names the roster-identified id in the suggested command: the
+-        // hostile id must ride single-quoted.
++        // The holder ID must be quoted for the platform's command parser.
+         let holder = SessionHolder {
+             id: "245ddb974b6d; rm -rf /".to_string(),
+             name: None,
+@@ -425,10 +434,12 @@ mod decorate_tests {
+         let original = "Session is already active in 245ddb974b6d; rm -rf /: /tmp/s.jsonl";
+         let text =
+             decorate_interactive_refusal(original, Some(holder.clone()), "245ddb974b6d; rm -rf /");
+-        assert!(
+-            text.contains("--resume '245ddb974b6d; rm -rf /'"),
+-            "the hostile id rides single-quoted: {text}"
+-        );
++        let resume = if cfg!(windows) {
++            "--resume \"245ddb974b6d; rm -rf /\""
++        } else {
++            "--resume '245ddb974b6d; rm -rf /'"
++        };
++        assert!(text.contains(resume), "the hostile id is quoted: {text}");
+         assert!(
+             !text.contains("--resume 245ddb974b6d;"),
+             "no unquoted splice survives: {text}"
+@@ -436,16 +447,17 @@ mod decorate_tests {
+         // The print-mode refusal quotes the same way.
+         let printed = already_active_error(&holder, Path::new("/tmp/s.jsonl"));
+         assert!(
+-            printed.contains("--resume '245ddb974b6d; rm -rf /'"),
++            printed.contains(resume),
+             "the print-mode line quotes too: {printed}"
+         );
+         // The embedded-quote escape: an id carrying a single quote still round-trips as ONE
+         // argument.
+-        assert_eq!(
+-            quoted_resume_arg("it's"),
+-            "--resume 'it'\\''s'",
+-            "the POSIX escape form"
+-        );
++        let apostrophe = if cfg!(windows) {
++            "--resume \"it's\""
++        } else {
++            "--resume 'it'\\''s'"
++        };
++        assert_eq!(quoted_resume_arg("it's"), apostrophe);
+         #[cfg(windows)]
+         {
+             // The cmd separator stays ^-escaped with a SINGLE caret (the caret

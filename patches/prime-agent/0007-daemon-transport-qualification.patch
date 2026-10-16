@@ -1,0 +1,543 @@
+diff --git a/crates/pa-cli/tests/acp_mode_e2e.rs b/crates/pa-cli/tests/acp_mode_e2e.rs
+index 41ffadd..0163d6d 100644
+--- a/crates/pa-cli/tests/acp_mode_e2e.rs
++++ b/crates/pa-cli/tests/acp_mode_e2e.rs
+@@ -34,7 +34,7 @@ struct AcpChild {
+     /// dropping the tempdir deletes it and the child's `current_dir` fails.
+     /// `None` for a second child sharing another child's home.
+     _home: Option<tempfile::TempDir>,
+-    spawn_stderr: Option<std::process::ChildStderr>,
++    spawn_stderr: Option<std::thread::JoinHandle<String>>,
+     /// The sandboxed supervisor socket the child spawned: the drop shuts
+     /// the supervisor down with it (a killed child must not leak the
+     /// supervisor into later test binaries).
+@@ -53,7 +53,14 @@ impl AcpChild {
+     ) -> AcpChild {
+         let stdin = child.stdin.take().expect("stdin piped");
+         let stdout = child.stdout.take().expect("stdout piped");
+-        let stderr = child.stderr.take().expect("stderr piped");
++        let mut stderr = child.stderr.take().expect("stderr piped");
++        // Drain while the child runs: Windows pipes can fill before teardown.
++        let stderr_reader = std::thread::spawn(move || {
++            use std::io::Read;
++            let mut text = String::new();
++            let _ = stderr.read_to_string(&mut text);
++            text
++        });
+         let (tx, lines) = channel();
+         std::thread::spawn(move || {
+             let reader = BufReader::new(stdout);
+@@ -74,7 +81,7 @@ impl AcpChild {
+             lines,
+             next_id: 0,
+             _home: home,
+-            spawn_stderr: Some(stderr),
++            spawn_stderr: Some(stderr_reader),
+             socket,
+         }
+     }
+@@ -257,15 +264,14 @@ impl Drop for AcpChild {
+     fn drop(&mut self) {
+         let _ = self.child.kill();
+         let _ = self.child.wait();
+-        if let Some(mut stderr) = self.spawn_stderr.take() {
+-            use std::io::Read;
+-            let mut text = String::new();
+-            let _ = stderr.read_to_string(&mut text);
++        // On Windows the supervisor can inherit this pipe. Close it before waiting for EOF.
++        shutdown_sandboxed_daemon(&self.socket);
++        if let Some(stderr_reader) = self.spawn_stderr.take() {
++            let text = stderr_reader.join().unwrap_or_default();
+             if !text.is_empty() {
+                 eprintln!("ACP child stderr: {text}");
+             }
+         }
+-        shutdown_sandboxed_daemon(&self.socket);
+     }
+ }
+ 
+@@ -464,7 +470,7 @@ fn acp_cwd_mismatch_is_reported_not_adopted() {
+     // (the value is tempdir-random).
+     assert!(meta["actual"]
+         .as_str()
+-        .is_some_and(|actual| actual.starts_with(std::path::MAIN_SEPARATOR)));
++        .is_some_and(|actual| std::path::Path::new(actual).is_absolute()));
+ }
+ 
+ #[test]
+@@ -834,8 +840,27 @@ fn acp_daemon_attached_eof_teardown_clears_the_connection_mcp_servers() {
+ #[test]
+ fn acp_mode_daemon_unreachable_exits_1_without_fallback() {
+     let home = tempfile::TempDir::new().unwrap();
++    #[cfg(unix)]
+     let socket = home.path().join("daemon.sock");
++    #[cfg(unix)]
+     std::fs::write(&socket, "not a socket").unwrap();
++    #[cfg(windows)]
++    let socket = std::path::PathBuf::from(format!(
++        r"\\.\pipe\prime-agent-acp-unreachable-{}",
++        uuid::Uuid::new_v4()
++    ));
++    #[cfg(windows)]
++    let runtime = tokio::runtime::Runtime::new().unwrap();
++    #[cfg(windows)]
++    let _blocked_endpoint = {
++        let _entered = runtime.enter();
++        // An inbound-only instance denies the daemon's duplex clients and its replacement bind.
++        tokio::net::windows::named_pipe::ServerOptions::new()
++            .first_pipe_instance(true)
++            .access_outbound(false)
++            .create(&socket)
++            .unwrap()
++    };
+     std::fs::write(
+         home.path().join("worker-script.json"),
+         json!({ "engine": "faux", "responses": ["unused"] }).to_string(),
+@@ -1861,10 +1886,19 @@ fn daemon_request(socket: &std::path::Path, id: &str, command: &Value) -> Value
+     let frame = json!({ "type": "command", "id": id, "protocol": protocol, "command": command });
+     writeln!(writer, "{frame}").expect("daemon frame");
+     writer.flush().expect("daemon flush");
++    let mut seen = Vec::new();
+     BufReader::new(reader)
+         .lines()
+         .map(|line| {
+-            serde_json::from_str::<Value>(&line.expect("daemon line")).expect("daemon JSON")
++            let line = line.unwrap_or_else(|error| {
++                panic!("daemon response for {id}: {error}; received {seen:?}")
++            });
++            let frame = serde_json::from_str::<Value>(&line).expect("daemon JSON");
++            seen.push(format!(
++                "{}:{}:{}",
++                frame["type"], frame["id"], frame["error"]
++            ));
++            frame
+         })
+         .find(|frame| frame["id"] == json!(id))
+         .unwrap_or_else(|| panic!("the daemon closed without answering {id}"))
+@@ -2548,6 +2582,12 @@ fn acp_daemon_attached_close_holds_the_input_pause_until_the_next_session_new()
+         "foreign-follow-up",
+         &json!({ "type": "follow_up", "activeSessionId": active_session_id, "message": "foreign" }),
+     );
++    let held = daemon_request(
++        &socket,
++        "foreign-state",
++        &json!({ "type": "get_state", "activeSessionId": active_session_id }),
++    );
++    assert_eq!(held["data"]["isStreaming"], json!(false), "{held}");
+     let idle = daemon_request(
+         &socket,
+         "foreign-idle",
+@@ -2561,3 +2601,60 @@ fn acp_daemon_attached_close_holds_the_input_pause_until_the_next_session_new()
+     let _second = new_session(&mut client);
+     drop(client);
+ }
++
++#[test]
++fn a_fragmented_daemon_command_survives_an_interleaved_session_event() {
++    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
++
++    let mut client = AcpChild::spawn(
++        &["--mode", "acp", "--no-session"],
++        &json!({ "responses": ["unused"] }),
++    );
++    let _ = initialize_and_new_session(&mut client);
++    let active_session_id = live_sessions(&client.socket)[0]["activeSessionId"]
++        .as_str()
++        .unwrap()
++        .to_string();
++    let socket = client.socket.clone();
++    let runtime = tokio::runtime::Runtime::new().unwrap();
++    runtime.block_on(async {
++        tokio::time::timeout(Duration::from_secs(15), async {
++            let stream = pa_types::platform::transport::connect_transport(&socket).await.unwrap();
++            let (reader, mut writer) = stream.split();
++            let mut lines = tokio::io::BufReader::new(reader).lines();
++            let _hello = lines.next_line().await.unwrap().unwrap();
++            let protocol = json!({ "name": "prime-agent.daemon", "version": pa_types::daemon::DAEMON_PROTOCOL_VERSION });
++            let attach = json!({ "type": "command", "id": "fragment-attach", "protocol": protocol,
++                "command": { "type": "attach", "activeSessionId": active_session_id } });
++            writer.write_all(format!("{attach}\n").as_bytes()).await.unwrap();
++            loop {
++                let frame: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
++                if frame["id"] == "fragment-attach" { assert_eq!(frame["success"], true, "{frame}"); break; }
++            }
++            let request = json!({ "type": "command", "id": "fragment-state", "protocol": protocol,
++                "command": { "type": "get_state", "activeSessionId": active_session_id } });
++            let bytes = format!("{request}\n").into_bytes();
++            let boundary = bytes.len() - 2;
++            writer.write_all(&bytes[..boundary]).await.unwrap();
++            writer.flush().await.unwrap();
++            let rename_socket = socket.clone();
++            let rename = tokio::task::spawn_blocking(move || daemon_request(&rename_socket, "fragment-rename",
++                &json!({ "type": "rename", "activeSessionId": active_session_id, "name": "fragmented-command" })));
++            loop {
++                let frame: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
++                if frame["event"]["type"] == "session_info_changed" && frame["event"]["name"] == "fragmented-command" { break; }
++            }
++            assert_eq!(rename.await.unwrap()["success"], true);
++            writer.write_all(&bytes[boundary..]).await.unwrap();
++            writer.flush().await.unwrap();
++            loop {
++                let frame: Value = serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
++                if frame["type"] == "response" {
++                    assert_eq!(frame["id"], "fragment-state", "{frame}");
++                    assert_eq!(frame["success"], true, "{frame}");
++                    break;
++                }
++            }
++        }).await.expect("an event must not discard an incomplete client command");
++    });
++}
+diff --git a/crates/pa-daemon/src/supervisor/clients.rs b/crates/pa-daemon/src/supervisor/clients.rs
+index a21a01a..88bb31c 100644
+--- a/crates/pa-daemon/src/supervisor/clients.rs
++++ b/crates/pa-daemon/src/supervisor/clients.rs
+@@ -142,8 +142,9 @@ impl Supervisor {
+         };
+         write_line(&mut writer, &serde_json::to_value(&hello)?).await?;
+ 
+-        let mut reader = BufReader::new(reader);
+-        let mut line = String::new();
++        // Events and responses can interrupt reads; Lines retains partial input
++        // across select cancellation until the complete command arrives.
++        let mut reader = BufReader::new(reader).lines();
+         let mut events = self.events.subscribe();
+         // Session events ride this per-connection queue (the subscriber
+         // registry resolves delivery at publish time, TS `handleWorkerFrame`
+@@ -172,14 +173,10 @@ impl Supervisor {
+             crate::backpressure::CLIENT_DISPATCH_CONCURRENCY,
+         ));
+         loop {
+-            line.clear();
+             tokio::select! {
+                 biased;
+-                read = reader.read_line(&mut line), if dispatch_slots.available_permits() > 0 => {
+-                    let Ok(read) = read else { break };
+-                    if read == 0 {
+-                        break;
+-                    }
++                read = reader.next_line(), if dispatch_slots.available_permits() > 0 => {
++                    let Ok(Some(line)) = read else { break };
+                     let trimmed = line.trim().to_string();
+                     if trimmed.is_empty() {
+                         continue;
+diff --git a/crates/pa-types/src/platform/windows_pipe.rs b/crates/pa-types/src/platform/windows_pipe.rs
+index 7338f32..e758a22 100644
+--- a/crates/pa-types/src/platform/windows_pipe.rs
++++ b/crates/pa-types/src/platform/windows_pipe.rs
+@@ -3,15 +3,16 @@
+ //! the shared [`TransportListener`] / [`TransportStream`] / [`BlockingTransportStream`] contracts.
+ //! Endpoint naming lives in `pa-daemon::platform`.
+ 
+-use std::io;
++use std::ffi::c_void;
++use std::fs::{File, OpenOptions};
++use std::io::{self, Read};
++use std::os::windows::io::AsRawHandle;
+ use std::sync::{Arc, Mutex};
+-use std::time::Duration;
++use std::time::{Duration, Instant};
+ 
+-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+ use tokio::net::windows::named_pipe::{
+     ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions,
+ };
+-use tokio::runtime::Runtime;
+ use tokio::sync::Mutex as AsyncMutex;
+ 
+ use super::transport::BlockingTransportStream;
+@@ -48,16 +49,19 @@ impl NamedPipeListener {
+         })
+     }
+ 
+-    /// Hand the next client a connected server instance. The next instance is created before
+-    /// waiting, so a creation failure surfaces first; two instances listen while this call waits,
+-    /// keeping clients off the busy path.
++    /// Keep one accepting instance until it connects. Cancellation leaves that instance in
++    /// place; creating a second listener early lets a client bypass the awaited instance.
+     pub(crate) async fn accept(&self) -> io::Result<NamedPipeServer> {
+         let mut pending = self.pending.lock().await;
++        pending
++            .as_ref()
++            .expect("a listening instance is always kept ready")
++            .connect()
++            .await?;
+         let next = ServerOptions::new().create(&self.name)?;
+         let server = pending
+             .replace(next)
+             .expect("a listening instance is always kept ready");
+-        server.connect().await?;
+         Ok(server)
+     }
+ }
+@@ -82,16 +86,49 @@ pub(crate) async fn connect(name: &str) -> io::Result<NamedPipeClient> {
+     }
+ }
+ 
+-/// State shared by the read and write halves of a blocking client: one pipe handle driven by a
+-/// dedicated single-threaded runtime, because std exposes no read deadline for named pipes; the
+-/// runtime gives `set_read_timeout` a real bounded wait.
++/// One synchronous pipe handle shared by cloned clients. It needs no nested Tokio runtime.
+ struct BlockingPipeState {
+-    runtime: Runtime,
+-    client: AsyncMutex<NamedPipeClient>,
++    file: Mutex<File>,
+     /// Read deadline for pending reads; `None` blocks indefinitely.
+     read_timeout: Mutex<Option<Duration>>,
+ }
+ 
++const ERROR_BROKEN_PIPE: i32 = 109;
++const ERROR_PIPE_NOT_CONNECTED: i32 = 233;
++const READ_RETRY_INTERVAL: Duration = Duration::from_millis(5);
++
++#[link(name = "kernel32")]
++extern "system" {
++    fn PeekNamedPipe(
++        pipe: *mut c_void,
++        buffer: *mut c_void,
++        buffer_size: u32,
++        bytes_read: *mut u32,
++        bytes_available: *mut u32,
++        bytes_left: *mut u32,
++    ) -> i32;
++}
++
++fn available_bytes(file: &File) -> io::Result<u32> {
++    let mut available = 0;
++    // SAFETY: the borrowed File owns the live pipe handle. Only the available-byte
++    // output is requested; optional buffers and outputs are null.
++    let result = unsafe {
++        PeekNamedPipe(
++            file.as_raw_handle(),
++            std::ptr::null_mut(),
++            0,
++            std::ptr::null_mut(),
++            std::ptr::from_mut(&mut available),
++            std::ptr::null_mut(),
++        )
++    };
++    if result == 0 {
++        return Err(io::Error::last_os_error());
++    }
++    Ok(available)
++}
++
+ /// A blocking named-pipe client for one-shot command surfaces (the CLI
+ /// daemon client). Cloning shares the underlying connection.
+ pub(crate) struct BlockingPipeClient {
+@@ -110,15 +147,25 @@ impl std::fmt::Debug for BlockingPipeClient {
+ impl BlockingPipeClient {
+     /// Connect to the pipe at `name`, blocking until connected.
+     pub(crate) fn connect(name: &str) -> io::Result<Self> {
+-        let runtime = tokio::runtime::Builder::new_current_thread()
+-            .enable_all()
+-            .build()?;
+-        let client = runtime.block_on(connect(name))?;
++        let deadline = Instant::now() + BUSY_RETRY_DEADLINE;
++        let file = loop {
++            match OpenOptions::new().read(true).write(true).open(name) {
++                Ok(file) => break file,
++                Err(error) if error.raw_os_error() == Some(ERROR_PIPE_BUSY) => {}
++                Err(error) => return Err(error),
++            }
++            if Instant::now() + BUSY_RETRY_INTERVAL > deadline {
++                return Err(io::Error::new(
++                    io::ErrorKind::TimedOut,
++                    format!("named pipe {name} stayed busy for more than {BUSY_RETRY_DEADLINE:?}"),
++                ));
++            }
++            std::thread::sleep(BUSY_RETRY_INTERVAL);
++        };
+         Ok(Self {
+             name: name.to_string(),
+             state: Arc::new(BlockingPipeState {
+-                runtime,
+-                client: AsyncMutex::new(client),
++                file: Mutex::new(file),
+                 read_timeout: Mutex::new(None),
+             }),
+         })
+@@ -135,25 +182,46 @@ impl BlockingPipeClient {
+ 
+     /// One blocking read, bounded by the configured deadline when present.
+     fn read_bounded(&self, buf: &mut [u8]) -> io::Result<usize> {
+-        let deadline = self
++        if buf.is_empty() {
++            return Ok(0);
++        }
++        let timeout = *self
+             .state
+             .read_timeout
+             .lock()
+             .map_err(|_| io::Error::other("read deadline lock poisoned"))?;
+-        let read = async { self.state.client.lock().await.read(buf).await };
+-        match *deadline {
+-            Some(timeout) => match self
+-                .state
+-                .runtime
+-                // Construct the timer only after entering this client's runtime.
+-                .block_on(async { tokio::time::timeout(timeout, read).await })
+-            {
+-                Ok(result) => result,
+-                // Cancelled reads leave the buffer untouched; callers treat
+-                // the deadline as an empty poll, like Unix `SO_RCVTIMEO`.
+-                Err(_elapsed) => Err(io::ErrorKind::TimedOut.into()),
+-            },
+-            None => self.state.runtime.block_on(read),
++        let mut file = self
++            .state
++            .file
++            .lock()
++            .map_err(|_| io::Error::other("pipe handle lock poisoned"))?;
++        let Some(timeout) = timeout else {
++            return file.read(buf);
++        };
++        let deadline = Instant::now() + timeout;
++        loop {
++            match available_bytes(&file) {
++                Ok(available) if available > 0 => {
++                    let available = usize::try_from(available).map_err(io::Error::other)?;
++                    let count = available.min(buf.len());
++                    return file.read(&mut buf[..count]);
++                }
++                Ok(_) => {}
++                Err(error)
++                    if matches!(
++                        error.raw_os_error(),
++                        Some(ERROR_BROKEN_PIPE | ERROR_PIPE_NOT_CONNECTED)
++                    ) =>
++                {
++                    return Ok(0)
++                }
++                Err(error) => return Err(error),
++            }
++            let remaining = deadline.saturating_duration_since(Instant::now());
++            if remaining.is_zero() {
++                return Err(io::ErrorKind::TimedOut.into());
++            }
++            std::thread::sleep(remaining.min(READ_RETRY_INTERVAL));
+         }
+     }
+ }
+@@ -167,14 +235,18 @@ impl std::io::Read for BlockingPipeClient {
+ impl std::io::Write for BlockingPipeClient {
+     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+         self.state
+-            .runtime
+-            .block_on(async { self.state.client.lock().await.write(buf).await })
++            .file
++            .lock()
++            .map_err(|_| io::Error::other("pipe handle lock poisoned"))?
++            .write(buf)
+     }
+ 
+     fn flush(&mut self) -> io::Result<()> {
+         self.state
+-            .runtime
+-            .block_on(async { self.state.client.lock().await.flush().await })
++            .file
++            .lock()
++            .map_err(|_| io::Error::other("pipe handle lock poisoned"))?
++            .flush()
+     }
+ }
+ 
+diff --git a/crates/pa-types/tests/windows_transport.rs b/crates/pa-types/tests/windows_transport.rs
+new file mode 100644
+index 0000000..4b7558e
+--- /dev/null
++++ b/crates/pa-types/tests/windows_transport.rs
+@@ -0,0 +1,93 @@
++#![cfg(windows)]
++
++use pa_types::platform::{bind_transport, connect_blocking, connect_transport, TransportListener};
++use std::future::Future;
++use std::io::{Read, Write};
++use std::path::Path;
++use std::task::Poll;
++use std::time::Duration;
++use tokio::io::{AsyncReadExt, AsyncWriteExt};
++
++async fn round_trip_after_accept_waits(listener: &dyn TransportListener, endpoint: &Path) {
++    let accepted = listener.accept();
++    tokio::pin!(accepted);
++    std::future::poll_fn(|context| {
++        assert!(accepted.as_mut().poll(context).is_pending());
++        Poll::Ready(())
++    })
++    .await;
++    tokio::time::timeout(Duration::from_secs(5), async {
++        let client = connect_transport(endpoint).await.unwrap();
++        let server = accepted.await.unwrap();
++        let (_server_reader, mut server_writer) = server.split();
++        let (mut client_reader, _client_writer) = client.split();
++        server_writer.write_all(b"ping").await.unwrap();
++        let mut message = [0; 4];
++        client_reader.read_exact(&mut message).await.unwrap();
++        assert_eq!(&message, b"ping");
++    })
++    .await
++    .expect("a client must reach the instance the listener is accepting");
++}
++
++#[tokio::test]
++async fn a_client_reaches_the_waiting_accept() {
++    let root = tempfile::tempdir().unwrap();
++    let endpoint = root.path().join("waiting.sock");
++    let listener = bind_transport(&endpoint).await.unwrap();
++    round_trip_after_accept_waits(listener.as_ref(), &endpoint).await;
++}
++
++#[tokio::test]
++async fn cancelling_accept_keeps_the_listening_instance_available() {
++    let root = tempfile::tempdir().unwrap();
++    let endpoint = root.path().join("cancelled.sock");
++    let listener = bind_transport(&endpoint).await.unwrap();
++    {
++        let cancelled = listener.accept();
++        tokio::pin!(cancelled);
++        std::future::poll_fn(|context| {
++            assert!(cancelled.as_mut().poll(context).is_pending());
++            Poll::Ready(())
++        })
++        .await;
++    }
++    round_trip_after_accept_waits(listener.as_ref(), &endpoint).await;
++}
++
++#[tokio::test]
++async fn blocking_commands_work_inside_an_async_runtime() {
++    let fixture = tempfile::tempdir().unwrap();
++    let endpoint = fixture.path().join("blocking.sock");
++    let server_endpoint = endpoint.clone();
++    let (ready_sender, ready_receiver) = std::sync::mpsc::channel();
++    let server = std::thread::spawn(move || {
++        let runtime = tokio::runtime::Runtime::new().unwrap();
++        runtime.block_on(async move {
++            let listener = bind_transport(&server_endpoint).await.unwrap();
++            ready_sender.send(()).unwrap();
++            let peer = listener.accept().await.unwrap();
++            let (mut reader, mut writer) = peer.split();
++            let mut request = [0; 4];
++            reader.read_exact(&mut request).await.unwrap();
++            assert_eq!(&request, b"ping");
++            writer.write_all(b"pong").await.unwrap();
++        });
++    });
++    ready_receiver.recv_timeout(Duration::from_secs(5)).unwrap();
++
++    let mut client = connect_blocking(&endpoint).unwrap();
++    client.set_read_timeout(Duration::from_millis(50)).unwrap();
++    let mut response = [0; 4];
++    assert_eq!(
++        client.read(&mut response).unwrap_err().kind(),
++        std::io::ErrorKind::TimedOut
++    );
++    client.write_all(b"ping").unwrap();
++    client.flush().unwrap();
++    client.set_read_timeout(Duration::from_secs(5)).unwrap();
++    client.read_exact(&mut response).unwrap();
++    assert_eq!(&response, b"pong");
++    drop(client);
++    server.join().unwrap();
++}

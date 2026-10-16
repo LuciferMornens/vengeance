@@ -1,0 +1,293 @@
+import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const executable = join(root, 'resources', 'prime-auth', 'bin', 'vengeance-prime-auth.exe')
+const tempRoot = await mkdtemp(join(tmpdir(), 'vengeance-prime-restart-'))
+const agentDir = join(tempRoot, 'agent')
+const socketPath = join(tempRoot, 'supervisor.sock')
+const sessionPath = join(tempRoot, 'sessions', 'first.jsonl')
+const secondSessionPath = join(tempRoot, 'sessions', 'second.jsonl')
+const rosterPath = join(tempRoot, 'prepared', 'roster.json')
+const backupDir = join(tempRoot, 'restart-backup')
+const descriptorDir = join(
+  agentDir,
+  'daemon-workers',
+  createHash('sha256').update(socketPath).digest('hex').slice(0, 12)
+)
+const descriptorPath = join(descriptorDir, 'worker-a.json')
+const secondDescriptorPath = join(descriptorDir, 'worker-b.json')
+const sessionBytes = Buffer.from('{"type":"session","id":"fixture-a"}\n')
+
+function descriptor(workerId, activeSessionId, sessionFile) {
+  return {
+    version: 2,
+    workerId,
+    pid: 4242,
+    socketPath: join(tempRoot, `${workerId}.sock`),
+    recoveryJournalPath: join(tempRoot, `${workerId}.journal`),
+    orphanProcessJournalPath: join(tempRoot, `${workerId}.orphan-journal`),
+    supervisorSocketPath: socketPath,
+    authenticationToken: `fixture-${workerId}`,
+    rootActiveSessionId: activeSessionId,
+    sessionFile,
+    createdAt: '2026-10-01T12:00:00Z',
+    updatedAt: '2026-10-01T12:00:00Z',
+    lifecycle: 'ready',
+    createCommand: {
+      sessionPath: sessionFile,
+      cwd: tempRoot,
+      provider: 'old-provider',
+      model: 'old-model',
+      thinking: 'low',
+      config: { provider: 'old-provider', model: 'old-model', thinking: 'low', extra: 'keep' },
+      futureCreateField: { preserved: true }
+    },
+    consecutiveFailures: 0,
+    futureDescriptorField: { preserved: true }
+  }
+}
+
+function rosterSession(sessionId, activeSessionId, sessionFile) {
+  return {
+    session_id: sessionId,
+    active_session_id: activeSessionId,
+    session_file: sessionFile,
+    kind: 'top-level',
+    rlm_depth: 0,
+    cwd: tempRoot,
+    runtime_config: {
+      create: {
+        sessionPath: sessionFile,
+        cwd: tempRoot,
+        provider: 'old-provider',
+        model: 'old-model',
+        thinking: 'low',
+        config: { provider: 'old-provider', model: 'old-model', thinking: 'low', extra: 'keep' },
+        futureCreateField: { preserved: true }
+      },
+      futureRuntimeField: 'preserved'
+    },
+    queue: { next_turn: [], actions: {} },
+    in_flight: {
+      streaming: false,
+      compacting: false,
+      bash_running: false,
+      rlm_children: false,
+      retrying: false,
+      prompt_in_flight: false
+    },
+    should_resume: false,
+    futureSessionField: { preserved: true }
+  }
+}
+
+function callHelper(operation, overrides = {}) {
+  const request = {
+    operation,
+    agentDir,
+    socketPath,
+    nativeAgentId: 'active-a',
+    sessionPath,
+    rosterPath,
+    backupDir,
+    configPatch: {
+      provider: null,
+      model: 'new-model',
+      thinking: 'high',
+      systemPrompt: 'fixture system'
+    },
+    ...overrides
+  }
+  const child = spawnSync(executable, ['--restart-config'], {
+    cwd: tempRoot,
+    env: { ...process.env, PRIME_AGENT_CODING_AGENT_DIR: agentDir },
+    input: JSON.stringify(request),
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 15_000
+  })
+  assert.equal(child.error, undefined)
+  assert.equal(child.status, 0, child.stderr)
+  const output = JSON.parse(child.stdout.trim())
+  assert.ok(!JSON.stringify(output).includes('fixture system'))
+  return output
+}
+
+try {
+  await mkdir(descriptorDir, { recursive: true })
+  await mkdir(dirname(sessionPath), { recursive: true })
+  await mkdir(dirname(rosterPath), { recursive: true })
+  await writeFile(sessionPath, sessionBytes)
+  await writeFile(secondSessionPath, Buffer.from('{"type":"session","id":"fixture-b"}\n'))
+
+  const firstDescriptor = descriptor('worker-a', 'active-a', sessionPath)
+  const secondDescriptor = descriptor('worker-b', 'active-b', secondSessionPath)
+  firstDescriptor.pid = 4343
+  secondDescriptor.pid = 4242
+  const roster = {
+    format_version: 1,
+    update_id: '018f1234-abcd-7abc-8def-0123456789ab',
+    socket_path: socketPath,
+    created_at: '2026-10-01T12:00:00Z',
+    supervisor: { pid: 4242, generation: 'fixture-generation' },
+    binary: { from_version: '0.10.0', to_version: '0.10.1' },
+    sessions: [
+      rosterSession('session-a', 'active-a', sessionPath),
+      rosterSession('session-b', 'active-b', secondSessionPath)
+    ],
+    workers: [
+      { worker_id: 'worker-a', sessions: ['session-a'], launch_env: {}, futureWorkerField: 'a' },
+      { worker_id: 'worker-b', sessions: ['session-b'], launch_env: {}, futureWorkerField: 'b' }
+    ],
+    futureRosterField: { preserved: true }
+  }
+  await writeFile(descriptorPath, JSON.stringify(firstDescriptor, null, 2))
+  await writeFile(secondDescriptorPath, JSON.stringify(secondDescriptor, null, 2))
+  await writeFile(rosterPath, JSON.stringify(roster, null, 2))
+  const journals = [firstDescriptor, secondDescriptor].flatMap((worker) => [
+    [worker.recoveryJournalPath, Buffer.from(`recovery-${worker.workerId}\0opaque`)],
+    [worker.orphanProcessJournalPath, Buffer.from(`orphan-${worker.workerId}\0opaque`)]
+  ])
+  const absentJournalPath = secondDescriptor.orphanProcessJournalPath
+  const presentJournals = journals.filter(([path]) => path !== absentJournalPath)
+  for (const [path, bytes] of presentJournals) await writeFile(path, bytes)
+
+  const originalDescriptor = await readFile(descriptorPath)
+  const originalSecondDescriptor = await readFile(secondDescriptorPath)
+  const originalRoster = await readFile(rosterPath)
+  const originalSecondSession = await readFile(secondSessionPath)
+
+  const siblingPath = join(descriptorDir, 'other-worker.json')
+  for (const invalid of [
+    '{',
+    JSON.stringify({ ...descriptor('worker-c', 'active-c', secondSessionPath), version: 999 }),
+    JSON.stringify({
+      ...descriptor('worker-c', 'active-c', secondSessionPath),
+      supervisorSocketPath: join(tempRoot, 'wrong-supervisor.sock')
+    })
+  ]) {
+    await writeFile(siblingPath, invalid)
+    const unsafe = callHelper('inspect')
+    assert.equal(unsafe.ok, false)
+    assert.equal(callHelper('workers').ok, false)
+    assert.deepEqual(await readFile(descriptorPath), originalDescriptor)
+    assert.deepEqual(await readFile(rosterPath), originalRoster)
+    assert.deepEqual(await readFile(sessionPath), sessionBytes)
+    await rm(siblingPath)
+  }
+
+  const wrongIdentity = callHelper('inspect', { nativeAgentId: 'missing-native-identity' })
+  assert.equal(wrongIdentity.ok, false)
+  assert.deepEqual(await readFile(descriptorPath), originalDescriptor)
+  assert.deepEqual(await readFile(rosterPath), originalRoster)
+  assert.deepEqual(await readFile(sessionPath), sessionBytes)
+
+  const inspected = callHelper('inspect')
+  assert.equal(inspected.ok, true, JSON.stringify(inspected))
+  assert.equal(inspected.result.descriptorPath, descriptorPath)
+  assert.equal(inspected.result.workerId, 'worker-a')
+  assert.deepEqual(inspected.result.workerPids, [4242, 4343])
+  assert.deepEqual(callHelper('workers').result.workerPids, [4242, 4343])
+  assert.deepEqual(await readFile(descriptorPath), originalDescriptor)
+  assert.deepEqual(await readFile(rosterPath), originalRoster)
+
+  const patched = callHelper('patch')
+  assert.equal(patched.ok, true, JSON.stringify(patched))
+  assert.deepEqual(patched.result.workerPids, [4242, 4343])
+  const patchedDescriptor = JSON.parse(await readFile(descriptorPath, 'utf8'))
+  const patchedRoster = JSON.parse(await readFile(rosterPath, 'utf8'))
+  const descriptorCreate = patchedDescriptor.createCommand
+  const rosterCreate = patchedRoster.sessions[0].runtime_config.create
+  for (const create of [descriptorCreate, rosterCreate]) {
+    assert.equal(create.model, 'new-model')
+    assert.equal(create.thinking, 'high')
+    assert.equal(create.systemPrompt, 'fixture system')
+    assert.equal('provider' in create, false)
+    assert.deepEqual(create.futureCreateField, { preserved: true })
+    assert.equal(create.config.model, 'new-model')
+    assert.equal(create.config.thinking, 'high')
+    assert.equal(create.config.systemPrompt, 'fixture system')
+    assert.equal('provider' in create.config, false)
+    assert.equal(create.config.extra, 'keep')
+  }
+  assert.deepEqual(patchedDescriptor.futureDescriptorField, { preserved: true })
+  assert.deepEqual(patchedRoster.futureRosterField, { preserved: true })
+  assert.deepEqual(patchedRoster.sessions[0].futureSessionField, { preserved: true })
+  assert.deepEqual(patchedRoster.sessions[1], roster.sessions[1])
+  assert.deepEqual(await readFile(secondDescriptorPath), originalSecondDescriptor)
+  assert.deepEqual(await readFile(sessionPath), sessionBytes)
+  assert.deepEqual(await readFile(secondSessionPath), originalSecondSession)
+  assert.deepEqual(await readFile(join(backupDir, 'descriptor.json')), originalDescriptor)
+  assert.deepEqual(await readFile(join(backupDir, 'roster.json')), originalRoster)
+
+  const rolledBack = callHelper('rollback')
+  assert.equal(rolledBack.ok, true, JSON.stringify(rolledBack))
+  assert.equal(rolledBack.result.restored, true)
+  assert.deepEqual(await readFile(descriptorPath), originalDescriptor)
+  assert.deepEqual(await readFile(rosterPath), originalRoster)
+  assert.deepEqual(await readFile(sessionPath), sessionBytes)
+  assert.deepEqual(await readFile(secondDescriptorPath), originalSecondDescriptor)
+  for (const [path, bytes] of presentJournals) assert.deepEqual(await readFile(path), bytes)
+  assert.equal(existsSync(absentJournalPath), false)
+
+  const captureBackupDir = join(tempRoot, 'capture-backup')
+  const captured = callHelper('capture', { backupDir: captureBackupDir })
+  assert.equal(captured.ok, true, JSON.stringify(captured))
+  assert.deepEqual(captured.result.workerPids, [4242, 4343])
+  const manifest = JSON.parse(await readFile(join(captureBackupDir, 'manifest.json'), 'utf8'))
+  assert.equal(manifest.workers.length, 2)
+  assert.deepEqual(
+    manifest.workers.map((worker) => worker.journals.length),
+    [2, 2]
+  )
+  assert.equal(
+    manifest.workers
+      .flatMap((worker) => worker.journals)
+      .filter((journal) => journal.fileName === null).length,
+    1
+  )
+  for (const [path] of presentJournals) await rm(path)
+  await rm(descriptorPath)
+  await rm(secondDescriptorPath)
+  await writeFile(absentJournalPath, Buffer.from('successor-only-journal'))
+  assert.deepEqual(callHelper('workers', { backupDir: captureBackupDir }).result.workerPids, [])
+
+  const restoredAndPatched = callHelper('patch', { backupDir: captureBackupDir })
+  assert.equal(restoredAndPatched.ok, true, JSON.stringify(restoredAndPatched))
+  assert.deepEqual(restoredAndPatched.result.workerPids, [4242, 4343])
+  assert.equal(JSON.parse(await readFile(descriptorPath, 'utf8')).createCommand.model, 'new-model')
+  assert.equal(
+    JSON.parse(await readFile(rosterPath, 'utf8')).sessions[0].runtime_config.create.model,
+    'new-model'
+  )
+  assert.deepEqual(await readFile(secondDescriptorPath), originalSecondDescriptor)
+  assert.deepEqual(JSON.parse(await readFile(rosterPath, 'utf8')).sessions[1], roster.sessions[1])
+  for (const [path, bytes] of presentJournals) assert.deepEqual(await readFile(path), bytes)
+  assert.equal(existsSync(absentJournalPath), false)
+  assert.deepEqual(await readFile(sessionPath), sessionBytes)
+  assert.deepEqual(await readFile(secondSessionPath), originalSecondSession)
+
+  const restoredCapture = callHelper('rollback', { backupDir: captureBackupDir })
+  assert.equal(restoredCapture.ok, true, JSON.stringify(restoredCapture))
+  assert.deepEqual(await readFile(descriptorPath), originalDescriptor)
+  assert.deepEqual(await readFile(secondDescriptorPath), originalSecondDescriptor)
+  assert.deepEqual(await readFile(rosterPath), originalRoster)
+  for (const [path, bytes] of presentJournals) assert.deepEqual(await readFile(path), bytes)
+  assert.equal(existsSync(absentJournalPath), false)
+  assert.deepEqual(await readFile(sessionPath), sessionBytes)
+  console.log(
+    'Native restart inspect, capture, scoped patch and rollback preserved peer workers, journals and sessions'
+  )
+} finally {
+  const resolvedTempRoot = await realpath(tempRoot)
+  const resolvedSystemTemp = await realpath(tmpdir())
+  assert.ok(relative(resolvedSystemTemp, resolvedTempRoot).split(sep)[0] !== '..')
+  await rm(resolvedTempRoot, { recursive: true, force: true })
+}

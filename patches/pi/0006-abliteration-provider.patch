@@ -1,0 +1,218 @@
+diff --git a/packages/ai/src/env-api-keys.ts b/packages/ai/src/env-api-keys.ts
+index 560dce8..7263752 100644
+--- a/packages/ai/src/env-api-keys.ts
++++ b/packages/ai/src/env-api-keys.ts
+@@ -82,6 +82,7 @@ function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
+ 	}
+ 
+ 	const envMap: Record<string, string> = {
++		abliteration: "ABLIT_KEY",
+ 		"ant-ling": "ANT_LING_API_KEY",
+ 		"qwen-token-plan": "QWEN_TOKEN_PLAN_API_KEY",
+ 		"qwen-token-plan-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
+diff --git a/packages/ai/src/providers/abliteration.ts b/packages/ai/src/providers/abliteration.ts
+new file mode 100644
+index 0000000..7ae9069
+--- /dev/null
++++ b/packages/ai/src/providers/abliteration.ts
+@@ -0,0 +1,93 @@
++import { openAICompletionsApi } from "../api/openai-completions.lazy.ts";
++import { envApiKeyAuth } from "../auth/helpers.ts";
++import { createProvider, type Provider } from "../models.ts";
++import type { Model } from "../types.ts";
++
++const PROVIDER_ID = "abliteration";
++const BASE_URL = "https://api.abliteration.ai/v1";
++
++const modelDefaults = {
++	provider: PROVIDER_ID,
++	baseUrl: BASE_URL,
++	api: "openai-completions" as const,
++	reasoning: true,
++	compat: {
++		supportsStore: false,
++		supportsReasoningEffort: true,
++		maxTokensField: "max_tokens" as const,
++		sendSessionAffinityHeaders: true,
++		supportsLongCacheRetention: false,
++	},
++};
++
++// Provider limits and USD per million tokens: docs.abliteration.ai/models and /pricing.
++export const ABLITERATION_MODELS = {
++	"abliterated-model": {
++		...modelDefaults,
++		id: "abliterated-model",
++		name: "Abliterated Model",
++		input: ["text", "image"],
++		inputLimits: {
++			images: {
++				resize: {
++					maxWidth: 2000,
++					maxHeight: 2000,
++					maxBytes: 4.5 * 1024 * 1024,
++					jpegQuality: 80,
++				},
++			},
++		},
++		contextWindow: 262144,
++		maxTokens: 262134,
++		thinkingLevelMap: { off: "none", xhigh: "xhigh", max: "max" },
++		cost: { input: 1, output: 3, cacheRead: 0.1, cacheWrite: 1 },
++	},
++	"abliterated-model-large-v2": {
++		...modelDefaults,
++		id: "abliterated-model-large-v2",
++		name: "Abliterated Model Large V2",
++		input: ["text"],
++		contextWindow: 1000000,
++		maxTokens: 999990,
++		// The API accepts the full effort ladder; the server maps aliases to low/high/max.
++		thinkingLevelMap: {
++			off: null,
++			minimal: "minimal",
++			low: "low",
++			medium: "medium",
++			high: "high",
++			xhigh: "xhigh",
++			max: "max",
++		},
++		cost: { input: 3, output: 5, cacheRead: 0.3, cacheWrite: 3 },
++	},
++	"abliterated-model-large": {
++		...modelDefaults,
++		id: "abliterated-model-large",
++		name: "Abliterated Model Large",
++		input: ["text"],
++		contextWindow: 1000000,
++		maxTokens: 999990,
++		thinkingLevelMap: {
++			off: "none",
++			minimal: null,
++			low: null,
++			medium: null,
++			high: "high",
++			xhigh: null,
++			max: "max",
++		},
++		cost: { input: 3, output: 5, cacheRead: 0.3, cacheWrite: 3 },
++	},
++} satisfies Record<string, Model<"openai-completions">>;
++
++export function abliterationProvider(): Provider<"openai-completions"> {
++	return createProvider({
++		id: PROVIDER_ID,
++		name: "Abliteration",
++		baseUrl: BASE_URL,
++		auth: { apiKey: envApiKeyAuth("Abliteration API key", ["ABLIT_KEY"]) },
++		models: Object.values(ABLITERATION_MODELS),
++		api: openAICompletionsApi(),
++	});
++}
+diff --git a/packages/ai/src/providers/all.ts b/packages/ai/src/providers/all.ts
+index 297db37..f89764d 100644
+--- a/packages/ai/src/providers/all.ts
++++ b/packages/ai/src/providers/all.ts
+@@ -1,6 +1,11 @@
+-import { CLASSIFIER_MODELS, IMAGE_MODELS, MODELS } from "../models.generated.ts";
++import {
++	CLASSIFIER_MODELS as GENERATED_CLASSIFIER_MODELS,
++	IMAGE_MODELS as GENERATED_IMAGE_MODELS,
++	MODELS as GENERATED_MODELS,
++} from "../models.generated.ts";
+ import { type CreateModelsOptions, createModels, type MutableModels, type Provider } from "../models.ts";
+ import type { AnyModel, Api, ClassifierApi, ClassifierModel, ImageApi, ImageModel, Model } from "../types.ts";
++import { ABLITERATION_MODELS, abliterationProvider } from "./abliteration.ts";
+ import { amazonBedrockProvider } from "./amazon-bedrock.ts";
+ import { antLingProvider } from "./ant-ling.ts";
+ import { anthropicProvider } from "./anthropic.ts";
+@@ -47,6 +52,11 @@ import { zaiCodingCnProvider } from "./zai-coding-cn.ts";
+ 
+ export { radiusProvider };
+ 
++// Keep the content-addressed upstream catalog intact; qualify this provider separately.
++const MODELS = { ...GENERATED_MODELS, abliteration: ABLITERATION_MODELS };
++const IMAGE_MODELS = { ...GENERATED_IMAGE_MODELS, abliteration: {} };
++const CLASSIFIER_MODELS = { ...GENERATED_CLASSIFIER_MODELS, abliteration: {} };
++
+ /** Providers present in the generated catalog. `KnownProvider` additionally
+  * includes purely dynamic providers (e.g. "radius") that have no static
+  * catalog entry. */
+@@ -135,6 +145,7 @@ export function getAllBuiltinModels<TProvider extends BuiltinProvider>(provider:
+ /** All built-in providers, freshly constructed. */
+ export function builtinProviders(): Provider[] {
+ 	return [
++		abliterationProvider(),
+ 		amazonBedrockProvider(),
+ 		antLingProvider(),
+ 		anthropicProvider(),
+diff --git a/packages/ai/src/types.ts b/packages/ai/src/types.ts
+index 6a9a1e5..64ef90c 100644
+--- a/packages/ai/src/types.ts
++++ b/packages/ai/src/types.ts
+@@ -85,6 +85,7 @@ export type KnownClassifierApi =
+ export type ClassifierApi = KnownClassifierApi | (string & {});
+ 
+ export type KnownProvider =
++	| "abliteration"
+ 	| "amazon-bedrock"
+ 	| "ant-ling"
+ 	| "anthropic"
+diff --git a/packages/ai/test/abliteration.test.ts b/packages/ai/test/abliteration.test.ts
+new file mode 100644
+index 0000000..0160b00
+--- /dev/null
++++ b/packages/ai/test/abliteration.test.ts
+@@ -0,0 +1,52 @@
++import { describe, expect, it } from "vitest";
++import { findEnvKeys, getEnvApiKey } from "../src/env-api-keys.ts";
++import { getSupportedThinkingLevels } from "../src/models.ts";
++import { builtinModels, getBuiltinModel, getBuiltinModels, getBuiltinProviders } from "../src/providers/all.ts";
++
++describe("Abliteration provider", () => {
++	it("offers native API-key login and shares the static and runtime catalog", async () => {
++		const models = builtinModels({
++			authContext: { env: async () => undefined, fileExists: async () => false },
++		});
++		const provider = models.getProviders().find((entry) => entry.id === "abliteration");
++		expect(provider?.auth.oauth).toBeUndefined();
++		expect(await models.getAuth("abliteration")).toBeUndefined();
++		expect(await models.getAvailable("abliteration")).toEqual([]);
++		const credential = await models.login("abliteration", "api_key", {
++			prompt: async () => "test-abliteration-key",
++			notify: () => {},
++		});
++		expect(credential).toEqual({ type: "api_key", key: "test-abliteration-key" });
++		expect(getBuiltinProviders()).toContain("abliteration");
++		expect(models.getModels("abliteration")).toEqual(getBuiltinModels("abliteration"));
++		expect(await models.getAvailable("abliteration")).toHaveLength(3);
++		await models.logout("abliteration");
++		expect(await models.getAvailable("abliteration")).toEqual([]);
++	});
++
++	it("resolves ABLIT_KEY without another provider's credentials", async () => {
++		const environment = { ABLIT_KEY: "test-abliteration-key", OPENAI_API_KEY: "other-key" };
++		expect(findEnvKeys("abliteration", environment)).toEqual(["ABLIT_KEY"]);
++		expect(getEnvApiKey("abliteration", environment)).toBe(environment.ABLIT_KEY);
++		const models = builtinModels({
++			authContext: {
++				env: async (name) => environment[name as keyof typeof environment],
++				fileExists: async () => false,
++			},
++		});
++		expect((await models.getAuth("abliteration"))?.auth.apiKey).toBe(environment.ABLIT_KEY);
++		expect((await models.getAvailable("abliteration")).map((model) => model.id)).toHaveLength(3);
++	});
++
++	it("offers every Large V2 effort and vision only on the base model", () => {
++		const base = getBuiltinModel("abliteration", "abliterated-model");
++		const large = getBuiltinModel("abliteration", "abliterated-model-large");
++		const largeV2 = getBuiltinModel("abliteration", "abliterated-model-large-v2");
++		expect(getSupportedThinkingLevels(base)).toEqual(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
++		expect(getSupportedThinkingLevels(large)).toEqual(["off", "high", "max"]);
++		expect(getSupportedThinkingLevels(largeV2)).toEqual(["minimal", "low", "medium", "high", "xhigh", "max"]);
++		expect(base.input).toEqual(["text", "image"]);
++		expect(large.input).toEqual(["text"]);
++		expect(largeV2.input).toEqual(["text"]);
++	});
++});

@@ -1,0 +1,46 @@
+/* Chat feature tokens + effects (owned by the chat lane). */
+
+:root,
+:root[data-theme='dark'] {
+  --user-bubble: color-mix(in oklab, var(--surface-4) 82%, transparent);
+}
+
+:root[data-theme='light'] {
+  --user-bubble: #ebe7e0;
+}
+
+/*
+ * Ember glow behind the Vengeance mark on the empty-session hero. It breathes three times and rests: an endless
+ * loop keeps an idle window producing frames. The breath starts and ends at its midpoint, which is also the resting
+ * style, so neither end jumps (the negative delay starts a quarter in; 2.75 iterations end three quarters in, and
+ * the symmetric easing puts both on the midpoint). In a background window the breath pauses where it is, so blurring
+ * the window never snaps the glow, and focusing it continues the remaining breaths.
+ */
+.v-ember-glow {
+  background: radial-gradient(
+    circle at 50% 55%,
+    color-mix(in oklab, var(--accent-2) 30%, transparent) 0%,
+    color-mix(in oklab, var(--accent-2) 12%, transparent) 38%,
+    transparent 70%
+  );
+  filter: blur(14px);
+  opacity: 0.775;
+  transform: scale(0.99);
+  animation: v-ember 4.8s var(--ease-in-out) -1.2s 2.75;
+}
+
+[data-window-blurred] .v-ember-glow {
+  animation-play-state: paused;
+}
+
+@keyframes v-ember {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+}

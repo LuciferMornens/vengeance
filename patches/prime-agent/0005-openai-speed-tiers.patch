@@ -1,0 +1,896 @@
+diff --git a/crates/pa-ai/src/lib.rs b/crates/pa-ai/src/lib.rs
+index 18d4cc7..3d4b975 100644
+--- a/crates/pa-ai/src/lib.rs
++++ b/crates/pa-ai/src/lib.rs
+@@ -16,7 +16,9 @@ pub mod types;
+ 
+ mod event_stream;
+ mod providers;
++mod service_tiers;
+ mod stream;
++pub use service_tiers::{available_service_tiers, ServiceTierOption};
+ 
+ #[cfg(test)]
+ mod prime_inference_differential_test;
+diff --git a/crates/pa-ai/src/providers/openai_codex_responses/errors.rs b/crates/pa-ai/src/providers/openai_codex_responses/errors.rs
+index e47a7b4..f33e4b8 100644
+--- a/crates/pa-ai/src/providers/openai_codex_responses/errors.rs
++++ b/crates/pa-ai/src/providers/openai_codex_responses/errors.rs
+@@ -482,6 +482,7 @@ fn normalize_codex_status(status: &Value) -> Option<&'static str> {
+ pub fn get_codex_service_tier_cost_multiplier(model_id: &str, service_tier: Option<&str>) -> f64 {
+     match service_tier {
+         Some("flex") => 0.5,
++        Some("ultrafast") if matches!(model_id, "gpt-6-astra" | "gpt-6.1-sol") => 6.0,
+         Some("priority") => {
+             if model_id.starts_with("gpt-5.5") {
+                 2.5
+@@ -520,7 +521,10 @@ pub fn resolve_codex_service_tier(
+     request_service_tier: Option<String>,
+ ) -> Option<String> {
+     if response_service_tier.as_deref() == Some("default")
+-        && matches!(request_service_tier.as_deref(), Some("flex" | "priority"))
++        && matches!(
++            request_service_tier.as_deref(),
++            Some("flex" | "priority" | "ultrafast")
++        )
+     {
+         return request_service_tier;
+     }
+diff --git a/crates/pa-ai/src/providers/openai_codex_responses/mod.rs b/crates/pa-ai/src/providers/openai_codex_responses/mod.rs
+index 712bab1..c625b18 100644
+--- a/crates/pa-ai/src/providers/openai_codex_responses/mod.rs
++++ b/crates/pa-ai/src/providers/openai_codex_responses/mod.rs
+@@ -63,10 +63,10 @@ pub struct OpenAICodexResponsesOptions {
+ impl OpenAICodexResponsesOptions {
+     pub fn from_base(base: StreamOptions) -> Self {
+         Self {
++            service_tier: base.service_tier,
+             base,
+             reasoning_effort: None,
+             reasoning_summary: None,
+-            service_tier: None,
+             text_verbosity: None,
+         }
+     }
+@@ -171,7 +171,7 @@ async fn run_stream(
+     output: &mut AssistantMessage,
+     writer: &AssistantMessageEventWriter,
+ ) -> Result<(), ProviderError> {
+-    let options = options.cloned().unwrap_or_default();
++    let mut options = options.cloned().unwrap_or_default();
+     let api_key = options
+         .base
+         .api_key
+@@ -195,6 +195,14 @@ async fn run_stream(
+         ProviderError::Message(format!("Failed to extract accountId from token: {message}"))
+     })?;
+ 
++    options.service_tier = crate::service_tiers::resolve_request_tier(
++        model,
++        &api_key,
++        options.service_tier,
++        options.base.signal.as_ref(),
++    )
++    .await?;
++
+     let mut body = build_request_body(model, context, &options);
+     if let Some(on_payload) = &options.base.on_payload {
+         if let Some(next) = on_payload(body.clone(), model) {
+@@ -705,6 +713,7 @@ fn service_tier_str(tier: ServiceTier) -> &'static str {
+         ServiceTier::Flex => "flex",
+         ServiceTier::Scale => "scale",
+         ServiceTier::Priority => "priority",
++        ServiceTier::Ultrafast => "ultrafast",
+     }
+ }
+ 
+@@ -772,6 +781,7 @@ pub fn stream_simple_openai_codex_responses(
+         .filter(|level| *level != ModelThinkingLevel::Off);
+ 
+     let stream_options = OpenAICodexResponsesOptions {
++        service_tier: base.service_tier,
+         base,
+         reasoning_effort,
+         ..Default::default()
+diff --git a/crates/pa-ai/src/providers/openai_responses.rs b/crates/pa-ai/src/providers/openai_responses.rs
+index d37a329..6fb32da 100644
+--- a/crates/pa-ai/src/providers/openai_responses.rs
++++ b/crates/pa-ai/src/providers/openai_responses.rs
+@@ -91,10 +91,10 @@ pub struct OpenAIResponsesOptions {
+ impl OpenAIResponsesOptions {
+     pub fn from_base(base: StreamOptions) -> Self {
+         Self {
++            service_tier: base.service_tier,
+             base,
+             reasoning_effort: None,
+             reasoning_summary: None,
+-            service_tier: None,
+         }
+     }
+ }
+@@ -281,13 +281,20 @@ async fn run_stream(
+     output: &mut AssistantMessage,
+     writer: &AssistantMessageEventWriter,
+ ) -> Result<(), ProviderError> {
+-    let options = options.cloned().unwrap_or_default();
++    let mut options = options.cloned().unwrap_or_default();
+     let api_key = options
+         .base
+         .api_key
+         .clone()
+         .or_else(|| get_env_api_key(&model.provider))
+         .unwrap_or_default();
++    options.service_tier = crate::service_tiers::resolve_request_tier(
++        model,
++        &api_key,
++        options.service_tier,
++        options.base.signal.as_ref(),
++    )
++    .await?;
+     let cache_retention = resolve_cache_retention(options.base.cache_retention);
+     let cache_session_id = if cache_retention == CacheRetention::None {
+         None
+@@ -454,10 +461,10 @@ pub fn stream_simple_openai_responses(
+         .map(|reasoning| clamp_thinking_level(model, reasoning));
+     let reasoning_effort = clamped_reasoning.filter(|level| *level != ModelThinkingLevel::Off);
+     let stream_options = OpenAIResponsesOptions {
++        service_tier: base.service_tier,
+         base,
+         reasoning_effort,
+         reasoning_summary: None,
+-        service_tier: None,
+     };
+     stream_openai_responses(model, context, Some(&stream_options))
+ }
+diff --git a/crates/pa-ai/src/providers/openai_responses_hooks.rs b/crates/pa-ai/src/providers/openai_responses_hooks.rs
+index 836641b..52b07ff 100644
+--- a/crates/pa-ai/src/providers/openai_responses_hooks.rs
++++ b/crates/pa-ai/src/providers/openai_responses_hooks.rs
+@@ -39,6 +39,7 @@ pub struct ResponsesStreamHooks {
+ pub fn get_service_tier_cost_multiplier(model_id: &str, service_tier: Option<&str>) -> f64 {
+     match service_tier {
+         Some("flex") => 0.5,
++        Some("ultrafast") if matches!(model_id, "gpt-6-astra" | "gpt-6.1-sol") => 6.0,
+         Some("priority") => {
+             if model_id == "gpt-5.5" {
+                 2.5
+diff --git a/crates/pa-ai/src/service_tiers.rs b/crates/pa-ai/src/service_tiers.rs
+new file mode 100644
+index 0000000..502eec3
+--- /dev/null
++++ b/crates/pa-ai/src/service_tiers.rs
+@@ -0,0 +1,233 @@
++//! Account-scoped `OpenAI` speed offers shared by native controls and request transports.
++
++use std::collections::HashMap;
++use std::sync::{Mutex, OnceLock};
++use std::time::{Duration, Instant};
++
++use serde::Serialize;
++use serde_json::Value;
++use sha2::{Digest, Sha256};
++
++use crate::providers::openai_codex_responses::request::{extract_account_id, resolve_codex_url};
++use crate::types::{Model, ServiceTier};
++
++const CATALOG_TTL: Duration = Duration::from_hours(1);
++const CATALOG_RETRY: Duration = Duration::from_mins(5);
++const CATALOG_TIMEOUT: Duration = Duration::from_secs(10);
++const MAX_CACHED_ACCOUNTS: usize = 64;
++const CODEX_CLIENT_VERSION: &str = "0.162.0";
++
++#[derive(Clone, Debug, Serialize)]
++pub struct ServiceTierOption {
++    pub tier: ServiceTier,
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub description: Option<String>,
++}
++
++#[derive(Clone)]
++struct CachedCatalog {
++    expires: Instant,
++    models: Option<HashMap<String, Vec<ServiceTierOption>>>,
++}
++
++static CATALOGS: OnceLock<Mutex<HashMap<String, CachedCatalog>>> = OnceLock::new();
++
++/// Return only faster modes the provider/model and signed-in account can use.
++/// Catalog failures offer Fast on known models, but never infer Ultrafast entitlement.
++pub async fn available_service_tiers(
++    model: &Model,
++    api_key: Option<&str>,
++) -> Vec<ServiceTierOption> {
++    let supported = |tier| pa_types::ai::supports_service_tier(model, tier);
++    let fallback = |subscription: bool| {
++        [ServiceTier::Priority, ServiceTier::Ultrafast]
++            .into_iter()
++            .filter(|tier| supported(*tier) && (!subscription || *tier != ServiceTier::Ultrafast))
++            .map(|tier| ServiceTierOption {
++                tier,
++                description: None,
++            })
++            .collect()
++    };
++    let responses = matches!(
++        (model.provider.as_str(), model.api.as_str()),
++        ("openai", "openai-responses") | ("openai-codex", "openai-codex-responses")
++    );
++    if !responses {
++        return fallback(false);
++    }
++    let account_id = api_key.and_then(|key| extract_account_id(key).ok());
++    let subscription = model.provider == "openai-codex" || account_id.is_some();
++    if !subscription {
++        return fallback(false);
++    }
++    let (Some(api_key), Some(account_id)) = (api_key, account_id) else {
++        return fallback(true);
++    };
++    let url = if model.api == "openai-codex-responses" {
++        let responses_url = resolve_codex_url(&model.base_url);
++        format!(
++            "{}models?client_version={CODEX_CLIENT_VERSION}",
++            responses_url
++                .strip_suffix("responses")
++                .unwrap_or(&responses_url)
++        )
++    } else {
++        format!(
++            "{}/models?client_version={CODEX_CLIENT_VERSION}",
++            model.base_url.trim_end_matches('/')
++        )
++    };
++    // Tokens are never retained in the cache; rotation and endpoint changes invalidate its scope.
++    let cache_key = format!("{url}:{:x}", Sha256::digest(api_key.as_bytes()));
++    let cache = CATALOGS.get_or_init(Mutex::default);
++    let cached = cache
++        .lock()
++        .unwrap_or_else(std::sync::PoisonError::into_inner)
++        .get(&cache_key)
++        .filter(|entry| Instant::now() < entry.expires)
++        .cloned();
++    let catalog = if let Some(cached) = cached {
++        cached.models
++    } else {
++        let catalog = fetch_catalog(&url, api_key, &account_id).await;
++        let expires = Instant::now()
++            + if catalog.is_some() {
++                CATALOG_TTL
++            } else {
++                CATALOG_RETRY
++            };
++        let mut entries = cache
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner);
++        entries.retain(|_, entry| Instant::now() < entry.expires);
++        if entries.len() >= MAX_CACHED_ACCOUNTS {
++            entries.clear();
++        }
++        entries.insert(
++            cache_key,
++            CachedCatalog {
++                expires,
++                models: catalog.clone(),
++            },
++        );
++        catalog
++    };
++    match catalog {
++        Some(mut models) => models
++            .remove(&model.id)
++            .unwrap_or_default()
++            .into_iter()
++            .filter(|option| supported(option.tier))
++            .collect(),
++        None => fallback(true),
++    }
++}
++
++async fn fetch_catalog(
++    url: &str,
++    api_key: &str,
++    account_id: &str,
++) -> Option<HashMap<String, Vec<ServiceTierOption>>> {
++    let body = reqwest::Client::builder()
++        .timeout(CATALOG_TIMEOUT)
++        .redirect(reqwest::redirect::Policy::none())
++        .build()
++        .ok()?
++        .get(url)
++        .bearer_auth(api_key)
++        .header("chatgpt-account-id", account_id)
++        .header("originator", "codex_cli_rs")
++        .send()
++        .await
++        .ok()?
++        .error_for_status()
++        .ok()?
++        .json::<Value>()
++        .await
++        .ok()?;
++    parse_catalog(&body)
++}
++
++fn parse_catalog(body: &Value) -> Option<HashMap<String, Vec<ServiceTierOption>>> {
++    let models = body.get("models")?.as_array()?;
++    Some(
++        models
++            .iter()
++            .filter_map(|model| {
++                let slug = model.get("slug")?.as_str()?.to_string();
++                let tiers = model.get("service_tiers").and_then(Value::as_array);
++                let legacy_fast = model
++                    .get("additional_speed_tiers")
++                    .and_then(Value::as_array)
++                    .is_some_and(|tiers| tiers.iter().any(|tier| tier.as_str() == Some("fast")));
++                let options = [
++                    ("priority", ServiceTier::Priority),
++                    ("ultrafast", ServiceTier::Ultrafast),
++                ]
++                .into_iter()
++                .filter_map(|(name, tier)| {
++                    let offered = tiers.and_then(|tiers| {
++                        tiers
++                            .iter()
++                            .find(|entry| entry.get("id").and_then(Value::as_str) == Some(name))
++                    });
++                    if offered.is_none() && !(tier == ServiceTier::Priority && legacy_fast) {
++                        return None;
++                    }
++                    Some(ServiceTierOption {
++                        tier,
++                        description: offered
++                            .and_then(|entry| entry.get("description"))
++                            .and_then(Value::as_str)
++                            .map(str::to_string),
++                    })
++                })
++                .collect();
++                Some((slug, options))
++            })
++            .collect(),
++    )
++}
++
++pub(crate) async fn resolve_request_tier(
++    model: &Model,
++    api_key: &str,
++    requested: Option<ServiceTier>,
++    signal: Option<&tokio_util::sync::CancellationToken>,
++) -> Result<Option<ServiceTier>, crate::ProviderError> {
++    if !matches!(
++        requested,
++        Some(ServiceTier::Priority | ServiceTier::Ultrafast)
++    ) {
++        return Ok(requested);
++    }
++    let subscription = model.provider == "openai-codex"
++        || (model.provider == "openai" && extract_account_id(api_key).is_ok());
++    if !subscription {
++        return Ok(requested);
++    }
++    let lookup = available_service_tiers(model, Some(api_key));
++    let options = if let Some(signal) = signal {
++        tokio::select! {
++            biased;
++            () = signal.cancelled() => return Err(crate::ProviderError::Aborted),
++            options = lookup => options,
++        }
++    } else {
++        lookup.await
++    };
++    Ok(
++        if options.iter().any(|option| Some(option.tier) == requested) {
++            requested
++        } else if requested == Some(ServiceTier::Ultrafast)
++            && options
++                .iter()
++                .any(|option| option.tier == ServiceTier::Priority)
++        {
++            Some(ServiceTier::Priority)
++        } else {
++            Some(ServiceTier::Default)
++        },
++    )
++}
+diff --git a/crates/pa-ai/tests/service_tiers.rs b/crates/pa-ai/tests/service_tiers.rs
+new file mode 100644
+index 0000000..4208877
+--- /dev/null
++++ b/crates/pa-ai/tests/service_tiers.rs
+@@ -0,0 +1,157 @@
++use std::time::Duration;
++
++use base64::Engine as _;
++use pa_ai::types::{Context, Model, ServiceTier, SimpleStreamOptions, StreamOptions, Transport};
++use serde_json::{json, Value};
++use tokio::io::{AsyncReadExt, AsyncWriteExt};
++
++fn test_model(provider: &str, address: std::net::SocketAddr) -> Model {
++    serde_json::from_value(json!({
++        "id": "gpt-6.1-sol", "name": "QA", "provider": provider,
++        "api": if provider == "openai" { "openai-responses" } else { "openai-codex-responses" },
++        "baseUrl": format!("http://{address}"), "reasoning": false, "input": ["text"],
++        "contextWindow": 10000, "maxTokens": 100,
++        "cost": {"input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0}
++    }))
++    .unwrap()
++}
++
++async fn capture_request(
++    provider: &str,
++    simple: bool,
++    requested: ServiceTier,
++    offered: Vec<&'static str>,
++) -> Value {
++    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++    let address = listener.local_addr().unwrap();
++    let server = tokio::spawn(async move {
++        loop {
++            let (mut socket, _) = listener.accept().await.unwrap();
++            let mut bytes = Vec::new();
++            let mut buffer = [0; 4096];
++            let (head, body) = loop {
++                let count = socket.read(&mut buffer).await.unwrap();
++                assert_ne!(count, 0);
++                bytes.extend_from_slice(&buffer[..count]);
++                if let Some(end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
++                    let head = String::from_utf8_lossy(&bytes[..end]);
++                    let length: usize = head
++                        .lines()
++                        .find_map(|line| {
++                            let (name, value) = line.split_once(':')?;
++                            name.eq_ignore_ascii_case("content-length")
++                                .then(|| value.trim().parse().unwrap())
++                        })
++                        .unwrap_or(0);
++                    if bytes.len() >= end + 4 + length {
++                        let body = serde_json::from_slice::<Value>(&bytes[end + 4..])
++                            .unwrap_or(Value::Null);
++                        break (head.to_string(), body);
++                    }
++                }
++            };
++            if head.starts_with("GET ") {
++                assert!(head.to_lowercase().contains("chatgpt-account-id: qa-speed"));
++                assert!(head.contains("client_version=0.162.0"));
++                let catalog = json!({"models": [{"slug": "gpt-6.1-sol", "service_tiers":
++                    offered.iter().map(|tier| json!({"id": tier})).collect::<Vec<_>>()
++                }]})
++                .to_string();
++                socket.write_all(format!(
++                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{catalog}",
++                catalog.len()
++            ).as_bytes()).await.unwrap();
++                continue;
++            }
++            let event = json!({"type": "response.completed", "response": {
++                "id": "qa-response", "status": "completed", "output": [],
++                "service_tier": "default", "usage": {"input_tokens": 1, "output_tokens": 1}
++            }});
++            let payload = format!("data: {event}\n\n");
++            let response = format!(
++            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
++            payload.len()
++        );
++            socket.write_all(response.as_bytes()).await.unwrap();
++            return body;
++        }
++    });
++    let model = test_model(provider, address);
++    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
++        json!({"https://api.openai.com/auth": {"chatgpt_account_id": "qa-speed"}}).to_string(),
++    );
++    let options = StreamOptions {
++        api_key: Some(if provider == "openai" {
++            "qa-key".into()
++        } else {
++            format!("e30.{claims}.qa")
++        }),
++        service_tier: Some(requested),
++        transport: Some(Transport::Sse),
++        ..Default::default()
++    };
++    let context = Context::default();
++    let result = if simple {
++        pa_ai::complete_simple(
++            &model,
++            &context,
++            Some(SimpleStreamOptions {
++                base: options,
++                ..Default::default()
++            }),
++        )
++        .await
++    } else {
++        pa_ai::complete(&model, &context, Some(options)).await
++    }
++    .unwrap();
++    assert!(result.error_message.is_none(), "{:?}", result.error_message);
++    let body = server.await.unwrap();
++    if provider == "openai-codex" {
++        let multiplier = match body["service_tier"].as_str() {
++            Some("ultrafast") => 6.0,
++            Some("priority") => 2.0,
++            _ => 1.0,
++        };
++        let expected_cost = 2.0 / 1_000_000.0 * multiplier;
++        assert!((result.usage.cost.total.as_f64() - expected_cost).abs() < 1e-12);
++    }
++    body
++}
++
++#[tokio::test]
++async fn public_streams_send_the_requested_service_tier() {
++    for provider in ["openai", "openai-codex"] {
++        for simple in [true, false] {
++            let body = tokio::time::timeout(
++                Duration::from_secs(10),
++                capture_request(provider, simple, ServiceTier::Priority, vec!["priority"]),
++            )
++            .await
++            .unwrap();
++            assert_eq!(
++                body["service_tier"], "priority",
++                "{provider}, simple={simple}"
++            );
++        }
++    }
++}
++
++#[tokio::test]
++async fn ultrafast_uses_account_entitlement_and_falls_back_to_an_offered_tier() {
++    for (offered, expected) in [
++        (vec!["priority", "ultrafast"], "ultrafast"),
++        (vec!["priority"], "priority"),
++        (vec![], "default"),
++    ] {
++        let body = tokio::time::timeout(
++            Duration::from_secs(10),
++            capture_request("openai-codex", true, ServiceTier::Ultrafast, offered),
++        )
++        .await
++        .unwrap();
++        assert_eq!(body["service_tier"], expected);
++    }
++    let body = capture_request("openai", true, ServiceTier::Ultrafast, vec![]).await;
++    assert_eq!(body["service_tier"], "ultrafast");
++}
+diff --git a/crates/pa-ai/tests/service_tiers_transport.rs b/crates/pa-ai/tests/service_tiers_transport.rs
+new file mode 100644
+index 0000000..10fcbce
+--- /dev/null
++++ b/crates/pa-ai/tests/service_tiers_transport.rs
+@@ -0,0 +1,150 @@
++use std::time::Duration;
++
++use base64::Engine as _;
++use futures::{SinkExt, StreamExt};
++use pa_ai::types::{
++    Context, Model, ServiceTier, SimpleStreamOptions, StopReason, StreamOptions, Transport,
++};
++use serde_json::{json, Value};
++use tokio::io::{AsyncReadExt, AsyncWriteExt};
++
++fn model(address: std::net::SocketAddr) -> Model {
++    serde_json::from_value(json!({
++        "id": "gpt-6.1-sol", "name": "QA", "provider": "openai-codex",
++        "api": "openai-codex-responses", "baseUrl": format!("http://{address}"),
++        "reasoning": false, "input": ["text"], "contextWindow": 10000, "maxTokens": 100,
++        "cost": {"input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0}
++    }))
++    .unwrap()
++}
++
++fn options(account: &str) -> SimpleStreamOptions {
++    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
++        json!({"https://api.openai.com/auth": {"chatgpt_account_id": account}}).to_string(),
++    );
++    SimpleStreamOptions {
++        base: StreamOptions {
++            api_key: Some(format!("e30.{claims}.qa")),
++            service_tier: Some(ServiceTier::Ultrafast),
++            transport: Some(Transport::Websocket),
++            ..Default::default()
++        },
++        ..Default::default()
++    }
++}
++
++async fn read_head(socket: &mut tokio::net::TcpStream) -> String {
++    let mut head = String::new();
++    let mut buffer = [0; 4096];
++    while !head.contains("\r\n\r\n") {
++        let count = socket.read(&mut buffer).await.unwrap();
++        assert_ne!(count, 0);
++        head.push_str(&String::from_utf8_lossy(&buffer[..count]));
++    }
++    head
++}
++
++async fn answer_catalog(socket: &mut tokio::net::TcpStream, tiers: Value) {
++    let body = json!({"models": [{"slug": "gpt-6.1-sol", "service_tiers": tiers}]}).to_string();
++    socket.write_all(format!(
++        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
++        body.len()
++    ).as_bytes()).await.unwrap();
++}
++
++#[tokio::test]
++async fn websocket_sends_ultrafast_without_changing_the_model() {
++    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++    let model = model(listener.local_addr().unwrap());
++    let server = tokio::spawn(async move {
++        let (mut catalog, _) = listener.accept().await.unwrap();
++        assert!(read_head(&mut catalog)
++            .await
++            .starts_with("GET /codex/models?"));
++        answer_catalog(
++            &mut catalog,
++            json!([{"id": "priority"}, {"id": "ultrafast"}]),
++        )
++        .await;
++        drop(catalog);
++        let (socket, _) = listener.accept().await.unwrap();
++        let mut websocket = tokio_tungstenite::accept_async(socket).await.unwrap();
++        let frame = websocket
++            .next()
++            .await
++            .unwrap()
++            .unwrap()
++            .into_text()
++            .unwrap();
++        let request: Value = serde_json::from_str(&frame).unwrap();
++        let completed = json!({"type": "response.completed", "response": {
++            "id": "qa-response", "status": "completed", "output": [],
++            "service_tier": "default", "usage": {"input_tokens": 1, "output_tokens": 1}
++        }});
++        websocket
++            .send(tokio_tungstenite::tungstenite::Message::Text(
++                completed.to_string().into(),
++            ))
++            .await
++            .unwrap();
++        request
++    });
++    let result = tokio::time::timeout(
++        Duration::from_secs(10),
++        pa_ai::complete_simple(&model, &Context::default(), Some(options("qa-websocket"))),
++    )
++    .await
++    .unwrap()
++    .unwrap();
++    assert_eq!(
++        result.stop_reason,
++        StopReason::Stop,
++        "{:?}",
++        result.error_message
++    );
++    let request = server.await.unwrap();
++    assert_eq!(request["model"], "gpt-6.1-sol");
++    assert_eq!(request["service_tier"], "ultrafast");
++}
++
++#[tokio::test]
++async fn cancellation_does_not_wait_for_a_hanging_catalog() {
++    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++    let model = model(listener.local_addr().unwrap());
++    let signal = tokio_util::sync::CancellationToken::new();
++    let mut options = options("qa-abort");
++    options.base.signal = Some(signal.clone());
++    let stream = pa_ai::stream_simple(&model, &Context::default(), Some(options)).unwrap();
++    let (mut socket, _) = listener.accept().await.unwrap();
++    assert!(read_head(&mut socket)
++        .await
++        .starts_with("GET /codex/models?"));
++    signal.cancel();
++    let result = tokio::time::timeout(Duration::from_secs(1), stream.result())
++        .await
++        .unwrap();
++    assert_eq!(result.stop_reason, StopReason::Aborted);
++}
++
++#[tokio::test]
++async fn catalog_cache_is_scoped_to_the_signed_in_account() {
++    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
++    let model = model(listener.local_addr().unwrap());
++    let server = tokio::spawn(async move {
++        for tiers in [json!([{"id": "ultrafast"}]), json!([])] {
++            let (mut socket, _) = listener.accept().await.unwrap();
++            read_head(&mut socket).await;
++            answer_catalog(&mut socket, tiers).await;
++        }
++    });
++    let eligible = options("qa-eligible");
++    let tiers = pa_ai::available_service_tiers(&model, eligible.base.api_key.as_deref()).await;
++    assert_eq!(tiers.len(), 1);
++    assert_eq!(tiers[0].tier, ServiceTier::Ultrafast);
++    let ineligible = options("qa-ineligible");
++    let tiers = pa_ai::available_service_tiers(&model, ineligible.base.api_key.as_deref()).await;
++    assert!(tiers.is_empty());
++    let tiers = pa_ai::available_service_tiers(&model, eligible.base.api_key.as_deref()).await;
++    assert_eq!(tiers[0].tier, ServiceTier::Ultrafast);
++    server.await.unwrap();
++}
+diff --git a/crates/pa-core/src/settings/manager.rs b/crates/pa-core/src/settings/manager.rs
+index 49a7c6e..5d44946 100644
+--- a/crates/pa-core/src/settings/manager.rs
++++ b/crates/pa-core/src/settings/manager.rs
+@@ -613,6 +613,7 @@ impl SettingsManager {
+             ServiceTier::Flex => "flex",
+             ServiceTier::Scale => "scale",
+             ServiceTier::Priority => "priority",
++            ServiceTier::Ultrafast => "ultrafast",
+         };
+         self.global.default_service_tier = Some(name.to_string());
+         self.save_global()
+@@ -631,6 +632,7 @@ impl SettingsManager {
+                 "flex" => Some(ServiceTier::Flex),
+                 "scale" => Some(ServiceTier::Scale),
+                 "priority" => Some(ServiceTier::Priority),
++                "ultrafast" => Some(ServiceTier::Ultrafast),
+                 "default" => Some(ServiceTier::Default),
+                 _ => None,
+             })
+diff --git a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
+index f9bf903..046c647 100644
+--- a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
++++ b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
+@@ -326,6 +326,22 @@ impl SessionEngine for AgentSessionEngine {
+         }
+     }
+ 
++    fn service_tier_options(
++        &self,
++    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Value> + Send + '_>> {
++        Box::pin(async move {
++            let Ok(model) = self.resolve_model() else {
++                return json!({ "tiers": [] });
++            };
++            let api_key = self.resolve_request_api_key(&model);
++            let tiers = pa_ai::available_service_tiers(&model, api_key.as_deref()).await;
++            json!({
++                "model": { "id": model.id, "provider": model.provider, "api": model.api },
++                "tiers": tiers,
++            })
++        })
++    }
++
+     fn configure_model(&self, selection: EngineModelSelection) {
+         // Merge like the TS runtime config: explicit wire flags replace; absent fields keep.
+         {
+diff --git a/crates/pa-daemon/src/engine.rs b/crates/pa-daemon/src/engine.rs
+index a8b7a9f..f08f093 100644
+--- a/crates/pa-daemon/src/engine.rs
++++ b/crates/pa-daemon/src/engine.rs
+@@ -265,6 +265,13 @@ pub trait SessionEngine: Send + Sync {
+     /// Set the session's resolved service-tier preference before the next request.
+     fn configure_service_tier(&self, _tier: Option<pa_types::ai::ServiceTier>) {}
+ 
++    /// Provider/account speed capabilities without exposing native credentials.
++    fn service_tier_options(
++        &self,
++    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Value> + Send + '_>> {
++        Box::pin(std::future::ready(Value::Null))
++    }
++
+     /// The effective thinking level as a wire name (`"off"`, `"minimal"`, ...):
+     /// the create-config flag (else the settings default, else `"medium"`),
+     /// clamped to the model's supported levels; `None` records `"off"`.
+diff --git a/crates/pa-daemon/src/setting_switches.rs b/crates/pa-daemon/src/setting_switches.rs
+index 20e1523..7f89750 100644
+--- a/crates/pa-daemon/src/setting_switches.rs
++++ b/crates/pa-daemon/src/setting_switches.rs
+@@ -42,6 +42,7 @@ pub(crate) fn service_tier_wire_name(tier: ServiceTier) -> &'static str {
+         ServiceTier::Flex => "flex",
+         ServiceTier::Scale => "scale",
+         ServiceTier::Priority => "priority",
++        ServiceTier::Ultrafast => "ultrafast",
+     }
+ }
+ 
+@@ -53,6 +54,12 @@ pub(crate) fn effective_service_tier(
+ ) -> Option<ServiceTier> {
+     match tier {
+         None | Some(ServiceTier::Default) => tier,
++        Some(ServiceTier::Ultrafast)
++            if !engine_supports_service_tier(engine, ServiceTier::Ultrafast)
++                && engine_supports_service_tier(engine, ServiceTier::Priority) =>
++        {
++            Some(ServiceTier::Priority)
++        }
+         Some(tier) => engine_supports_service_tier(engine, tier)
+             .then_some(tier)
+             .or(Some(ServiceTier::Default)),
+diff --git a/crates/pa-daemon/src/worker/commands.rs b/crates/pa-daemon/src/worker/commands.rs
+index 2a791cb..005ed7c 100644
+--- a/crates/pa-daemon/src/worker/commands.rs
++++ b/crates/pa-daemon/src/worker/commands.rs
+@@ -102,7 +102,22 @@ impl Worker {
+             "clear_queue" => self.handle_clear_queue(),
+             "abort_and_clear_queue" => self.handle_abort_and_clear_queue(),
+             "get_last_assistant_text" => self.handle_get_last_assistant_text(),
+-            "get_connection_state" => self.handle_get_connection_state(),
++            "get_connection_state" => {
++                let mut response = self.handle_get_connection_state();
++                if payload
++                    .get("includeServiceTierOptions")
++                    .and_then(Value::as_bool)
++                    == Some(true)
++                {
++                    if let Some(data) = response.data.as_mut().and_then(Value::as_object_mut) {
++                        data.insert(
++                            "serviceTierOptions".into(),
++                            self.engine.service_tier_options().await,
++                        );
++                    }
++                }
++                response
++            }
+             "get_mcp_connections" => self.handle_get_mcp_connections().await,
+             "set_mcp_static_token" => self.handle_set_mcp_static_token(payload).await,
+             "remove_mcp_connection" => self.handle_remove_mcp_connection(payload).await,
+diff --git a/crates/pa-tui/src/tree_display.rs b/crates/pa-tui/src/tree_display.rs
+index 6962e24..dda731f 100644
+--- a/crates/pa-tui/src/tree_display.rs
++++ b/crates/pa-tui/src/tree_display.rs
+@@ -310,6 +310,7 @@ fn tier_name(tier: pa_types::ai::ServiceTier) -> &'static str {
+         pa_types::ai::ServiceTier::Flex => "flex",
+         pa_types::ai::ServiceTier::Scale => "scale",
+         pa_types::ai::ServiceTier::Priority => "priority",
++        pa_types::ai::ServiceTier::Ultrafast => "ultrafast",
+     }
+ }
+ 
+diff --git a/crates/pa-types/src/ai/mod.rs b/crates/pa-types/src/ai/mod.rs
+index 938b700..0fe1e1a 100644
+--- a/crates/pa-types/src/ai/mod.rs
++++ b/crates/pa-types/src/ai/mod.rs
+@@ -172,7 +172,7 @@ pub enum Transport {
+     Auto,
+ }
+ 
+-/// TS `ServiceTier = "auto" | "default" | "flex" | "scale" | "priority" | null`.
++/// Provider service tier, including the entitlement-gated `ultrafast` tier.
+ /// The wire value can be absent or an explicit null, both mapping to `None`.
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+ #[serde(rename_all = "lowercase")]
+@@ -182,6 +182,7 @@ pub enum ServiceTier {
+     Flex,
+     Scale,
+     Priority,
++    Ultrafast,
+ }
+ 
+ /// HTTP response metadata handed to the `onResponse` hook.
+@@ -746,8 +747,14 @@ pub fn supports_service_tier_fields(
+     let eligible_id = model_id == "gpt-5.4"
+         || model_id == "gpt-5.5"
+         || model_id == "gpt-5.6"
+-        || model_id == "gpt-6-astra"
++        || matches!(
++            model_id,
++            "gpt-6-astra" | "gpt-6.1-sol" | "gpt-6-sol" | "gpt-6-luna"
++        )
+         || model_id.starts_with("gpt-5.6-");
++    if tier == ServiceTier::Ultrafast {
++        return matches!(model_id, "gpt-6-astra" | "gpt-6.1-sol");
++    }
+     if tier == ServiceTier::Priority {
+         return eligible_id;
+     }
+@@ -768,6 +775,14 @@ pub fn supports_service_tier(model: &Model, tier: ServiceTier) -> bool {
+ pub fn clamp_service_tier(model: Option<&Model>, tier: Option<ServiceTier>) -> Option<ServiceTier> {
+     match tier {
+         None | Some(ServiceTier::Default) => tier,
++        Some(ServiceTier::Ultrafast)
++            if model.is_some_and(|model| {
++                !supports_service_tier(model, ServiceTier::Ultrafast)
++                    && supports_service_tier(model, ServiceTier::Priority)
++            }) =>
++        {
++            Some(ServiceTier::Priority)
++        }
+         Some(tier) => model
+             .is_some_and(|model| supports_service_tier(model, tier))
+             .then_some(tier)

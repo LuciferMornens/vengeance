@@ -1,0 +1,61 @@
+appId: com.vengeance.app
+productName: Vengeance
+copyright: Copyright © Vengeance
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**
+  - resources/**
+  - '!resources/bridge/**'
+  - '!resources/prime-auth/**'
+  - package.json
+  - '!**/*.map'
+asarUnpack:
+  - resources/**
+  # The provider host runs with the engine's own node, which cannot read
+  # app.asar (main/features/settings/provider-host.ts).
+  - out/main/provider-host.js
+# The bridge extension is loaded by the external pi process
+# (`--extension`), so it must be a real file outside app.asar:
+# <install>/resources/bridge/vengeance-bridge.ts (main/engine/bridge.ts).
+extraResources:
+  - from: .engine-staging/bundled
+    to: engines
+    filter:
+      - '**/*'
+  - from: resources/bridge
+    to: bridge
+    filter:
+      - '**/*.ts'
+  - from: resources/prime-auth/bin
+    to: prime-auth
+    filter:
+      - vengeance-prime-auth.exe
+  - from: resources/prime-auth/THIRD-PARTY-NOTICES.txt
+    to: prime-auth/THIRD-PARTY-NOTICES.txt
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+  executableName: Vengeance
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  menuCategory: false
+  shortcutName: Vengeance
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+  uninstallDisplayName: Vengeance
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  artifactName: Vengeance-Setup-${version}.${ext}
+npmRebuild: false
+beforePack: scripts/engines/before-pack.cjs
+afterPack: scripts/engines/after-pack.cjs
+# Builds never publish. The generic self-update feed is opt-in via
+# VENGEANCE_UPDATE_FEED (scripts/dist.mjs). No file associations.

@@ -1,0 +1,85 @@
+diff --git a/packages/coding-agent/src/config.ts b/packages/coding-agent/src/config.ts
+--- a/packages/coding-agent/src/config.ts
++++ b/packages/coding-agent/src/config.ts
+@@ -544,9 +544,10 @@ export function detectInstallChange(packageJsonPath = startupPackageJsonPath): InstallChange | undefined {
+ 	} catch (error) {
+ 		return (error as NodeJS.ErrnoException).code === "ENOENT" ? { kind: "removed" } : undefined;
+ 	}
+-	return installed.version && installed.version !== VERSION
+-		? { kind: "updated", version: installed.version }
++	const installedVersion = installed.vengeance?.version || installed.version;
++	return installedVersion && installedVersion !== DISTRIBUTION_VERSION
++		? { kind: "updated", version: installedVersion }
+ 		: undefined;
+ }
+ 
+ // =============================================================================
+@@ -556,9 +557,12 @@
+ interface PackageJson {
+ 	name?: string;
+ 	version?: string;
++	vengeance?: {
++		version?: string;
++	};
+ 	piConfig?: {
+ 		name?: string;
+ 		configDir?: string;
+ 	};
+ }
+ 
+@@ -579,7 +583,9 @@
+ export const APP_NAME: string = piConfigName || "pi";
+ export const APP_TITLE: string = piConfigName ? APP_NAME : "π";
+ export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
+ export const VERSION: string = pkg.version || "0.0.0";
++// Extensions compare VERSION against upstream releases, independently of distribution identity.
++export const DISTRIBUTION_VERSION: string = pkg.vengeance?.version || VERSION;
+ 
+ // e.g., PI_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
+ export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
+diff --git a/packages/coding-agent/src/main.ts b/packages/coding-agent/src/main.ts
+--- a/packages/coding-agent/src/main.ts
++++ b/packages/coding-agent/src/main.ts
+@@ -33,7 +33,14 @@
+ import { createProjectTrustContext } from "./cli/project-trust.ts";
+ import { selectSession } from "./cli/session-picker.ts";
+ import { shouldRunFirstTimeSetup, showFirstTimeSetup, showStartupSelector } from "./cli/startup-ui.ts";
+-import { APP_NAME, ENV_SESSION_DIR, expandTildePath, getAgentDir, getPackageDir, VERSION } from "./config.ts";
++import {
++	APP_NAME,
++	DISTRIBUTION_VERSION,
++	ENV_SESSION_DIR,
++	expandTildePath,
++	getAgentDir,
++	getPackageDir,
++} from "./config.ts";
+ import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.ts";
+ import {
+ 	type AgentSessionRuntimeDiagnostic,
+@@ -632,7 +639,7 @@
+ 	time("parseArgs");
+ 
+ 	if (parsed.version) {
+-		console.log(VERSION);
++		console.log(DISTRIBUTION_VERSION);
+ 		process.exit(0);
+ 	}
+ 
+diff --git a/packages/coding-agent/src/utils/version-check.ts b/packages/coding-agent/src/utils/version-check.ts
+--- a/packages/coding-agent/src/utils/version-check.ts
++++ b/packages/coding-agent/src/utils/version-check.ts
+@@ -1,5 +1,6 @@
+ import { compare, valid } from "semver";
++import { DISTRIBUTION_VERSION } from "../config.ts";
+ import { fetchWithRetry } from "./management-http.ts";
+ import { getPiUserAgent } from "./pi-user-agent.ts";
+ 
+ const LATEST_VERSION_URL = "https://pi.dev/api/latest-version";
+@@ -97,6 +98,6 @@
+ export async function checkForNewPiVersion(currentVersion: string): Promise<LatestPiRelease | undefined> {
+ 	// Vengeance qualifies and distributes engine upgrades with application releases.
+-	if (currentVersion.includes("+vengeance.")) return undefined;
++	if (DISTRIBUTION_VERSION.includes("+vengeance.")) return undefined;
+ 	if (process.env.PI_SKIP_VERSION_CHECK) return undefined;
+ 
+ 	try {

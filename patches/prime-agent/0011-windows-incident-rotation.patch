@@ -1,0 +1,54 @@
+diff --git a/crates/pa-tui/src/incident_notices.rs b/crates/pa-tui/src/incident_notices.rs
+index 56e26bd..42787af 100644
+--- a/crates/pa-tui/src/incident_notices.rs
++++ b/crates/pa-tui/src/incident_notices.rs
+@@ -67,7 +67,7 @@ pub struct IncidentNoticeState {
+     pub entries: Vec<IncidentLogEntry>,
+     /// Byte offset consumed in agent.jsonl; `None` before the first tail read.
+     pub log_offset: Option<u64>,
+-    /// `dev:ino` of agent.jsonl at the last read; a change means rotation or replacement.
++    /// Filesystem identity of agent.jsonl at the last read; a change means rotation or replacement.
+     pub log_file_id: Option<String>,
+     /// Dismissal horizons by notice key: incidents at or before this timeMs stay hidden.
+     pub dismissed_horizons: HashMap<String, i64>,
+@@ -301,7 +301,7 @@ fn read_incident_log_lines(
+ ) -> Option<IncidentLogChunk> {
+     let mut file = std::fs::File::open(log_path).ok()?;
+     let stats = file.metadata().ok()?;
+-    let file_id = file_identity(&stats);
++    let file_id = file_identity(&file, &stats);
+     let rotated =
+         previous_file_id.is_some_and(|id| file_id.as_deref().is_some_and(|current| current != id));
+     let retailed = previous_offset.is_none()
+@@ -386,18 +386,24 @@ fn read_incident_log_lines(
+     })
+ }
+ 
+-/// The filesystem identity of the log: `dev:ino` on Unix (a rotation
+-/// changes the inode). Rust's std has no dev/ino on other platforms, and
+-/// keying on size + mtime instead would flip the identity on every append
+-/// — re-tailing consumed bytes into phantom update restarts.
++/// The filesystem identity stays stable across appends, unlike size or mtime.
+ #[cfg(unix)]
+-fn file_identity(stats: &std::fs::Metadata) -> Option<String> {
++fn file_identity(_file: &std::fs::File, stats: &std::fs::Metadata) -> Option<String> {
+     use std::os::unix::fs::MetadataExt;
+     Some(format!("{}:{}", stats.dev(), stats.ino()))
+ }
+ 
+-#[cfg(not(unix))]
+-fn file_identity(_stats: &std::fs::Metadata) -> Option<String> {
++#[cfg(windows)]
++fn file_identity(file: &std::fs::File, _stats: &std::fs::Metadata) -> Option<String> {
++    let identity = pa_types::platform::windows_file::identity(file).ok()?;
++    Some(format!(
++        "{}:{}:{}",
++        identity.volume_serial_number, identity.file_id[0], identity.file_id[1]
++    ))
++}
++
++#[cfg(not(any(unix, windows)))]
++fn file_identity(_file: &std::fs::File, _stats: &std::fs::Metadata) -> Option<String> {
+     None
+ }
+ 

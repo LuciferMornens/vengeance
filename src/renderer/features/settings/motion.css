@@ -1,0 +1,8 @@
+/* Settings → General → Motion: "Reduced" applies the same rules as the OS reduced-motion preference. */
+html[data-motion='reduce'] *,
+html[data-motion='reduce'] ::before,
+html[data-motion='reduce'] ::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}

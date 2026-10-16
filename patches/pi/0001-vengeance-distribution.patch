@@ -1,0 +1,30 @@
+diff --git a/packages/coding-agent/src/package-manager-cli.ts b/packages/coding-agent/src/package-manager-cli.ts
+index 45a6db7..34dcb0d 100644
+--- a/packages/coding-agent/src/package-manager-cli.ts
++++ b/packages/coding-agent/src/package-manager-cli.ts
+@@ -901,6 +901,12 @@ export async function handlePackageCommand(
+ 		return true;
+ 	}
+ 
++	if (options.command === "update" && updateTargetIncludesSelf(options.updateTarget ?? { type: "self" })) {
++		console.error("This Engine is supplied by Vengeance. Update Vengeance to update the Engine.");
++		process.exitCode = 1;
++		return true;
++	}
++
+ 	if (options.invalidOption) {
+ 		console.error(chalk.red(`Unknown option ${options.invalidOption} for "${options.command}".`));
+ 		console.error(chalk.dim(`Use "${APP_NAME} --help" or "${getPackageCommandUsage(options.command)}".`));
+diff --git a/packages/coding-agent/src/utils/version-check.ts b/packages/coding-agent/src/utils/version-check.ts
+index a09a3d0..cadeb91 100644
+--- a/packages/coding-agent/src/utils/version-check.ts
++++ b/packages/coding-agent/src/utils/version-check.ts
+@@ -95,6 +95,8 @@ export async function getLatestPiVersion(
+ }
+ 
+ export async function checkForNewPiVersion(currentVersion: string): Promise<LatestPiRelease | undefined> {
++	// Vengeance qualifies and distributes engine upgrades with application releases.
++	if (currentVersion.includes("+vengeance.")) return undefined;
+ 	if (process.env.PI_SKIP_VERSION_CHECK) return undefined;
+ 
+ 	try {

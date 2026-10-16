@@ -1,0 +1,64 @@
+diff --git a/crates/pa-core/src/packages/npm.rs b/crates/pa-core/src/packages/npm.rs
+index d6400e2..da70349 100644
+--- a/crates/pa-core/src/packages/npm.rs
++++ b/crates/pa-core/src/packages/npm.rs
+@@ -11,14 +11,21 @@ use anyhow::{bail, Result};
+ use super::process::run_command_capture;
+ use super::source::{NpmSource, SourceScope};
+ 
+-/// The configured npm command (argv form) or plain `npm`.
++/// The configured npm command (argv form) or the platform's npm launcher.
+ pub fn npm_command(configured: Option<&Vec<String>>) -> (String, Vec<String>) {
++    // Windows Node installs a command script; CreateProcess does not resolve
++    // an extensionless npm name to npm.cmd.
++    let default = if cfg!(windows) { "npm.cmd" } else { "npm" };
+     match configured {
+         Some(command) if !command.is_empty() => {
+-            let program = command[0].clone();
++            let program = if cfg!(windows) && command[0].eq_ignore_ascii_case("npm") {
++                default.to_string()
++            } else {
++                command[0].clone()
++            };
+             (program, command[1..].to_vec())
+         }
+-        _ => ("npm".to_string(), Vec::new()),
++        _ => (default.to_string(), Vec::new()),
+     }
+ }
+ 
+@@ -159,16 +166,32 @@ pub fn ensure_gitignore(dir: &Path) -> Result<()> {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    #[cfg(windows)]
++    fn the_default_npm_launcher_discovers_its_root_on_windows() {
++        let (command, arguments) = npm_command(None);
++        let root = discover_global_npm_root(&command, &arguments)
++            .expect("installed npm can report its root");
++        assert!(
++            root.is_absolute(),
++            "npm must return an absolute module root: {root:?}"
++        );
++    }
++
+     #[test]
+     fn npm_command_defaults_and_configuration() {
+-        assert_eq!(npm_command(None), ("npm".to_string(), Vec::<String>::new()));
++        let default = if cfg!(windows) { "npm.cmd" } else { "npm" };
++        assert_eq!(
++            npm_command(None),
++            (default.to_string(), Vec::<String>::new())
++        );
+         assert_eq!(
+             npm_command(Some(&vec!["mise".into(), "exec".into()])),
+             ("mise".to_string(), vec!["exec".to_string()])
+         );
+         assert_eq!(
+             npm_command(Some(&Vec::new())),
+-            ("npm".to_string(), Vec::<String>::new())
++            (default.to_string(), Vec::<String>::new())
+         );
+     }
+ 

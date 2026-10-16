@@ -1,0 +1,287 @@
+/*
+ * Obsidian & Ember — design tokens. The contract for every surface; see docs/DESIGN-SYSTEM.md.
+ * Theme:    <html data-theme="dark|light">
+ * Accent:   <html data-accent="ember|violet|cyan|lime|rose|mono">  (also scoped: any element with data-accent)
+ * Material: <html data-material="mica|solid">  (mica = translucent window background)
+ * Density:  <html data-density="comfortable|compact">
+ * Scale:    --font-scale set inline on <html> (1 = 13.5px UI / 15px prose)
+ */
+
+:root {
+  /* Typography */
+  --font-ui: 'Geist Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Cascadia Code', Consolas, ui-monospace, monospace;
+  --font-scale: 1;
+  --text-2xs: calc(10.5px * var(--font-scale));
+  --text-xs: calc(11.5px * var(--font-scale));
+  --text-sm: calc(12.5px * var(--font-scale));
+  --text-ui: calc(13.5px * var(--font-scale));
+  --text-md: calc(14px * var(--font-scale));
+  --text-title: calc(15px * var(--font-scale));
+  --text-prose: calc(15px * var(--font-scale));
+  --text-lg: calc(17px * var(--font-scale));
+  --text-xl: calc(21px * var(--font-scale));
+  --text-2xl: calc(28px * var(--font-scale));
+  --text-3xl: calc(36px * var(--font-scale));
+  --leading-ui: 1.45;
+  --leading-prose: 1.65;
+  --tracking-tight: -0.011em;
+  --tracking-heading: -0.022em;
+  /* Row/label weight: 450 offsets ClearType bloom on dark, plain 500 reads right on paper. */
+  --weight-row: 450;
+  --weight-title: 600;
+
+  /* Radius scale (rounded-xs … rounded-xl) */
+  --r-xs: 4px; /* badges, kbd, inline code */
+  --r-sm: 6px; /* chips, xs buttons, icon tiles ≤24px */
+  --r-md: 8px; /* controls, list rows, inputs */
+  --r-card: 10px; /* cards, popovers, icon tiles 32px+ */
+  --r-lg: 14px; /* dialogs, composer, large panels */
+  --r-xl: 18px; /* hero surfaces, onboarding card */
+  --r-full: 9999px;
+
+  /* Layout */
+  --titlebar-h: 40px;
+  --pane-header-h: 44px;
+  --caption-w: 138px;
+  --transcript-w: 760px;
+  --row-h: 32px;
+  --control-h: 32px;
+  --composer-h: 132px;
+
+  /* Stacking: sheets < toasts < modals < floating < tooltips */
+  --z-titlebar: 30;
+  --z-sheet: 40;
+  --z-toast: 45;
+  --z-modal: 50;
+  --z-popover: 55;
+  --z-tooltip: 60;
+  --z-lightbox: 80;
+
+  /* Motion */
+  --dur-instant: 80ms; /* hover, press */
+  --dur-fast: 120ms; /* color/opacity swaps, popover exit */
+  --dur-base: 180ms; /* popover enter, collapses */
+  --dur-panel: 260ms; /* sheets, panels */
+  --dur-slow: 420ms; /* glows, hero */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-snap: cubic-bezier(0.2, 0.9, 0.1, 1);
+  /* CSS spring (≈ spring.smooth): slight settle, no visible wobble. */
+  --ease-spring: linear(0, 0.009, 0.035 2.1%, 0.141 4.4%, 0.723 12.9%, 0.938 16.7%, 1.017 19.7%, 1.067, 1.077 25.4%, 1.067 28.3%, 1.019 34.9%, 1.002 39.5%, 0.995 45.4%, 1);
+  --press-scale: 0.97;
+}
+
+:root[data-density='compact'] {
+  --row-h: 28px;
+  --control-h: 28px;
+}
+
+/* ─── Dark: Obsidian ─────────────────────────────────────────────────────── */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0b0b0e;
+  --bg-window: #0b0b0e;
+  --surface-1: #111116;
+  --surface-2: #16161d;
+  --surface-3: #1c1c24;
+  --surface-4: #23232d;
+  --glass: rgba(20, 20, 27, 0.72);
+  --glass-strong: rgba(24, 24, 31, 0.86);
+  --overlay: rgba(4, 4, 6, 0.6);
+
+  --hairline-soft: rgba(255, 255, 255, 0.05);
+  --hairline: rgba(255, 255, 255, 0.075);
+  --hairline-strong: rgba(255, 255, 255, 0.115);
+
+  --fg: #ededf2;
+  --fg-2: #a6a6b4;
+  --fg-3: #808090; /* ≥4.8:1 on surface-1 */
+  --fg-4: #52525d; /* disabled + placeholder only */
+
+  --hover: rgba(255, 255, 255, 0.045);
+  --active: rgba(255, 255, 255, 0.075);
+
+  --success: #3ddc97;
+  --warning: #f5b84b;
+  --danger: #ff5a76;
+  --info: #6ca8ff;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 18px -6px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.35), 0 24px 64px -16px rgba(0, 0, 0, 0.75);
+  --shadow-xl: 0 4px 12px rgba(0, 0, 0, 0.4), 0 40px 120px -24px rgba(0, 0, 0, 0.85);
+  --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.055);
+  --highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  --noise-opacity: 0.035;
+}
+
+:root[data-theme='dark'][data-material='mica'] {
+  --bg-window: rgba(11, 11, 14, 0.8);
+}
+
+/* ─── Light: Bone ────────────────────────────────────────────────────────── */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f4f2ee;
+  --bg-window: #f4f2ee;
+  --surface-1: #faf9f6;
+  --surface-2: #ffffff;
+  --surface-3: #f0eee9;
+  --surface-4: #e8e5df;
+  --glass: rgba(252, 251, 249, 0.8);
+  --glass-strong: rgba(254, 253, 251, 0.9);
+  --overlay: rgba(30, 26, 22, 0.26);
+
+  --hairline-soft: rgba(28, 24, 20, 0.055);
+  --hairline: rgba(28, 24, 20, 0.09);
+  --hairline-strong: rgba(28, 24, 20, 0.145);
+
+  --fg: #17161b;
+  --fg-2: #55545d;
+  --fg-3: #6f6d78; /* ≥4.9:1 on surface-1 */
+  --fg-4: #aeacb5;
+
+  --hover: rgba(28, 24, 20, 0.045);
+  --active: rgba(28, 24, 20, 0.075);
+
+  --success: #12935f;
+  --warning: #b97a0a;
+  --danger: #d93a5c;
+  --info: #2f6fd8;
+
+  --shadow-sm: 0 1px 2px rgba(40, 32, 24, 0.07);
+  --shadow-md: 0 1px 2px rgba(40, 32, 24, 0.06), 0 8px 20px -8px rgba(40, 32, 24, 0.14);
+  --shadow-lg: 0 2px 6px rgba(40, 32, 24, 0.06), 0 24px 56px -16px rgba(40, 32, 24, 0.22);
+  --shadow-xl: 0 4px 12px rgba(40, 32, 24, 0.08), 0 40px 100px -24px rgba(40, 32, 24, 0.3);
+  --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --highlight-strong: inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  --noise-opacity: 0.025;
+  --weight-row: 500;
+}
+
+:root[data-theme='light'][data-material='mica'] {
+  --bg-window: rgba(244, 242, 238, 0.82);
+}
+
+/* ─── Accents ────────────────────────────────────────────────────────────────
+ * --accent   solid: primary CTA fill, live/running dot, streaming caret, progress fill. Nothing else.
+ * --accent-2 the softer sibling every tint derives from (soft surfaces, accent text, switches, glows).
+ */
+:root,
+[data-accent='ember'] {
+  --accent: #ff4d3d;
+  --accent-2: #ff8a3d;
+  --accent-fg: #ffffff;
+}
+[data-accent='violet'] {
+  --accent: #8b5cf6;
+  --accent-2: #b98cfb;
+  --accent-fg: #ffffff;
+}
+[data-accent='cyan'] {
+  --accent: #06b6d4;
+  --accent-2: #4fd8c4;
+  --accent-fg: #04121a;
+}
+[data-accent='lime'] {
+  --accent: #84cc16;
+  --accent-2: #b5e655;
+  --accent-fg: #0d1404;
+}
+[data-accent='rose'] {
+  --accent: #f43f5e;
+  --accent-2: #fb7185;
+  --accent-fg: #ffffff;
+}
+[data-accent='mono'] {
+  --accent: #d4d4dc;
+  --accent-2: #a2a2ae;
+  --accent-fg: #0b0b0e;
+}
+
+/* Bone needs deeper accents so tints and accent text keep their contrast on paper. */
+:root[data-theme='light'],
+:root[data-theme='light'] [data-accent='ember'],
+:root[data-theme='light'][data-accent='ember'] {
+  --accent: #ec3d2b;
+  --accent-2: #f2711f;
+}
+:root[data-theme='light'][data-accent='violet'],
+:root[data-theme='light'] [data-accent='violet'] {
+  --accent: #7c3aed;
+  --accent-2: #9d5cf5;
+}
+:root[data-theme='light'][data-accent='cyan'],
+:root[data-theme='light'] [data-accent='cyan'] {
+  --accent: #0891b2;
+  --accent-2: #0d9488;
+  --accent-fg: #ffffff;
+}
+:root[data-theme='light'][data-accent='lime'],
+:root[data-theme='light'] [data-accent='lime'] {
+  --accent: #65a30d;
+  --accent-2: #4d8a12;
+  --accent-fg: #ffffff;
+}
+:root[data-theme='light'][data-accent='rose'],
+:root[data-theme='light'] [data-accent='rose'] {
+  --accent: #e11d48;
+  --accent-2: #f0476a;
+}
+:root[data-theme='light'][data-accent='mono'],
+:root[data-theme='light'] [data-accent='mono'] {
+  --accent: #2a2a31;
+  --accent-2: #5a5962;
+  --accent-fg: #ffffff;
+}
+
+/* Derived roles — recomputed wherever an accent is (re)declared, so they follow theme + accent. */
+:root,
+[data-accent] {
+  --accent-gradient: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  /* Ember highlight surfaces/text: orange family, never confused with --danger. */
+  --accent-soft: color-mix(in oklab, var(--accent-2) 14%, transparent);
+  --accent-softer: color-mix(in oklab, var(--accent-2) 8%, transparent);
+  --accent-border: color-mix(in oklab, var(--accent-2) 30%, transparent);
+  --accent-text: color-mix(in oklab, var(--accent-2) 72%, var(--fg));
+  --accent-glow: 0 0 0 1px color-mix(in oklab, var(--accent-2) 30%, transparent),
+    0 8px 28px -6px color-mix(in oklab, var(--accent-2) 40%, transparent);
+  /* Switch / checkbox / slider "on": the accent at reduced chroma, so a column of switches never reads as a wall of ember. */
+  --control-on: oklch(from var(--accent-2) calc(l - 0.05) calc(c * 0.58) h);
+  --selection: color-mix(in oklab, var(--accent-2) 28%, transparent);
+}
+:root[data-theme='light'],
+:root[data-theme='light'] [data-accent] {
+  --accent-text: color-mix(in oklab, var(--accent-2) 64%, var(--fg));
+  --control-on: oklch(from var(--accent-2) calc(l + 0.02) calc(c * 0.7) h);
+}
+
+/* Neutral + semantic roles. */
+:root {
+  /* Keyboard focus: neutral-bright, never accent-red. Outline color + field ring (box-shadow). */
+  --focus-color: color-mix(in oklab, var(--fg) 45%, transparent);
+  --focus-ring: 0 0 0 1px color-mix(in oklab, var(--fg) 26%, transparent), 0 0 0 4px color-mix(in oklab, var(--fg) 7%, transparent);
+  /* Legacy alias — prefer --focus-color / --focus-ring. */
+  --accent-ring: var(--focus-color);
+
+  --success-soft: color-mix(in oklab, var(--success) 14%, transparent);
+  --warning-soft: color-mix(in oklab, var(--warning) 14%, transparent);
+  --danger-soft: color-mix(in oklab, var(--danger) 14%, transparent);
+  --info-soft: color-mix(in oklab, var(--info) 14%, transparent);
+  --success-border: color-mix(in oklab, var(--success) 28%, transparent);
+  --warning-border: color-mix(in oklab, var(--warning) 28%, transparent);
+  --danger-border: color-mix(in oklab, var(--danger) 28%, transparent);
+  --info-border: color-mix(in oklab, var(--info) 28%, transparent);
+
+  /* Status pills (titlebar activity, counts): neutral unless semantic. */
+  --pill-bg: color-mix(in oklab, var(--surface-3) 80%, transparent);
+  --pill-fg: var(--fg-2);
+
+  /* Elevation: highlight + hairline + shadow, one token per level. */
+  --elev-0: inset 0 0 0 1px var(--hairline-soft); /* flat well */
+  --elev-1: var(--highlight), 0 0 0 1px var(--hairline), var(--shadow-sm); /* cards, controls */
+  --elev-2: var(--highlight), 0 0 0 1px var(--hairline-strong), var(--shadow-lg); /* popovers, menus, toasts */
+  --elev-3: var(--highlight), 0 0 0 1px var(--hairline-strong), var(--shadow-xl); /* dialogs, palette */
+}

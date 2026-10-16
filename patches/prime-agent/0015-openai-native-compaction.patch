@@ -1,0 +1,568 @@
+diff --git a/crates/pa-ai/src/lib.rs b/crates/pa-ai/src/lib.rs
+index 3d4b975..81ff069 100644
+--- a/crates/pa-ai/src/lib.rs
++++ b/crates/pa-ai/src/lib.rs
+@@ -10,6 +10,7 @@
+ pub mod env_api_keys;
+ pub mod models;
+ pub mod models_generated;
++pub mod native_compaction;
+ pub mod oauth;
+ pub mod registry;
+ pub mod types;
+diff --git a/crates/pa-ai/src/native_compaction.rs b/crates/pa-ai/src/native_compaction.rs
+new file mode 100644
+index 0000000..e2e5061
+--- /dev/null
++++ b/crates/pa-ai/src/native_compaction.rs
+@@ -0,0 +1,127 @@
++//! `OpenAI` Responses checkpoints. The trigger is a protocol item, never a user instruction.
++use serde_json::{json, Value};
++
++use crate::types::{
++    AssistantMessage, Context, Model, SimpleStreamOptions, StopReason, Usage, UserMessage,
++    UserMessageContent, UserOrToolContent,
++};
++
++const FORMAT: &str = "responses-compaction-trigger-v1";
++const ITEMS: &str = "vengeanceCompactionItems";
++const COMPLETED: &str = "vengeanceCompactionCompleted";
++
++#[cfg(test)]
++mod tests;
++
++#[must_use]
++pub fn supported(model: &Model) -> bool {
++    matches!(
++        (model.provider.as_str(), model.api.as_str()),
++        ("openai", "openai-responses") | ("openai-codex", "openai-codex-responses")
++    )
++}
++
++/// Observe raw events before the normal assistant-message parser discards non-message items.
++pub(crate) fn observe(event: &Value, output: &mut AssistantMessage) {
++    match event["type"].as_str() {
++        Some("response.output_item.done") if event["item"]["type"] == "compaction" => {
++            let items = output.rest.entry(ITEMS).or_insert_with(|| json!([]));
++            if let Some(items) = items.as_array_mut() {
++                items.push(event["item"].clone());
++            }
++        }
++        Some("response.completed") if output.rest.contains_key(ITEMS) => {
++            output.rest.insert(
++                COMPLETED.into(),
++                json!(event["response"]["status"] == "completed"),
++            );
++        }
++        _ => {}
++    }
++}
++
++fn valid_item(item: &Value) -> bool {
++    item["type"] == "compaction"
++        && item["encrypted_content"]
++            .as_str()
++            .is_some_and(|content| !content.is_empty())
++}
++
++fn checkpoint(model: &Model, output: &AssistantMessage) -> Option<Value> {
++    let items = output.rest.get(ITEMS)?.as_array()?;
++    if output.stop_reason != StopReason::Stop
++        || output.rest.get(COMPLETED) != Some(&Value::Bool(true))
++        || items.len() != 1
++        || !valid_item(&items[0])
++    {
++        return None;
++    }
++    let mut item =
++        json!({"type": "compaction", "encrypted_content": items[0]["encrypted_content"]});
++    if let Some(id) = items[0]["id"].as_str() {
++        item["id"] = json!(id);
++    }
++    Some(
++        json!({"format": FORMAT, "model": model.id, "provider": model.provider,
++        "api": model.api, "baseUrl": model.base_url, "item": item}),
++    )
++}
++
++/// Complete a checkpoint on the same authenticated Responses transport as ordinary turns.
++/// Dropping the caller must cancel the supplied transport token.
++pub async fn compact(
++    model: &Model,
++    context: &Context,
++    mut options: SimpleStreamOptions,
++) -> Option<(Value, Usage)> {
++    if !supported(model) {
++        return None;
++    }
++    options.base.on_payload = Some(std::sync::Arc::new(|mut payload, _| {
++        let body = payload.as_object_mut()?;
++        // Compaction uses provider defaults, not an ordinary answer's budget or reasoning effort.
++        for key in ["max_output_tokens", "temperature", "top_p", "reasoning"] {
++            body.remove(key);
++        }
++        body.get_mut("input")?
++            .as_array_mut()?
++            .push(json!({"type": "compaction_trigger"}));
++        Some(payload)
++    }));
++    let result = crate::complete_simple(model, context, Some(options))
++        .await
++        .ok()?;
++    checkpoint(model, &result).map(|checkpoint| (checkpoint, result.usage))
++}
++
++/// The summary's provider signature survives the pa-agent wire round-trip. Other providers
++/// ignore user text signatures and see the saved text summary. Never parse user text as a checkpoint.
++pub(crate) fn replay(user: &UserMessage, model: &Model) -> Option<Vec<Value>> {
++    if !supported(model) {
++        return None;
++    }
++    let UserMessageContent::Blocks(blocks) = &user.content else {
++        return None;
++    };
++    let [UserOrToolContent::Text(text)] = blocks.as_slice() else {
++        return None;
++    };
++    let checkpoint: Value = serde_json::from_str(text.text_signature.as_deref()?).ok()?;
++    if checkpoint["format"] != FORMAT
++        || checkpoint["model"] != model.id
++        || checkpoint["provider"] != model.provider.as_str()
++        || checkpoint["api"] != model.api.as_str()
++        || checkpoint["baseUrl"] != model.base_url
++        || !valid_item(&checkpoint["item"])
++    {
++        return None;
++    }
++    let mut input = vec![checkpoint["item"].clone()];
++    if let Some(digest) = checkpoint["digest"]
++        .as_str()
++        .filter(|digest| !digest.is_empty())
++    {
++        input.push(json!({"role": "user", "content": [{"type": "input_text", "text": digest}]}));
++    }
++    Some(input)
++}
+diff --git a/crates/pa-ai/src/native_compaction/tests.rs b/crates/pa-ai/src/native_compaction/tests.rs
+new file mode 100644
+index 0000000..2175f6f
+--- /dev/null
++++ b/crates/pa-ai/src/native_compaction/tests.rs
+@@ -0,0 +1,93 @@
++use super::*;
++
++fn model(provider: &str, api: &str) -> Model {
++    serde_json::from_value(
++        json!({"id":"gpt-6.1-sol", "name":"test", "provider":provider,
++        "api":api, "baseUrl":"http://localhost/v1", "reasoning":true, "input":["text"],
++        "contextWindow":272_000, "maxTokens":4096,
++        "cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0}}),
++    )
++    .unwrap()
++}
++
++fn output() -> AssistantMessage {
++    serde_json::from_value(
++        json!({"role":"assistant", "content":[], "api":"openai-responses",
++        "provider":"openai", "model":"gpt-6.1-sol", "stopReason":"stop", "timestamp":0,
++        "usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,
++            "cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}}}),
++    )
++    .unwrap()
++}
++
++fn item() -> Value {
++    json!({"type":"compaction", "id":"cmp_test", "encrypted_content":"opaque"})
++}
++
++#[test]
++fn only_one_valid_item_in_a_completed_response_is_committed() {
++    let model = model("openai", "openai-responses");
++    let mut output = output();
++    observe(
++        &json!({"type":"response.output_item.done", "item":item()}),
++        &mut output,
++    );
++    assert!(checkpoint(&model, &output).is_none(), "truncated stream");
++    observe(
++        &json!({"type":"response.completed", "response":{"status":"incomplete"}}),
++        &mut output,
++    );
++    assert!(checkpoint(&model, &output).is_none());
++    observe(
++        &json!({"type":"response.completed", "response":{"status":"completed"}}),
++        &mut output,
++    );
++    assert!(checkpoint(&model, &output).is_some());
++    output.stop_reason = StopReason::Aborted;
++    assert!(checkpoint(&model, &output).is_none());
++    output.stop_reason = StopReason::Stop;
++    observe(
++        &json!({"type":"response.output_item.done", "item":{"type":"compaction"}}),
++        &mut output,
++    );
++    assert!(
++        checkpoint(&model, &output).is_none(),
++        "malformed extra item is still a duplicate"
++    );
++}
++
++#[test]
++fn replay_is_bound_to_version_model_provider_api_and_endpoint() {
++    for (provider, api) in [
++        ("openai", "openai-responses"),
++        ("openai-codex", "openai-codex-responses"),
++    ] {
++        let model = model(provider, api);
++        let mut output = output();
++        observe(
++            &json!({"type":"response.output_item.done", "item":item()}),
++            &mut output,
++        );
++        observe(
++            &json!({"type":"response.completed", "response":{"status":"completed"}}),
++            &mut output,
++        );
++        let mut saved = checkpoint(&model, &output).unwrap();
++        saved["digest"] = json!("current harness state");
++        let user = |checkpoint: &Value| -> UserMessage {
++            serde_json::from_value(json!({"content":[{"type":"text", "text":"portable summary",
++                "textSignature":checkpoint.to_string()}], "timestamp":0}))
++            .unwrap()
++        };
++        let replayed = replay(&user(&saved), &model).unwrap();
++        assert_eq!(replayed[0], item());
++        assert_eq!(replayed[1]["content"][0]["text"], "current harness state");
++        for field in ["format", "model", "provider", "api", "baseUrl"] {
++            let mut changed = saved.clone();
++            changed[field] = json!("other");
++            assert!(replay(&user(&changed), &model).is_none(), "{field}");
++        }
++        saved.as_object_mut().unwrap().remove("format");
++        assert!(replay(&user(&saved), &model).is_none(), "legacy checkpoint");
++    }
++}
+diff --git a/crates/pa-ai/src/providers/openai_responses_shared.rs b/crates/pa-ai/src/providers/openai_responses_shared.rs
+index d26d893..3c6a74c 100644
+--- a/crates/pa-ai/src/providers/openai_responses_shared.rs
++++ b/crates/pa-ai/src/providers/openai_responses_shared.rs
+@@ -162,6 +162,12 @@ pub fn convert_responses_messages(
+     }
+ 
+     for (msg_index, msg) in transformed.iter().enumerate() {
++        if let Message::User(user) = msg {
++            if let Some(checkpoint) = crate::native_compaction::replay(user, model) {
++                messages.extend(checkpoint);
++                continue;
++            }
++        }
+         match msg {
+             Message::User(user) => match &user.content {
+                 UserMessageContent::Text(text) => messages.push(json!({
+diff --git a/crates/pa-ai/src/providers/openai_responses_stream.rs b/crates/pa-ai/src/providers/openai_responses_stream.rs
+index ea68747..9d04b8b 100644
+--- a/crates/pa-ai/src/providers/openai_responses_stream.rs
++++ b/crates/pa-ai/src/providers/openai_responses_stream.rs
+@@ -81,6 +81,7 @@ impl<'a> ResponsesStreamProcessor<'a> {
+     // Long by design: mirrors the provider's stream shape.
+     #[allow(clippy::too_many_lines)]
+     pub fn handle_event(&mut self, event: &Value) -> Result<(), ProviderError> {
++        crate::native_compaction::observe(event, self.output);
+         let event_type = event
+             .get("type")
+             .and_then(|value| value.as_str())
+diff --git a/crates/pa-core/src/session/mod.rs b/crates/pa-core/src/session/mod.rs
+index 87ff23d..45db15b 100644
+--- a/crates/pa-core/src/session/mod.rs
++++ b/crates/pa-core/src/session/mod.rs
+@@ -451,6 +451,11 @@ pub fn build_session_context(entries: &[FileEntry], leaf_id: Option<&str>) -> Se
+         };
+         messages.push(AgentMessage::CompactionSummary(CompactionSummaryMessage {
+             summary: payload.summary,
++            native_compaction: payload
++                .details
++                .as_ref()
++                .and_then(|details| details.get("nativeCompaction"))
++                .cloned(),
+             tokens_before: payload.tokens_before,
+             retained_message_count: Some(retained.len() as u64),
+             custom_instructions: payload.custom_instructions,
+diff --git a/crates/pa-core/src/session_engine/branch_summarization.rs b/crates/pa-core/src/session_engine/branch_summarization.rs
+index 673d5d2..ccd6483 100644
+--- a/crates/pa-core/src/session_engine/branch_summarization.rs
++++ b/crates/pa-core/src/session_engine/branch_summarization.rs
+@@ -133,6 +133,7 @@ fn get_message_from_entry(entry: &FileEntry) -> Option<AgentMessage> {
+         FileEntry::Compaction { payload, .. } => {
+             Some(AgentMessage::CompactionSummary(CompactionSummaryMessage {
+                 summary: payload.summary.clone(),
++                native_compaction: None,
+                 tokens_before: payload.tokens_before,
+                 retained_message_count: None,
+                 custom_instructions: payload.custom_instructions.clone(),
+diff --git a/crates/pa-core/src/session_engine/compact_session.rs b/crates/pa-core/src/session_engine/compact_session.rs
+index d2e1ed0..d13113d 100644
+--- a/crates/pa-core/src/session_engine/compact_session.rs
++++ b/crates/pa-core/src/session_engine/compact_session.rs
+@@ -122,6 +122,7 @@ pub enum CompactOutcome {
+ }
+ 
+ pub(crate) struct CompactionAttempt {
++    pub(crate) native_messages: Vec<AgentMessage>,
+     /// The session leaf at prepare: the commit is valid while the active
+     /// branch still grows through it with no compaction between.
+     prefix_leaf: Option<String>,
+@@ -205,7 +206,24 @@ pub(crate) fn prepare_attempt(
+     file_op_messages.extend(turn_prefix_messages.iter().cloned());
+     let details: CompactionDetails =
+         details_for(&file_op_messages, &entries, prev_compaction_index);
++    // Reuse only the previous boundary and the exact prefix this attempt replaces.
++    // Native input needs tool results too; the text summarizer intentionally omits them.
++    let mut native_messages: Vec<_> = session
++        .active_context()
++        .messages
++        .into_iter()
++        .filter(|message| matches!(message, AgentMessage::CompactionSummary(_)))
++        .collect();
++    native_messages.extend(
++        entries[preparation.boundary_start..cut.first_kept_entry_index]
++            .iter()
++            .filter_map(|entry| match entry {
++                FileEntry::Message { message, .. } => Some(message.clone()),
++                _ => message_from_entry(entry),
++            }),
++    );
+     Ok(CompactionAttempt {
++        native_messages,
+         prefix_leaf,
+         cut,
+         previous_summary,
+diff --git a/crates/pa-core/src/session_engine/compaction.rs b/crates/pa-core/src/session_engine/compaction.rs
+index 01643f0..00fcac7 100644
+--- a/crates/pa-core/src/session_engine/compaction.rs
++++ b/crates/pa-core/src/session_engine/compaction.rs
+@@ -568,6 +568,7 @@ mod tests {
+     fn compaction_summary(timestamp: u64) -> AgentMessage {
+         AgentMessage::CompactionSummary(pa_types::session::CompactionSummaryMessage {
+             summary: "the story so far".to_string(),
++            native_compaction: None,
+             tokens_before: 100,
+             retained_message_count: None,
+             custom_instructions: None,
+diff --git a/crates/pa-core/src/session_engine/compaction_arms.rs b/crates/pa-core/src/session_engine/compaction_arms.rs
+index df178ac..424c6db 100644
+--- a/crates/pa-core/src/session_engine/compaction_arms.rs
++++ b/crates/pa-core/src/session_engine/compaction_arms.rs
+@@ -305,11 +305,18 @@ impl AgentSession {
+                 summary_delta: options.summary_delta.clone(),
+                 semantic_edges: options.semantic_edges.clone(),
+             };
+-            let prepared = crate::session_engine::compact_session::summarize_attempt(
+-                &attempt,
+-                &attempt_options,
+-            )
+-            .await?;
++            let (mut prepared, checkpoint) = tokio::try_join!(
++                crate::session_engine::compact_session::summarize_attempt(
++                    &attempt,
++                    &attempt_options
++                ),
++                async {
++                    Ok::<_, anyhow::Error>(
++                        Box::pin(self.native_checkpoint(&attempt, &attempt_options)).await,
++                    )
++                }
++            )?;
++            super::native_compaction::attach(&mut prepared, checkpoint);
+             let committed = {
+                 let mut session = self.session.lock().await;
+                 crate::session_engine::compact_session::commit_attempt(
+diff --git a/crates/pa-core/src/session_engine/headless.rs b/crates/pa-core/src/session_engine/headless.rs
+index 7adb48b..4b9bf18 100644
+--- a/crates/pa-core/src/session_engine/headless.rs
++++ b/crates/pa-core/src/session_engine/headless.rs
+@@ -332,6 +332,7 @@ mod tests {
+             text_assistant("answer", StopReason::Stop),
+             AgentMessage::CompactionSummary(CompactionSummaryMessage {
+                 summary: "prior".to_string(),
++                native_compaction: None,
+                 tokens_before: 0,
+                 retained_message_count: None,
+                 custom_instructions: None,
+diff --git a/crates/pa-core/src/session_engine/messages.rs b/crates/pa-core/src/session_engine/messages.rs
+index cf34bbc..86d28ca 100644
+--- a/crates/pa-core/src/session_engine/messages.rs
++++ b/crates/pa-core/src/session_engine/messages.rs
+@@ -357,11 +357,23 @@ pub fn convert_to_llm(messages: &[AgentMessage]) -> Vec<AgentMessage> {
+                         format!("{HARNESS_DIGEST_PREFIX}{digest}{HARNESS_DIGEST_SUFFIX}\n\n")
+                     })
+                     .unwrap_or_default();
++                let mut block = text_block(format!(
++                    "{digest_block}{COMPACTION_SUMMARY_PREFIX}{}{COMPACTION_SUMMARY_SUFFIX}",
++                    summary.summary
++                ));
++                if std::env::var("VENGEANCE_NATIVE_COMPACTION").as_deref() != Ok("off") {
++                    if let (Some(checkpoint), UserContentBlock::Text(text)) =
++                        (&summary.native_compaction, &mut block)
++                    {
++                        let mut checkpoint = checkpoint.clone();
++                        if let Some(object) = checkpoint.as_object_mut() {
++                            object.insert("digest".into(), serde_json::Value::String(digest_block));
++                            text.text_signature = Some(checkpoint.to_string());
++                        }
++                    }
++                }
+                 AgentMessage::User(UserMessage {
+-                    content: UserContent::Blocks(vec![text_block(format!(
+-                        "{digest_block}{COMPACTION_SUMMARY_PREFIX}{}{COMPACTION_SUMMARY_SUFFIX}",
+-                        summary.summary
+-                    ))]),
++                    content: UserContent::Blocks(vec![block]),
+                     timestamp: summary.timestamp,
+                     rest: serde_json::Map::default(),
+                 })
+@@ -518,6 +530,7 @@ mod tests {
+             }),
+             AgentMessage::CompactionSummary(pa_types::session::CompactionSummaryMessage {
+                 summary: "the story".to_string(),
++                native_compaction: None,
+                 tokens_before: 1,
+                 retained_message_count: None,
+                 custom_instructions: None,
+diff --git a/crates/pa-core/src/session_engine/mod.rs b/crates/pa-core/src/session_engine/mod.rs
+index 81f2c67..a5b8c74 100644
+--- a/crates/pa-core/src/session_engine/mod.rs
++++ b/crates/pa-core/src/session_engine/mod.rs
+@@ -48,6 +48,7 @@ pub mod turn_boundary;
+ mod admission;
+ mod compaction_arms;
+ mod model_selection;
++mod native_compaction;
+ mod wiring;
+ 
+ use std::sync::Arc;
+diff --git a/crates/pa-core/src/session_engine/native_compaction.rs b/crates/pa-core/src/session_engine/native_compaction.rs
+new file mode 100644
+index 0000000..3705635
+--- /dev/null
++++ b/crates/pa-core/src/session_engine/native_compaction.rs
+@@ -0,0 +1,106 @@
++//! Optional native checkpoint alongside the durable, portable text summary.
++use pa_ai::types::{Context, SimpleStreamOptions, StreamOptions, Tool, Usage};
++use serde_json::Value;
++
++use super::{
++    compact_session::{CompactOptions, CompactionAttempt, PreparedCompaction},
++    AgentSession,
++};
++
++impl AgentSession {
++    pub(super) async fn native_checkpoint(
++        &self,
++        attempt: &CompactionAttempt,
++        options: &CompactOptions<'_>,
++    ) -> Option<(Value, Usage)> {
++        if std::env::var("VENGEANCE_NATIVE_COMPACTION").as_deref() == Ok("off")
++            || !pa_ai::native_compaction::supported(&options.model)
++        {
++            return None;
++        }
++        let state = self.agent.state().await;
++        let context = Context {
++            system_prompt: Some(state.system_prompt),
++            messages: super::messages::convert_to_llm(&attempt.native_messages)
++                .iter()
++                .filter_map(super::provider_adapter::json_round_trip)
++                .collect(),
++            tools: Some(
++                state
++                    .tools
++                    .iter()
++                    .map(|tool| Tool {
++                        name: tool.name().to_string(),
++                        description: tool.description().to_string(),
++                        parameters: tool.parameters().clone(),
++                    })
++                    .collect(),
++            ),
++        };
++        let (session_id, service_tier) = {
++            let session = self.session.lock().await;
++            (
++                session.get_session_id().to_string(),
++                session.active_context().service_tier,
++            )
++        };
++        // Use the selected session model even when text summaries use an auxiliary model.
++        let headers = match options.auxiliary {
++            Some(auxiliary) => {
++                let auxiliary = auxiliary.clone();
++                let model = options.model.clone();
++                let api_key = options.api_key.clone();
++                tokio::task::spawn_blocking(move || {
++                    super::auxiliary_model::session_fallback_with_headers(
++                        &auxiliary, &model, api_key,
++                    )
++                })
++                .await
++                .ok()?
++                .headers
++            }
++            None => options.model.headers.clone(),
++        };
++        let cancel = tokio_util::sync::CancellationToken::new();
++        let _cancel_on_drop = cancel.clone().drop_guard();
++        let request = pa_ai::native_compaction::compact(
++            &options.model,
++            &context,
++            SimpleStreamOptions {
++                base: StreamOptions {
++                    api_key: options.api_key.clone(),
++                    headers: headers.map(|headers| headers.into_iter().collect()),
++                    signal: Some(cancel),
++                    session_id: Some(session_id),
++                    service_tier,
++                    ..Default::default()
++                },
++                reasoning: Some(super::provider_adapter::model_thinking_level(
++                    state.thinking_level,
++                )),
++                ..Default::default()
++            },
++        );
++        match options.abort {
++            Some(signal) => pa_agent::abort::race_with_abort(request, signal)
++                .await
++                .ok()
++                .flatten(),
++            None => request.await,
++        }
++    }
++}
++
++pub(super) fn attach(prepared: &mut PreparedCompaction, checkpoint: Option<(Value, Usage)>) {
++    let Some((checkpoint, usage)) = checkpoint else {
++        return;
++    };
++    let details = prepared
++        .entry
++        .details
++        .get_or_insert_with(|| serde_json::json!({}));
++    details["nativeCompaction"] = checkpoint;
++    let total = prepared.result.usage.get_or_insert_with(Usage::default);
++    super::compaction_exec::add_assistant_usage(total, &usage);
++    prepared.entry.usage = Some(*total);
++}
+diff --git a/crates/pa-types/src/session.rs b/crates/pa-types/src/session.rs
+index a9f0bfb..bbc1609 100644
+--- a/crates/pa-types/src/session.rs
++++ b/crates/pa-types/src/session.rs
+@@ -116,6 +116,9 @@ pub struct BranchSummaryMessage {
+ #[serde(rename_all = "camelCase")]
+ pub struct CompactionSummaryMessage {
+     pub summary: String,
++    /// Versioned provider checkpoint; the text summary remains the portable fallback.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub native_compaction: Option<serde_json::Value>,
+     pub tokens_before: u64,
+     /// Retained messages that precede this summary in transcript presentation.
+     #[serde(default, skip_serializing_if = "Option::is_none")]

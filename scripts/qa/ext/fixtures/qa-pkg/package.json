@@ -1,0 +1,7 @@
+{
+  "name": "pi-qa-tools",
+  "version": "1.2.3",
+  "description": "QA fixture package: two extensions, a skill and two prompt templates.",
+  "keywords": ["pi-package"],
+  "homepage": "https://example.invalid/pi-qa-tools"
+}

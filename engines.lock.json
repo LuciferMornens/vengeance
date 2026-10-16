@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "platform": "win32-x64",
+  "pi": {
+    "repository": "https://github.com/earendil-works/pi.git",
+    "tag": "v1.2.0",
+    "revision": "06a466935536f8c9bcacb2d5efc0fc021be1bdff",
+    "version": "1.2.0+vengeance.4",
+    "patches": [
+      "patches/pi/0001-vengeance-distribution.patch",
+      "patches/pi/0002-preserve-extension-runtime-version.patch",
+      "patches/pi/0003-native-runtime-qualification.patch",
+      "patches/pi/0004-model-catalog-qualification.patch",
+      "patches/pi/0005-windows-native-fixtures.patch",
+      "patches/pi/0006-abliteration-provider.patch"
+    ],
+    "packageDir": "pi/node_modules/@earendil-works/pi-coding-agent",
+    "entry": "pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
+  },
+  "prime": {
+    "repository": "https://github.com/PrimeIntellect-ai/prime-agent.git",
+    "tag": "v0.10.0",
+    "revision": "763094e1b6a7c17450ee8399b06cda1853847ca5",
+    "version": "0.10.0+vengeance.6",
+    "patches": [
+      "patches/prime-agent/0001-fix-cancel-provider-HTTP-streams-when-compaction-is-.patch",
+      "patches/prime-agent/0002-fix-synchronize-persisted-user-shell-output-with-liv.patch",
+      "patches/prime-agent/0003-fix-compare-release-archive-paths-portably-on-Window.patch",
+      "patches/prime-agent/0004-vengeance-distribution.patch",
+      "patches/prime-agent/0005-openai-speed-tiers.patch",
+      "patches/prime-agent/0006-windows-session-qualification.patch",
+      "patches/prime-agent/0007-daemon-transport-qualification.patch",
+      "patches/prime-agent/0008-native-test-fixtures.patch",
+      "patches/prime-agent/0009-windows-package-launcher.patch",
+      "patches/prime-agent/0010-windows-edit-errors.patch",
+      "patches/prime-agent/0011-windows-incident-rotation.patch",
+      "patches/prime-agent/0012-live-model-image-capabilities.patch",
+      "patches/prime-agent/0013-pin-session-model-selection.patch",
+      "patches/prime-agent/0014-upstream-settings-preservation.patch",
+      "patches/prime-agent/0015-openai-native-compaction.patch"
+    ],
+    "catalogRevision": "b90e08807c37ccdfab04eb31b23de6a86dd6e7fe",
+    "rustVersion": "1.98.1",
+    "target": "x86_64-pc-windows-gnu",
+    "packageDir": "prime",
+    "entry": "prime/prime-agent.exe"
+  }
+}

@@ -1,0 +1,35 @@
+[package]
+name = "vengeance-prime-auth"
+version = "1.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+
+[dependencies.pa-ai]
+git = "https://github.com/PrimeIntellect-ai/prime-agent"
+rev = "763094e1b6a7c17450ee8399b06cda1853847ca5"
+
+[dependencies.pa-core]
+git = "https://github.com/PrimeIntellect-ai/prime-agent"
+rev = "763094e1b6a7c17450ee8399b06cda1853847ca5"
+
+[dependencies.pa-daemon]
+git = "https://github.com/PrimeIntellect-ai/prime-agent"
+rev = "763094e1b6a7c17450ee8399b06cda1853847ca5"
+
+[dependencies.pa-types]
+git = "https://github.com/PrimeIntellect-ai/prime-agent"
+rev = "763094e1b6a7c17450ee8399b06cda1853847ca5"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 4
+
+[lints.rust]
+unsafe_code = "forbid"

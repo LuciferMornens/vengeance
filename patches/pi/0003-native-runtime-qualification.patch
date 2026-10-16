@@ -1,0 +1,170 @@
+diff --git a/packages/coding-agent/src/config.ts b/packages/coding-agent/src/config.ts
+index 1940d1f..14b24c5 100644
+--- a/packages/coding-agent/src/config.ts
++++ b/packages/coding-agent/src/config.ts
+@@ -586,6 +586,8 @@ export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
+ export const VERSION: string = pkg.version || "0.0.0";
+ // Extensions compare VERSION against upstream releases, independently of distribution identity.
+ export const DISTRIBUTION_VERSION: string = pkg.vengeance?.version || VERSION;
++// This fork distributes Engine updates exclusively through Vengeance releases.
++export const IS_VENGEANCE_DISTRIBUTION = true;
+ 
+ // e.g., PI_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
+ export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
+diff --git a/packages/coding-agent/src/modes/interactive/components/config-selector.ts b/packages/coding-agent/src/modes/interactive/components/config-selector.ts
+index a805488..ceb910e 100644
+--- a/packages/coding-agent/src/modes/interactive/components/config-selector.ts
++++ b/packages/coding-agent/src/modes/interactive/components/config-selector.ts
+@@ -3,7 +3,7 @@
+  */
+ 
+ import { homedir } from "node:os";
+-import { basename, dirname, join, relative } from "node:path";
++import { basename, dirname, join, relative, sep } from "node:path";
+ import {
+ 	type Component,
+ 	Container,
+@@ -868,7 +868,7 @@ class ResourceList implements Component, Focusable {
+ 
+ 	private getPackageResourcePattern(item: ResourceItem): string {
+ 		const baseDir = item.metadata.baseDir ?? dirname(item.path);
+-		return relative(baseDir, item.path);
++		return relative(baseDir, item.path).split(sep).join("/");
+ 	}
+ }
+ 
+diff --git a/packages/coding-agent/src/modes/interactive/external-editor.ts b/packages/coding-agent/src/modes/interactive/external-editor.ts
+index d672d4e..0e46b9f 100644
+--- a/packages/coding-agent/src/modes/interactive/external-editor.ts
++++ b/packages/coding-agent/src/modes/interactive/external-editor.ts
+@@ -1,7 +1,8 @@
+-import { spawn } from "node:child_process";
+ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
++import { parseCommandArgs } from "../../core/prompt-templates.ts";
++import { spawnProcess } from "../../utils/child-process.ts";
+ import { stripBom } from "../../utils/text.ts";
+ 
+ export interface ExternalEditorOptions {
+@@ -16,16 +17,16 @@ export async function editInExternalEditor(options: ExternalEditorOptions): Prom
+ 	const filePath = join(directory, "prompt.md");
+ 	try {
+ 		writeFileSync(filePath, options.content, "utf-8");
+-		const [editor, ...editorArgs] = options.command.split(" ");
++		const [editor, ...editorArgs] = parseCommandArgs(options.command);
++		if (!editor) return { status: "failed" };
+ 		process.stdout.write(`Launching external editor: ${options.command}\nPi will resume when the editor exits.\n`);
+ 
+ 		// Do not use spawnSync here. On Windows, synchronous child_process calls can keep
+ 		// Node/libuv's console input read active after the parent pauses stdin, racing
+ 		// vim/nvim for the console input buffer until Ctrl+C cancels the pending read.
+ 		const exitCode = await new Promise<number | null>((resolve) => {
+-			const child = spawn(editor, [...editorArgs, filePath], {
++			const child = spawnProcess(editor, [...editorArgs, filePath], {
+ 				stdio: "inherit",
+-				shell: process.platform === "win32",
+ 			});
+ 			child.on("error", () => resolve(null));
+ 			child.on("close", (code) => resolve(code));
+diff --git a/packages/coding-agent/src/package-manager-cli.ts b/packages/coding-agent/src/package-manager-cli.ts
+index 34dcb0d..5ace1ea 100644
+--- a/packages/coding-agent/src/package-manager-cli.ts
++++ b/packages/coding-agent/src/package-manager-cli.ts
+@@ -22,6 +22,7 @@ import {
+ 	getPackageDir,
+ 	getSelfUpdateCommand,
+ 	getSelfUpdateUnavailableInstruction,
++	IS_VENGEANCE_DISTRIBUTION,
+ 	PACKAGE_NAME,
+ 	type SelfUpdateCommand,
+ 	type SelfUpdatePackageTarget,
+@@ -901,7 +902,11 @@ export async function handlePackageCommand(
+ 		return true;
+ 	}
+ 
+-	if (options.command === "update" && updateTargetIncludesSelf(options.updateTarget ?? { type: "self" })) {
++	if (
++		IS_VENGEANCE_DISTRIBUTION &&
++		options.command === "update" &&
++		updateTargetIncludesSelf(options.updateTarget ?? { type: "self" })
++	) {
+ 		console.error("This Engine is supplied by Vengeance. Update Vengeance to update the Engine.");
+ 		process.exitCode = 1;
+ 		return true;
+diff --git a/packages/coding-agent/src/utils/version-check.ts b/packages/coding-agent/src/utils/version-check.ts
+index ada78b9..edbf0de 100644
+--- a/packages/coding-agent/src/utils/version-check.ts
++++ b/packages/coding-agent/src/utils/version-check.ts
+@@ -1,5 +1,5 @@
+ import { compare, valid } from "semver";
+-import { DISTRIBUTION_VERSION } from "../config.ts";
++import { IS_VENGEANCE_DISTRIBUTION } from "../config.ts";
+ import { fetchWithRetry } from "./management-http.ts";
+ import { getPiUserAgent } from "./pi-user-agent.ts";
+ 
+@@ -97,7 +97,7 @@ export async function getLatestPiVersion(
+ 
+ export async function checkForNewPiVersion(currentVersion: string): Promise<LatestPiRelease | undefined> {
+ 	// Vengeance qualifies and distributes engine upgrades with application releases.
+-	if (DISTRIBUTION_VERSION.includes("+vengeance.")) return undefined;
++	if (IS_VENGEANCE_DISTRIBUTION) return undefined;
+ 	if (process.env.PI_SKIP_VERSION_CHECK) return undefined;
+ 
+ 	try {
+diff --git a/packages/coding-agent/test/vengeance-self-update.test.ts b/packages/coding-agent/test/vengeance-self-update.test.ts
+new file mode 100644
+index 0000000..3708dbf
+--- /dev/null
++++ b/packages/coding-agent/test/vengeance-self-update.test.ts
+@@ -0,0 +1,50 @@
++import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { ENV_AGENT_DIR, IS_VENGEANCE_DISTRIBUTION, VERSION } from "../src/config.ts";
++import { handlePackageCommand } from "../src/package-manager-cli.ts";
++import { checkForNewPiVersion } from "../src/utils/version-check.ts";
++
++describe("Vengeance distribution updates", () => {
++	afterEach(() => {
++		vi.unstubAllEnvs();
++		vi.unstubAllGlobals();
++		vi.restoreAllMocks();
++	});
++
++	it.each([{ options: [] }, { options: ["--force"] }])(
++		"blocks self-update before network or package writes ($options)",
++		async ({ options }) => {
++			const directory = mkdtempSync(join(tmpdir(), "vengeance-update-policy-"));
++			const settings = join(directory, "settings.json");
++			const original = '{"verificationPreference":"preserve"}\n';
++			writeFileSync(settings, original);
++			vi.stubEnv(ENV_AGENT_DIR, directory);
++			const fetch = vi.fn();
++			vi.stubGlobal("fetch", fetch);
++			const error = vi.spyOn(console, "error").mockImplementation(() => {});
++			const exitCode = process.exitCode;
++			try {
++				expect(IS_VENGEANCE_DISTRIBUTION).toBe(true);
++				expect(await handlePackageCommand(["update", "--self", ...options])).toBe(true);
++				expect(fetch).not.toHaveBeenCalled();
++				expect(readFileSync(settings, "utf8")).toBe(original);
++				expect(error).toHaveBeenCalledWith(
++					"This Engine is supplied by Vengeance. Update Vengeance to update the Engine.",
++				);
++				expect(process.exitCode).toBe(1);
++			} finally {
++				process.exitCode = exitCode;
++				rmSync(directory, { recursive: true, force: true });
++			}
++		},
++	);
++
++	it("does not advertise an upstream self-update", async () => {
++		const fetch = vi.fn();
++		vi.stubGlobal("fetch", fetch);
++		expect(await checkForNewPiVersion(VERSION)).toBeUndefined();
++		expect(fetch).not.toHaveBeenCalled();
++	});
++});

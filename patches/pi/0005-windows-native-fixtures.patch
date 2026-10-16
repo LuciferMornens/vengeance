@@ -1,0 +1,997 @@
+diff --git a/packages/chord/test/boundary.test.ts b/packages/chord/test/boundary.test.ts
+index 2c044ba..4997a1d 100644
+--- a/packages/chord/test/boundary.test.ts
++++ b/packages/chord/test/boundary.test.ts
+@@ -1,5 +1,5 @@
+ import { readdir, readFile } from "node:fs/promises";
+-import { dirname, resolve } from "node:path";
++import { dirname, resolve, sep } from "node:path";
+ import { fileURLToPath } from "node:url";
+ import { describe, expect, test } from "vitest";
+ 
+@@ -24,7 +24,10 @@ describe("package boundary", () => {
+ 			for (const match of source.matchAll(IMPORT_SPECIFIER)) {
+ 				const specifier = match[1]!;
+ 				if (specifier.startsWith("@earendil-works/pi-")) violations.push(`${path}: ${specifier}`);
+-				if (specifier.startsWith(".") && !resolve(dirname(file), specifier).startsWith(`${sourceDirectory}/`)) {
++				if (
++					specifier.startsWith(".") &&
++					!resolve(dirname(file), specifier).startsWith(`${sourceDirectory}${sep}`)
++				) {
+ 					violations.push(`${path}: ${specifier}`);
+ 				}
+ 			}
+diff --git a/packages/coding-agent/test/config.test.ts b/packages/coding-agent/test/config.test.ts
+index ff652ca..5d58af8 100644
+--- a/packages/coding-agent/test/config.test.ts
++++ b/packages/coding-agent/test/config.test.ts
+@@ -1,7 +1,8 @@
++import * as fs from "fs";
+ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+ import { tmpdir } from "os";
+ import { delimiter, join } from "path";
+-import { afterEach, describe, expect, test } from "vitest";
++import { afterEach, describe, expect, test, vi } from "vitest";
+ import {
+ 	detectInstallChange,
+ 	detectInstallMethod,
+@@ -17,6 +18,11 @@ const originalPiPackageDir = process.env.PI_PACKAGE_DIR;
+ const originalArgv1 = process.argv[1];
+ let tempDir: string | undefined;
+ 
++vi.mock("fs", async (importOriginal) => {
++	const actual = await importOriginal<typeof import("fs")>();
++	return { ...actual, accessSync: vi.fn(actual.accessSync) };
++});
++
+ function setExecPath(value: string): void {
+ 	Object.defineProperty(process, "execPath", {
+ 		value,
+@@ -25,6 +31,7 @@ function setExecPath(value: string): void {
+ }
+ 
+ afterEach(() => {
++	vi.restoreAllMocks();
+ 	if (execPathDescriptor) {
+ 		Object.defineProperty(process, "execPath", execPathDescriptor);
+ 	}
+@@ -125,7 +132,7 @@ function createBunGlobalInstall(): { packageDir: string } {
+ 
+ function createFakePnpmScript(root: string): string {
+ 	if (process.platform === "win32") {
+-		return `@echo off\r\nif "%1"=="root" if "%2"=="-g" echo ${root}\r\n`;
++		return `@echo off\r\nif "%~1"=="root" if "%~2"=="-g" echo ${root}\r\n`;
+ 	}
+ 	const escapedRoot = root.replaceAll("'", "'\\''");
+ 	return `#!/bin/sh\nif [ "$1" = "root" ] && [ "$2" = "-g" ]; then\n\tprintf '%s\\n' '${escapedRoot}'\n\texit 0\nfi\nexit 1\n`;
+@@ -133,7 +140,7 @@ function createFakePnpmScript(root: string): string {
+ 
+ function createFakeYarnScript(globalDir: string): string {
+ 	if (process.platform === "win32") {
+-		return `@echo off\r\nif "%1"=="global" if "%2"=="dir" echo ${globalDir}\r\n`;
++		return `@echo off\r\nif "%~1"=="global" if "%~2"=="dir" echo ${globalDir}\r\n`;
+ 	}
+ 	const escapedGlobalDir = globalDir.replaceAll("'", "'\\''");
+ 	return `#!/bin/sh\nif [ "$1" = "global" ] && [ "$2" = "dir" ]; then\n\tprintf '%s\\n' '${escapedGlobalDir}'\n\texit 0\nfi\nexit 1\n`;
+@@ -141,7 +148,7 @@ function createFakeYarnScript(globalDir: string): string {
+ 
+ function createFakeBunScript(bunBin: string): string {
+ 	if (process.platform === "win32") {
+-		return `@echo off\r\nif "%1"=="pm" if "%2"=="bin" if "%3"=="-g" echo ${bunBin}\r\n`;
++		return `@echo off\r\nif "%~1"=="pm" if "%~2"=="bin" if "%~3"=="-g" echo ${bunBin}\r\n`;
+ 	}
+ 	const escapedBunBin = bunBin.replaceAll("'", "'\\''");
+ 	return `#!/bin/sh\nif [ "$1" = "pm" ] && [ "$2" = "bin" ] && [ "$3" = "-g" ]; then\n\tprintf '%s\\n' '${escapedBunBin}'\n\texit 0\nfi\nexit 1\n`;
+@@ -252,6 +259,12 @@ describe("detectInstallMethod", () => {
+ 
+ 	test("self-update respects configured npmCommand", () => {
+ 		const { prefix } = createNpmPrefixInstall();
++		if (process.platform === "win32") {
++			// Windows npm root -g uses <prefix>/node_modules rather than lib/node_modules.
++			const packageDir = join(prefix, "node_modules", "@earendil-works", "pi-coding-agent");
++			mkdirSync(packageDir, { recursive: true });
++			process.env.PI_PACKAGE_DIR = packageDir;
++		}
+ 
+ 		const command = getSelfUpdateCommand("@earendil-works/pi-coding-agent", ["npm", "--prefix", prefix]);
+ 
+@@ -442,7 +455,13 @@ describe("detectInstallMethod", () => {
+ 
+ 	test("does not self-update when npm install path is not writable", () => {
+ 		const { packageDir } = createNpmPrefixInstall();
+-		chmodSync(packageDir, 0o500);
++		const access = fs.accessSync;
++		vi.spyOn(fs, "accessSync").mockImplementation((path, mode) => {
++			if (path === packageDir && mode === fs.constants.W_OK) {
++				throw Object.assign(new Error("permission denied"), { code: "EACCES" });
++			}
++			return access(path, mode);
++		});
+ 
+ 		expect(getSelfUpdateCommand("@earendil-works/pi-coding-agent")).toBeUndefined();
+ 		expect(getSelfUpdateUnavailableInstruction("@earendil-works/pi-coding-agent")).toContain(
+diff --git a/packages/coding-agent/test/external-editor.test.ts b/packages/coding-agent/test/external-editor.test.ts
+index 5cbbc93..75d1fc7 100644
+--- a/packages/coding-agent/test/external-editor.test.ts
++++ b/packages/coding-agent/test/external-editor.test.ts
+@@ -18,11 +18,11 @@ async function runExternalEditor(fixtureFlag?: "--fail" | "--empty"): Promise<{
+ 	result: ExternalEditorResult;
+ 	capture: EditorCapture;
+ }> {
+-	const testDirectory = mkdtempSync(join(tmpdir(), "pi-external-editor-test-"));
++	const testDirectory = mkdtempSync(join(tmpdir(), "pi external editor test-"));
+ 	const capturePath = join(testDirectory, "capture.json");
+ 	try {
+ 		const result = await editInExternalEditor({
+-			command: `${process.execPath} ${editorFixturePath} ${capturePath}${fixtureFlag ? ` ${fixtureFlag}` : ""}`,
++			command: `"${process.execPath}" "${editorFixturePath}" "${capturePath}"${fixtureFlag ? ` ${fixtureFlag}` : ""}`,
+ 			content: "original",
+ 		});
+ 		const capture = JSON.parse(readFileSync(capturePath, "utf-8")) as EditorCapture;
+diff --git a/packages/coding-agent/test/file-mutation-queue.test.ts b/packages/coding-agent/test/file-mutation-queue.test.ts
+index 8e13a45..071e971 100644
+--- a/packages/coding-agent/test/file-mutation-queue.test.ts
++++ b/packages/coding-agent/test/file-mutation-queue.test.ts
+@@ -1,7 +1,8 @@
+-import { access, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
++import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
+ import { afterEach, describe, expect, it } from "vitest";
++import { createFileAlias } from "../../../scripts/test-filesystem.ts";
+ import { createEditTool } from "../src/core/tools/edit.ts";
+ import { withFileMutationQueue } from "../src/core/tools/file-mutation-queue.ts";
+ import { createWriteTool } from "../src/core/tools/write.ts";
+@@ -77,9 +78,8 @@ describe("withFileMutationQueue", () => {
+ 	it("uses the same queue for symlink aliases", async () => {
+ 		const dir = await createTempDir();
+ 		const targetPath = join(dir, "target.txt");
+-		const symlinkPath = join(dir, "alias.txt");
+ 		await writeFile(targetPath, "hello\n", "utf8");
+-		await symlink(targetPath, symlinkPath);
++		const symlinkPath = createFileAlias(targetPath, join(dir, "alias.txt"));
+ 
+ 		const order: string[] = [];
+ 		await Promise.all([
+diff --git a/packages/coding-agent/test/footer-width.test.ts b/packages/coding-agent/test/footer-width.test.ts
+index 12c074d..7a134ae 100644
+--- a/packages/coding-agent/test/footer-width.test.ts
++++ b/packages/coding-agent/test/footer-width.test.ts
+@@ -1,3 +1,4 @@
++import { join } from "node:path";
+ import { visibleWidth } from "@earendil-works/pi-tui";
+ import { beforeAll, describe, expect, it } from "vitest";
+ import type { AgentSession } from "../src/core/agent-session.ts";
+@@ -113,7 +114,7 @@ describe("formatCwdForFooter", () => {
+ 
+ 	it("abbreviates the home directory and descendants", () => {
+ 		expect(formatCwdForFooter("/home/user", "/home/user")).toBe("~");
+-		expect(formatCwdForFooter("/home/user/project", "/home/user")).toBe("~/project");
++		expect(formatCwdForFooter("/home/user/project", "/home/user")).toBe(join("~", "project"));
+ 	});
+ });
+ 
+diff --git a/packages/coding-agent/test/interactive-mode-suspend.test.ts b/packages/coding-agent/test/interactive-mode-suspend.test.ts
+index 996d2f1..045c8d7 100644
+--- a/packages/coding-agent/test/interactive-mode-suspend.test.ts
++++ b/packages/coding-agent/test/interactive-mode-suspend.test.ts
+@@ -24,8 +24,10 @@ function callHandleCtrlZ(context: HandleCtrlZThis): void {
+ const interactiveModePrototype = InteractiveMode.prototype as unknown;
+ 
+ describe("InteractiveMode.handleCtrlZ", () => {
++	const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+ 	afterEach(() => {
+ 		vi.restoreAllMocks();
++		if (platformDescriptor) Object.defineProperty(process, "platform", platformDescriptor);
+ 	});
+ 
+ 	test("shows a status message and skips suspend on Windows", () => {
+@@ -63,6 +65,7 @@ describe("InteractiveMode.handleCtrlZ", () => {
+ 	});
+ 
+ 	test("keeps the process alive while suspended and restores the TUI on SIGCONT", () => {
++		Object.defineProperty(process, "platform", { configurable: true, value: "linux" });
+ 		const ui: FakeUi = {
+ 			start: vi.fn(),
+ 			stop: vi.fn(),
+@@ -113,6 +116,7 @@ describe("InteractiveMode.handleCtrlZ", () => {
+ 	});
+ 
+ 	test("cleans up the temporary handlers if suspension fails", () => {
++		Object.defineProperty(process, "platform", { configurable: true, value: "linux" });
+ 		const ui: FakeUi = {
+ 			start: vi.fn(),
+ 			stop: vi.fn(),
+diff --git a/packages/coding-agent/test/mcp-command.test.ts b/packages/coding-agent/test/mcp-command.test.ts
+index 7bde1e1..8b0c29c 100644
+--- a/packages/coding-agent/test/mcp-command.test.ts
++++ b/packages/coding-agent/test/mcp-command.test.ts
+@@ -41,9 +41,12 @@ describe("pi mcp", () => {
+ 		expect(exitCode).toBe(1);
+ 		expect(output).toContain("fixture: connected, 1 tool (codemode, global)\n");
+ 		expect(output).toContain("  tools: echo");
++		expect(output).toContain("broken: failed (codemode, global)\n  pi-test-missing-mcp-server\n");
+ 		expect(output).toContain(
+-			"broken: failed (codemode, global)\n  pi-test-missing-mcp-server\n  spawn pi-test-missing-mcp-server ENOENT",
++			process.platform === "win32" ? "MCP connection closed" : "spawn pi-test-missing-mcp-server ENOENT",
+ 		);
++		if (process.platform === "win32")
++			expect(output).toContain("is not recognized as an internal or external command");
+ 		expect(output).toContain("parked: disabled (codemode, global)");
+ 		expect(output).toContain("config error: ");
+ 		expect(output).toContain('server "bad" needs either "command"');
+diff --git a/packages/coding-agent/test/package-command-paths.test.ts b/packages/coding-agent/test/package-command-paths.test.ts
+index c97fbe9..feae09f 100644
+--- a/packages/coding-agent/test/package-command-paths.test.ts
++++ b/packages/coding-agent/test/package-command-paths.test.ts
+@@ -24,6 +24,13 @@ import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+ import { handlePackageCommand } from "../src/package-manager-cli.ts";
+ import { allowNetwork } from "./test-network-env.ts";
+ 
++// Qualify the upstream installer separately from the distribution policy.
++// vengeance-self-update.test.ts checks the real, unmocked Vengeance guard.
++vi.mock("../src/config.ts", async (importOriginal) => {
++	const config = await importOriginal<typeof import("../src/config.ts")>();
++	return { ...config, IS_VENGEANCE_DISTRIBUTION: false };
++});
++
+ describe("package commands", () => {
+ 	let tempDir: string;
+ 	let agentDir: string;
+@@ -942,7 +949,7 @@ else {
+ 		writeFileSync(join(selfPackageDir, "package.json"), JSON.stringify({ name: PACKAGE_NAME, version: VERSION }));
+ 		const fakePnpmScript =
+ 			process.platform === "win32"
+-				? `@echo off\r\nif "%1"=="root" if "%2"=="-g" (echo ${globalRoot} & exit /b 0)\r\nexit /b 23\r\n`
++				? `@echo off\r\nif "%~1"=="root" if "%~2"=="-g" (echo ${globalRoot} & exit /b 0)\r\nexit /b 23\r\n`
+ 				: `#!/bin/sh\nif [ "$1" = "root" ] && [ "$2" = "-g" ]; then\n\tprintf '%s\\n' '${globalRoot.replaceAll("'", "'\\''")}'\n\texit 0\nfi\nexit 23\n`;
+ 		writeFileSync(fakePnpmPath, fakePnpmScript);
+ 		chmodSync(fakePnpmPath, 0o755);
+diff --git a/packages/coding-agent/test/package-manager.test.ts b/packages/coding-agent/test/package-manager.test.ts
+index 8aedd93..5179f7d 100644
+--- a/packages/coding-agent/test/package-manager.test.ts
++++ b/packages/coding-agent/test/package-manager.test.ts
+@@ -1,9 +1,10 @@
+ import { EventEmitter } from "node:events";
+-import { existsSync, mkdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
++import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+ import { tmpdir } from "node:os";
+ import { join, relative } from "node:path";
+ import { PassThrough } from "node:stream";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { symlinkSync } from "../../../scripts/test-filesystem.ts";
+ import { DefaultPackageManager, type ProgressEvent, type ResolvedResource } from "../src/core/package-manager.ts";
+ import { SettingsManager } from "../src/core/settings-manager.ts";
+ 
+@@ -1615,7 +1616,9 @@ Content`,
+ 		// #10765
+ 		it("should expand ~ in exclusion and exact patterns", async () => {
+ 			const previousHome = process.env.HOME;
++			const previousProfile = process.env.USERPROFILE;
+ 			process.env.HOME = tempDir;
++			process.env.USERPROFILE = tempDir;
+ 
+ 			try {
+ 				const skillsDir = join(tempDir, "extra", "skills");
+@@ -1635,6 +1638,8 @@ Content`,
+ 				expect(result.skills.some((r) => isDisabled(r, "glob-excluded/SKILL.md"))).toBe(true);
+ 				expect(result.skills.some((r) => isDisabled(r, "exact-excluded/SKILL.md"))).toBe(true);
+ 			} finally {
++				if (previousProfile === undefined) delete process.env.USERPROFILE;
++				else process.env.USERPROFILE = previousProfile;
+ 				if (previousHome === undefined) {
+ 					delete process.env.HOME;
+ 				} else {
+diff --git a/packages/coding-agent/test/paths.test.ts b/packages/coding-agent/test/paths.test.ts
+index fbdb4f5..0928ec9 100644
+--- a/packages/coding-agent/test/paths.test.ts
++++ b/packages/coding-agent/test/paths.test.ts
+@@ -1,8 +1,9 @@
+-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
++import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+ import { homedir, tmpdir } from "node:os";
+ import { join, resolve } from "node:path";
+ import { pathToFileURL } from "node:url";
+ import { afterEach, describe, expect, it } from "vitest";
++import { createFileAlias, symlinkSync } from "../../../scripts/test-filesystem.ts";
+ import {
+ 	canonicalizePath,
+ 	getCwdRelativePath,
+@@ -37,9 +38,8 @@ describe("canonicalizePath", () => {
+ 	it("resolves symlinks to their targets", () => {
+ 		const dir = createTempDir();
+ 		const target = join(dir, "target.txt");
+-		const link = join(dir, "link.txt");
+ 		writeFileSync(target, "hello");
+-		symlinkSync(target, link);
++		const link = createFileAlias(target, join(dir, "link.txt"));
+ 		expect(canonicalizePath(link)).toBe(realpathSync(target));
+ 	});
+ 
+@@ -63,7 +63,7 @@ describe("canonicalizePath", () => {
+ 		const target = join(dir, "target.txt");
+ 		const link = join(dir, "link.txt");
+ 		// Create a symlink whose target does not exist.
+-		symlinkSync(target, link);
++		symlinkSync(target, link, process.platform === "win32" ? "junction" : "file");
+ 		// realpathSync would throw, so canonicalizePath returns the link path.
+ 		expect(canonicalizePath(link)).toBe(link);
+ 	});
+diff --git a/packages/coding-agent/test/resource-loader.test.ts b/packages/coding-agent/test/resource-loader.test.ts
+index bba3fc9..dab31b3 100644
+--- a/packages/coding-agent/test/resource-loader.test.ts
++++ b/packages/coding-agent/test/resource-loader.test.ts
+@@ -1,8 +1,9 @@
+-import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
++import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
+ import { pathToFileURL } from "node:url";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { fileSymlinksAvailable, symlinkSync } from "../../../scripts/test-filesystem.ts";
+ import { AuthStorage } from "../src/core/auth-storage.ts";
+ import { ExtensionRunner } from "../src/core/extensions/runner.ts";
+ import { DefaultResourceLoader, loadProjectContextFiles } from "../src/core/resource-loader.ts";
+@@ -1244,27 +1245,33 @@ export default function(pi: ExtensionAPI) {
+ 		});
+ 
+ 		// https://github.com/earendil-works/pi/issues/10681
+-		it("should load the worktree's context once when it symlinks to the main repo's file", () => {
+-			const { main, worktree, worktreeSrc } = setupNestedWorktree();
+-			writeFileSync(join(main, "AGENTS.md"), "main repo instructions");
+-			symlinkSync(join(main, "AGENTS.md"), join(worktree, "AGENTS.md"));
+-
+-			const files = loadProjectContextFiles({ cwd: worktreeSrc, agentDir });
+-
+-			expect(files.map((f) => f.path)).toEqual([join(worktree, "AGENTS.md")]);
+-		});
+-
+-		it("should skip the main repo's duplicate when the main repo's file is a symlink", () => {
+-			const { outer, main, worktree, worktreeSrc } = setupNestedWorktree();
+-			const shared = join(outer, "shared-agents.md");
+-			writeFileSync(shared, "shared instructions");
+-			symlinkSync(shared, join(main, "AGENTS.md"));
+-			symlinkSync(shared, join(worktree, "AGENTS.md"));
+-
+-			const files = loadProjectContextFiles({ cwd: worktreeSrc, agentDir });
+-
+-			expect(files.map((f) => f.path)).toEqual([join(worktree, "AGENTS.md")]);
+-		});
++		it.runIf(fileSymlinksAvailable)(
++			"should load the worktree's context once when it symlinks to the main repo's file",
++			() => {
++				const { main, worktree, worktreeSrc } = setupNestedWorktree();
++				writeFileSync(join(main, "AGENTS.md"), "main repo instructions");
++				symlinkSync(join(main, "AGENTS.md"), join(worktree, "AGENTS.md"));
++
++				const files = loadProjectContextFiles({ cwd: worktreeSrc, agentDir });
++
++				expect(files.map((f) => f.path)).toEqual([join(worktree, "AGENTS.md")]);
++			},
++		);
++
++		it.runIf(fileSymlinksAvailable)(
++			"should skip the main repo's duplicate when the main repo's file is a symlink",
++			() => {
++				const { outer, main, worktree, worktreeSrc } = setupNestedWorktree();
++				const shared = join(outer, "shared-agents.md");
++				writeFileSync(shared, "shared instructions");
++				symlinkSync(shared, join(main, "AGENTS.md"));
++				symlinkSync(shared, join(worktree, "AGENTS.md"));
++
++				const files = loadProjectContextFiles({ cwd: worktreeSrc, agentDir });
++
++				expect(files.map((f) => f.path)).toEqual([join(worktree, "AGENTS.md")]);
++			},
++		);
+ 
+ 		it("should still inherit the main repo's context when the worktree root has none", () => {
+ 			const { main, worktreeSrc } = setupNestedWorktree();
+diff --git a/packages/coding-agent/test/sdk-session-manager.test.ts b/packages/coding-agent/test/sdk-session-manager.test.ts
+index cf1349f..846aa2c 100644
+--- a/packages/coding-agent/test/sdk-session-manager.test.ts
++++ b/packages/coding-agent/test/sdk-session-manager.test.ts
+@@ -1,6 +1,6 @@
+ import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+ import { tmpdir } from "node:os";
+-import { join } from "node:path";
++import { join, sep } from "node:path";
+ import { getModel } from "@earendil-works/pi-ai/compat";
+ import { afterEach, beforeEach, describe, expect, it } from "vitest";
+ import { createAgentSession } from "../src/core/sdk.ts";
+@@ -41,7 +41,7 @@ describe("createAgentSession session manager defaults", () => {
+ 		const sessionFile = session.sessionManager.getSessionFile();
+ 
+ 		expect(sessionDir).toBe(expectedSessionDir);
+-		expect(sessionFile?.startsWith(`${expectedSessionDir}/`)).toBe(true);
++		expect(sessionFile?.startsWith(`${expectedSessionDir}${sep}`)).toBe(true);
+ 
+ 		session.dispose();
+ 	});
+@@ -78,7 +78,7 @@ describe("createAgentSession session manager defaults", () => {
+ 		});
+ 
+ 		expect(session.sessionManager).toBe(sessionManager);
+-		expect(session.systemPrompt).toContain(`<cwd>\n${sessionCwd}\n</cwd>`);
++		expect(session.systemPrompt).toContain(`<cwd>\n${sessionCwd.split(sep).join("/")}\n</cwd>`);
+ 
+ 		const bashTool = session.agent.state.tools.find((tool) => tool.name === "bash");
+ 		expect(bashTool).toBeTruthy();
+@@ -88,7 +88,10 @@ describe("createAgentSession session manager defaults", () => {
+ 			.map((item) => item.text)
+ 			.join("");
+ 
+-		expect(realpathSync(output.trim())).toBe(realpathSync(sessionCwd));
++		const { normalizeWindowsShellPath } = await import("../src/utils/paths.ts");
++		expect(
++			realpathSync(process.platform === "win32" ? normalizeWindowsShellPath(output.trim()) : output.trim()),
++		).toBe(realpathSync(sessionCwd));
+ 
+ 		session.dispose();
+ 	});
+diff --git a/packages/coding-agent/test/session-manager/load-entries.test.ts b/packages/coding-agent/test/session-manager/load-entries.test.ts
+index 463dfad..6c0ea06 100644
+--- a/packages/coding-agent/test/session-manager/load-entries.test.ts
++++ b/packages/coding-agent/test/session-manager/load-entries.test.ts
+@@ -1,3 +1,4 @@
++import { resolve } from "node:path";
+ import { describe, expect, it } from "vitest";
+ import type { FileEntry, SessionEntry, SessionMessageEntry } from "../../src/core/session-manager.ts";
+ import { SessionManager } from "../../src/core/session-manager.ts";
+@@ -100,7 +101,7 @@ describe("SessionManager.inMemory with preloaded entries", () => {
+ 
+ 		expect(session.getSessionId()).toBe("restored-session");
+ 		expect(session.getHeader()!.id).toBe("restored-session");
+-		expect(session.getHeader()!.cwd).toBe("/project");
++		expect(session.getHeader()!.cwd).toBe(resolve("/project"));
+ 	});
+ 
+ 	it("generates a session id when the options carry none", () => {
+diff --git a/packages/coding-agent/test/session-selector-path-delete.test.ts b/packages/coding-agent/test/session-selector-path-delete.test.ts
+index 4a0ed36..43fd8a6 100644
+--- a/packages/coding-agent/test/session-selector-path-delete.test.ts
++++ b/packages/coding-agent/test/session-selector-path-delete.test.ts
+@@ -1,8 +1,9 @@
+-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
++import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
+ import { setKeybindings } from "@earendil-works/pi-tui";
+ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
++import { symlinkSync } from "../../../scripts/test-filesystem.ts";
+ import { KeybindingsManager } from "../src/core/keybindings.ts";
+ import type { SessionInfo } from "../src/core/session-manager.ts";
+ import { SessionSelectorComponent } from "../src/modes/interactive/components/session-selector.ts";
+@@ -67,8 +68,8 @@ function createSymlinkedSessionPaths(): {
+ 	mkdirSync(sharedDir, { recursive: true });
+ 	const aliasASessions = join(aliasADir, "sessions");
+ 	const aliasBSessions = join(aliasBDir, "sessions");
+-	symlinkSync(sharedDir, aliasASessions);
+-	symlinkSync(sharedDir, aliasBSessions);
++	symlinkSync(sharedDir, aliasASessions, "dir");
++	symlinkSync(sharedDir, aliasBSessions, "dir");
+ 
+ 	const parentRealPath = join(sharedDir, "parent.jsonl");
+ 	const childRealPath = join(sharedDir, "child.jsonl");
+diff --git a/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts b/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts
+index 61b0918..032dacc 100644
+--- a/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts
++++ b/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts
+@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
+ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
++import { pathToFileURL } from "node:url";
+ import { afterEach, beforeEach, describe, expect, it } from "vitest";
+ 
+ /**
+@@ -39,7 +40,7 @@ describe("issue #2791 fs.watch error event crashes process", () => {
+ 	});
+ 
+ 	it("process should survive an error event on the theme FSWatcher", () => {
+-		const themeModulePath = join(__dirname, "../../../src/modes/interactive/theme/theme.ts").replace(/\\/g, "/");
++		const themeModulePath = pathToFileURL(join(__dirname, "../../../src/modes/interactive/theme/theme.ts")).href;
+ 		const agentDir = join(tempRoot, "agent").replace(/\\/g, "/");
+ 
+ 		// Script that sets up the watcher and emits a synthetic error on it.
+diff --git a/packages/coding-agent/test/tools.test.ts b/packages/coding-agent/test/tools.test.ts
+index ae16443..d89f45c 100644
+--- a/packages/coding-agent/test/tools.test.ts
++++ b/packages/coding-agent/test/tools.test.ts
+@@ -1,5 +1,6 @@
+ import { applyPatch } from "diff";
+ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
++import * as fileOperations from "fs/promises";
+ import { tmpdir } from "os";
+ import { join } from "path";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+@@ -26,8 +27,14 @@ import {
+ 	createReadTool,
+ 	createWriteTool,
+ } from "../src/index.ts";
++import { normalizeWindowsShellPath } from "../src/utils/paths.ts";
+ import * as shellModule from "../src/utils/shell.ts";
+ 
++vi.mock("fs/promises", async (importOriginal) => {
++	const actual = await importOriginal<typeof import("fs/promises")>();
++	return { ...actual, access: vi.fn(actual.access) };
++});
++
+ const readTool = createReadTool(process.cwd());
+ const writeTool = createWriteTool(process.cwd());
+ const editTool = createEditTool(process.cwd());
+@@ -440,7 +447,7 @@ describe("Coding Agent Tools", () => {
+ 			expect(readFileSync(testFile, "utf-8")).toBe(originalContent);
+ 		});
+ 
+-		it("should include EACCES for read-only files", async () => {
++		it("should include the native permission error for read-only files", async () => {
+ 			const testFile = join(testDir, "edit-readonly.txt");
+ 			writeFileSync(testFile, "hello\n");
+ 			chmodSync(testFile, 0o444);
+@@ -450,7 +457,9 @@ describe("Coding Agent Tools", () => {
+ 					path: testFile,
+ 					edits: [{ oldText: "hello", newText: "world" }],
+ 				}),
+-			).rejects.toThrow(`Could not edit file: ${testFile}. Error code: EACCES.`);
++			).rejects.toThrow(
++				`Could not edit file: ${testFile}. Error code: ${process.platform === "win32" ? "EPERM" : "EACCES"}.`,
++			);
+ 		});
+ 
+ 		it("should include the original error message for unknown edit access errors", async () => {
+@@ -482,7 +491,9 @@ describe("Coding Agent Tools", () => {
+ 		it("should include EACCES in diff preview for unreadable files", async () => {
+ 			const unreadableFile = join(testDir, "unreadable-preview.txt");
+ 			writeFileSync(unreadableFile, "hello\n");
+-			chmodSync(unreadableFile, 0o222);
++			vi.spyOn(fileOperations, "access").mockRejectedValueOnce(
++				Object.assign(new Error("permission denied"), { code: "EACCES" }),
++			);
+ 
+ 			const result = await computeEditsDiff(unreadableFile, [{ oldText: "hello", newText: "world" }], testDir);
+ 
+@@ -919,6 +930,7 @@ describe("Coding Agent Tools", () => {
+ 			const result = await grepTool.execute("test-call-grep-injection", {
+ 				pattern: `--pre=${payload}`,
+ 				path: testDir,
++				literal: true,
+ 			});
+ 
+ 			expect(getTextOutput(result)).toContain("No matches found");
+@@ -1101,7 +1113,8 @@ describe("tool cwd resolution", () => {
+ 			fakeCtx(testDir),
+ 		);
+ 		const output = getTextOutput(result);
+-		expect(output).toContain(testDir);
++		const nativePath = process.platform === "win32" ? normalizeWindowsShellPath(output.trim()) : output.trim();
++		expect(nativePath.replaceAll("\\", "/").toLowerCase()).toBe(testDir.replaceAll("\\", "/").toLowerCase());
+ 	});
+ });
+ 
+diff --git a/packages/coding-agent/test/trust-selector.test.ts b/packages/coding-agent/test/trust-selector.test.ts
+index c465900..a3c3a76 100644
+--- a/packages/coding-agent/test/trust-selector.test.ts
++++ b/packages/coding-agent/test/trust-selector.test.ts
+@@ -1,3 +1,4 @@
++import { dirname, resolve } from "node:path";
+ import { setKeybindings } from "@earendil-works/pi-tui";
+ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+ import { KeybindingsManager } from "../src/core/keybindings.ts";
+@@ -15,30 +16,32 @@ describe("TrustSelectorComponent", () => {
+ 	});
+ 
+ 	it("keeps the saved trusted decision marked while browsing", () => {
++		const cwd = resolve("/project");
+ 		const selector = new TrustSelectorComponent({
+-			cwd: "/project",
+-			savedDecision: { path: "/project", decision: true },
++			cwd,
++			savedDecision: { path: cwd, decision: true },
+ 			projectTrusted: true,
+ 			onSelect: () => {},
+ 			onCancel: () => {},
+ 		});
+ 
+ 		let output = stripAnsi(selector.render(120).join("\n"));
+-		expect(output).toContain("Saved decision: trusted (/project)");
++		expect(output).toContain(`Saved decision: trusted (${cwd})`);
+ 		expect(output).toContain("Current session: trusted");
+ 		expect(output).toContain("→ ✓ Trust");
+ 
+ 		selector.handleInput("\x1b[B");
+ 		output = stripAnsi(selector.render(120).join("\n"));
+ 		expect(output).toContain("✓ Trust");
+-		expect(output).toContain("→   Trust parent folder (/)");
++		expect(output).toContain(`→   Trust parent folder (${dirname(cwd)})`);
+ 		expect(output).not.toContain("✓ Do not trust");
+ 	});
+ 
+ 	it("selects a trust decision", () => {
++		const cwd = resolve("/project");
+ 		const onSelect = vi.fn();
+ 		const selector = new TrustSelectorComponent({
+-			cwd: "/project",
++			cwd,
+ 			savedDecision: null,
+ 			projectTrusted: false,
+ 			onSelect,
+@@ -47,13 +50,14 @@ describe("TrustSelectorComponent", () => {
+ 
+ 		selector.handleInput("\n");
+ 
+-		expect(onSelect).toHaveBeenCalledWith({ trusted: true, updates: [{ path: "/project", decision: true }] });
++		expect(onSelect).toHaveBeenCalledWith({ trusted: true, updates: [{ path: cwd, decision: true }] });
+ 	});
+ 
+ 	it("labels saved ancestor decisions as inherited", () => {
++		const parent = resolve("/parent");
+ 		const selector = new TrustSelectorComponent({
+-			cwd: "/parent/project/nested",
+-			savedDecision: { path: "/parent", decision: true },
++			cwd: resolve("/parent/project/nested"),
++			savedDecision: { path: parent, decision: true },
+ 			projectTrusted: true,
+ 			onSelect: () => {},
+ 			onCancel: () => {},
+@@ -61,30 +65,32 @@ describe("TrustSelectorComponent", () => {
+ 
+ 		const output = stripAnsi(selector.render(120).join("\n"));
+ 
+-		expect(output).toContain("Saved decision: trusted (inherited from /parent)");
++		expect(output).toContain(`Saved decision: trusted (inherited from ${parent})`);
+ 	});
+ 
+ 	it("adds a trust parent option", () => {
++		const parent = resolve("/parent");
++		const cwd = resolve("/parent/project");
+ 		const onSelect = vi.fn();
+ 		const selector = new TrustSelectorComponent({
+-			cwd: "/parent/project",
+-			savedDecision: { path: "/parent", decision: true },
++			cwd,
++			savedDecision: { path: parent, decision: true },
+ 			projectTrusted: true,
+ 			onSelect,
+ 			onCancel: () => {},
+ 		});
+ 
+ 		const output = stripAnsi(selector.render(120).join("\n"));
+-		expect(output).toContain("Saved decision: trusted (inherited from /parent)");
+-		expect(output).toContain("✓ Trust parent folder (/parent)");
++		expect(output).toContain(`Saved decision: trusted (inherited from ${parent})`);
++		expect(output).toContain(`✓ Trust parent folder (${parent})`);
+ 
+ 		selector.handleInput("\n");
+ 
+ 		expect(onSelect).toHaveBeenCalledWith({
+ 			trusted: true,
+ 			updates: [
+-				{ path: "/parent", decision: true },
+-				{ path: "/parent/project", decision: null },
++				{ path: parent, decision: true },
++				{ path: cwd, decision: null },
+ 			],
+ 		});
+ 	});
+diff --git a/packages/coding-agent/test/version-check.test.ts b/packages/coding-agent/test/version-check.test.ts
+index ffe2150..07584f7 100644
+--- a/packages/coding-agent/test/version-check.test.ts
++++ b/packages/coding-agent/test/version-check.test.ts
+@@ -11,6 +11,12 @@ import { allowNetwork } from "./test-network-env.ts";
+ 
+ const originalSkipVersionCheck = process.env.PI_SKIP_VERSION_CHECK;
+ 
++// The unmocked distribution policy is qualified in vengeance-self-update.test.ts.
++vi.mock("../src/config.ts", async (importOriginal) => {
++	const config = await importOriginal<typeof import("../src/config.ts")>();
++	return { ...config, IS_VENGEANCE_DISTRIBUTION: false };
++});
++
+ beforeEach(() => {
+ 	allowNetwork();
+ });
+diff --git a/packages/durable/test/env-node.test.ts b/packages/durable/test/env-node.test.ts
+index 37410f0..38e143f 100644
+--- a/packages/durable/test/env-node.test.ts
++++ b/packages/durable/test/env-node.test.ts
+@@ -6,6 +6,7 @@ import { delimiter, join } from "node:path";
+ import { pathToFileURL } from "node:url";
+ import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
+ import { afterEach, describe, expect, it, vi } from "vitest";
++import { fileSymlinksAvailable, symlinkSync } from "../../../scripts/test-filesystem.ts";
+ import { FileError, getOrThrow, type ShellExecOptions } from "../src/env/index.ts";
+ import { NodeExecutionEnv } from "../src/env/node.ts";
+ 
+@@ -197,8 +198,7 @@ describe("NodeExecutionEnv filesystem", () => {
+ 		const env = new NodeExecutionEnv({ cwd: root });
+ 		getOrThrow(await env.createDir("dir", { recursive: true }, BACKGROUND_CONTEXT));
+ 		getOrThrow(await env.writeFile("dir/file.txt", "hello", BACKGROUND_CONTEXT));
+-		await symlink(join(root, "dir/file.txt"), join(root, "file-link"));
+-		await symlink(join(root, "dir"), join(root, "dir-link"));
++		symlinkSync(join(root, "dir"), join(root, "dir-link"), "dir");
+ 
+ 		expect(getOrThrow(await env.fileInfo("dir", BACKGROUND_CONTEXT))).toMatchObject({
+ 			name: "dir",
+@@ -211,26 +211,36 @@ describe("NodeExecutionEnv filesystem", () => {
+ 			kind: "file",
+ 			size: 5,
+ 		});
+-		expect(getOrThrow(await env.fileInfo("file-link", BACKGROUND_CONTEXT))).toMatchObject({
+-			name: "file-link",
+-			path: join(root, "file-link"),
+-			kind: "symlink",
+-		});
+ 		expect(getOrThrow(await env.fileInfo("dir-link", BACKGROUND_CONTEXT))).toMatchObject({
+ 			name: "dir-link",
+ 			path: join(root, "dir-link"),
+ 			kind: "symlink",
+ 		});
+-		expect(getOrThrow(await env.canonicalPath("file-link", BACKGROUND_CONTEXT))).toBe(
+-			await realpath(join(root, "dir/file.txt")),
++		expect(getOrThrow(await env.listDir(".", BACKGROUND_CONTEXT))).toContainEqual(
++			expect.objectContaining({ name: "dir-link", kind: "symlink" }),
++		);
++	});
++
++	it.runIf(fileSymlinksAvailable)("returns file-link metadata and its canonical target", async () => {
++		const root = createTempDir();
++		const env = new NodeExecutionEnv({ cwd: root });
++		getOrThrow(await env.writeFile("target.txt", "hello", BACKGROUND_CONTEXT));
++		await symlink(join(root, "target.txt"), join(root, "link.txt"), "file");
++		expect(getOrThrow(await env.fileInfo("link.txt", BACKGROUND_CONTEXT))).toMatchObject({
++			name: "link.txt",
++			path: join(root, "link.txt"),
++			kind: "symlink",
++		});
++		expect(getOrThrow(await env.canonicalPath("link.txt", BACKGROUND_CONTEXT))).toBe(
++			await realpath(join(root, "target.txt")),
+ 		);
+ 	});
+ 
+-	it("lists symlinks as symlinks", async () => {
++	it.runIf(fileSymlinksAvailable)("lists file symlinks as symlinks", async () => {
+ 		const root = createTempDir();
+ 		const env = new NodeExecutionEnv({ cwd: root });
+ 		getOrThrow(await env.writeFile("target.txt", "hello", BACKGROUND_CONTEXT));
+-		await symlink(join(root, "target.txt"), join(root, "link.txt"));
++		await symlink(join(root, "target.txt"), join(root, "link.txt"), "file");
+ 
+ 		const entries = getOrThrow(await env.listDir(".", BACKGROUND_CONTEXT));
+ 		expect(
+diff --git a/packages/durable/test/tools.test.ts b/packages/durable/test/tools.test.ts
+index dba4d7c..bb0b47e 100644
+--- a/packages/durable/test/tools.test.ts
++++ b/packages/durable/test/tools.test.ts
+@@ -1,7 +1,6 @@
+ // Ported from packages/agent/test/harness/tools.test.ts and adapted to ToolRegistration: tools take the environment
+ // from `api.env`, stream through `api.output()`, and report notices as diagnostics instead of content text.
+ import { appendFileSync, mkdirSync, rmSync } from "node:fs";
+-import { symlink } from "node:fs/promises";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
+ import type { Context, JsonValue } from "@earendil-works/chord";
+@@ -14,6 +13,7 @@ import type {
+ } from "@earendil-works/pi-durable";
+ import { applyPatch } from "diff";
+ import { afterAll, describe, expect, it } from "vitest";
++import { createFileAlias, symlinkSync } from "../../../scripts/test-filesystem.ts";
+ import {
+ 	type ExecutionEnv,
+ 	ExecutionError,
+@@ -443,11 +443,11 @@ describe("durable tools", () => {
+ 		it("serializes concurrent edits through canonical and symlink paths", async () => {
+ 			const env = new SlowReadExecutionEnv({ cwd: createTempDir() });
+ 			getOrThrow(await env.writeFile("target.txt", "alpha\nbeta\ngamma\n", BACKGROUND_CONTEXT));
+-			await symlink("target.txt", `${env.cwd}/link.txt`);
++			const alias = createFileAlias(join(env.cwd, "target.txt"), join(env.cwd, "link.txt"));
+ 			const tool = createEditTool();
+ 			await Promise.all([
+ 				run(tool, { path: "target.txt", edits: [{ oldText: "alpha", newText: "ALPHA" }] }, env),
+-				run(tool, { path: "link.txt", edits: [{ oldText: "beta", newText: "BETA" }] }, env),
++				run(tool, { path: alias, edits: [{ oldText: "beta", newText: "BETA" }] }, env),
+ 			]);
+ 			expect(getOrThrow(await env.readTextFile("target.txt", BACKGROUND_CONTEXT))).toBe("ALPHA\nBETA\ngamma\n");
+ 		});
+@@ -467,8 +467,8 @@ describe("durable tools", () => {
+ 
+ 		it("serializes a new file created through a symlinked directory with its canonical path", async () => {
+ 			const env = new BlockingWriteExecutionEnv({ cwd: createTempDir() });
+-			mkdirSync(`${env.cwd}/real`);
+-			await symlink(`${env.cwd}/real`, `${env.cwd}/link`);
++			mkdirSync(join(env.cwd, "real"));
++			symlinkSync(join(env.cwd, "real"), join(env.cwd, "link"), "dir");
+ 			const tool = createWriteTool();
+ 			const first = run(tool, { path: "link/new.txt", content: "first\n" }, env);
+ 			await env.firstWriteStarted.promise;
+@@ -533,8 +533,8 @@ describe("durable tools", () => {
+ 		it("edits regular files through symlinks", async () => {
+ 			const env = createEnv();
+ 			getOrThrow(await env.writeFile("target.txt", "before\n", BACKGROUND_CONTEXT));
+-			await symlink("target.txt", `${env.cwd}/link.txt`);
+-			await run(createEditTool(), { path: "link.txt", edits: [{ oldText: "before", newText: "after" }] }, env);
++			const alias = createFileAlias(join(env.cwd, "target.txt"), join(env.cwd, "link.txt"));
++			await run(createEditTool(), { path: alias, edits: [{ oldText: "before", newText: "after" }] }, env);
+ 			expect(getOrThrow(await env.readTextFile("target.txt", BACKGROUND_CONTEXT))).toBe("after\n");
+ 		});
+ 
+diff --git a/packages/tui/test/autocomplete.test.ts b/packages/tui/test/autocomplete.test.ts
+index 9f18baa..b818264 100644
+--- a/packages/tui/test/autocomplete.test.ts
++++ b/packages/tui/test/autocomplete.test.ts
+@@ -1,9 +1,10 @@
+ import assert from "node:assert";
+ import { spawnSync } from "node:child_process";
+-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
++import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+ import { tmpdir } from "node:os";
+ import { dirname, join } from "node:path";
+ import { afterEach, beforeEach, describe, it, test } from "node:test";
++import { fileSymlinksAvailable, symlinkSync } from "../../../scripts/test-filesystem.ts";
+ import { CombinedAutocompleteProvider } from "../src/autocomplete.ts";
+ 
+ const resolveFdPath = (): string | null => {
+@@ -436,7 +437,7 @@ describe("CombinedAutocompleteProvider", () => {
+ 					"some_file.txt": "symlinked",
+ 				},
+ 			});
+-			symlinkSync("../outside", join(baseDir, "symlinked_dir"));
++			symlinkSync(outsideDir, join(baseDir, "symlinked_dir"), "dir");
+ 
+ 			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
+ 			const line = "@some";
+@@ -453,7 +454,7 @@ describe("CombinedAutocompleteProvider", () => {
+ 					"nested/file.txt": "symlinked",
+ 				},
+ 			});
+-			symlinkSync("../outside", join(baseDir, "symlinked_dir"));
++			symlinkSync(outsideDir, join(baseDir, "symlinked_dir"), "dir");
+ 
+ 			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
+ 			const line = "@symlinked";
+@@ -463,14 +464,14 @@ describe("CombinedAutocompleteProvider", () => {
+ 			assert.ok(values.includes("@symlinked_dir/"));
+ 		});
+ 
+-		test("returns symlinked files without requiring type l", async () => {
++		test("returns symlinked files without requiring type l", { skip: !fileSymlinksAvailable }, async () => {
+ 			setupFolder(baseDir, {
+ 				files: {
+ 					"original.txt": "content",
+ 				},
+ 			});
+ 			const linkPath = join(baseDir, "link.txt");
+-			symlinkSync("original.txt", linkPath);
++			symlinkSync(join(baseDir, "original.txt"), linkPath, "file");
+ 
+ 			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
+ 			const line = "@link";
+diff --git a/packages/tui/test/terminal-image.test.ts b/packages/tui/test/terminal-image.test.ts
+index aa28c75..ba628b6 100644
+--- a/packages/tui/test/terminal-image.test.ts
++++ b/packages/tui/test/terminal-image.test.ts
+@@ -793,7 +793,7 @@ describe("imageFallback", () => {
+ 		try {
+ 			const abs = join(homedir(), ".pi", "agent", "shot.png");
+ 			const result = imageFallback("image/png", { widthPx: 1280, heightPx: 720 }, abs);
+-			assert.strictEqual(result, "[Image: ~/.pi/agent/shot.png [image/png] 1280x720]");
++			assert.strictEqual(result, `[Image: ${join("~", ".pi", "agent", "shot.png")} [image/png] 1280x720]`);
+ 		} finally {
+ 			resetCapabilitiesCache();
+ 		}
+@@ -811,7 +811,7 @@ describe("imageFallback", () => {
+ 			);
+ 			// Visible text must use ~/... not the expanded home path.
+ 			const visible = result.replace(/\x1b\]8;;.*?\x1b\\/g, "");
+-			assert.strictEqual(visible, "[Image: ~/.pi/agent/shot.png [image/png] 10x10]");
++			assert.strictEqual(visible, `[Image: ${join("~", ".pi", "agent", "shot.png")} [image/png] 10x10]`);
+ 		} finally {
+ 			resetCapabilitiesCache();
+ 		}
+diff --git a/scripts/local-package-install.test.mjs b/scripts/local-package-install.test.mjs
+index fe467d0..9a58baf 100644
+--- a/scripts/local-package-install.test.mjs
++++ b/scripts/local-package-install.test.mjs
+@@ -7,6 +7,7 @@ import test from "node:test";
+ import { fileURLToPath } from "node:url";
+ import { parse } from "yaml";
+ import { installConsumer, smokeTestNpmConsumer, wireConsumer } from "./local-package-install.mjs";
++import { execNpmSync } from "./npm-command.mjs";
+ import { produceArtifactSet } from "./package-artifacts.mjs";
+ 
+ function writePackage(directory, manifest, files) {
+@@ -99,7 +100,7 @@ test("wires multiple direct packages without registry fallbacks", (t) => {
+ 		consumerDirectory,
+ 		packageNames: ["@pi-package-test/target", "@pi-package-test/second"],
+ 	});
+-	execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: consumerDirectory, stdio: "pipe" });
++	execNpmSync(["install", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: consumerDirectory, stdio: "pipe" });
+ 
+ 	const manifest = JSON.parse(readFileSync(join(consumerDirectory, "package.json"), "utf8"));
+ 	assert.match(manifest.dependencies["@pi-package-test/target"], /^file:/);
+diff --git a/scripts/test-filesystem.ts b/scripts/test-filesystem.ts
+new file mode 100644
+index 0000000..c6c44d0
+--- /dev/null
++++ b/scripts/test-filesystem.ts
+@@ -0,0 +1,38 @@
++import { mkdtempSync, rmSync, symlinkSync as nativeSymlinkSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { basename, dirname, join, resolve } from "node:path";
++
++/** Directory junctions exercise real Windows aliases without administrator privileges. */
++export function symlinkSync(target: string, path: string, type?: "file" | "dir" | "junction"): void {
++	nativeSymlinkSync(target, path, process.platform === "win32" && type === "dir" ? "junction" : type);
++}
++
++/** A file reached through a junction has the same canonical identity as its original path. */
++export function createFileAlias(target: string, alias: string): string {
++	if (process.platform !== "win32") {
++		nativeSymlinkSync(target, alias, "file");
++		return alias;
++	}
++	const parentAlias = `${alias}.parent`;
++	nativeSymlinkSync(dirname(resolve(target)), parentAlias, "junction");
++	return join(parentAlias, basename(target));
++}
++
++function probeFileSymlinks(): boolean {
++	if (process.platform !== "win32") return true;
++	const directory = mkdtempSync(join(tmpdir(), "pi-symlink-capability-"));
++	try {
++		const target = join(directory, "target");
++		writeFileSync(target, "fixture");
++		nativeSymlinkSync(target, join(directory, "link"), "file");
++		return true;
++	} catch (error) {
++		if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
++		return false;
++	} finally {
++		rmSync(directory, { recursive: true, force: true });
++	}
++}
++
++/** File-link metadata tests require Windows symlink privilege; directory/alias tests always run. */
++export const fileSymlinksAvailable = probeFileSymlinks();
+diff --git a/test.sh b/test.sh
+index d3f07be..2861446 100755
+--- a/test.sh
++++ b/test.sh
+@@ -12,6 +12,13 @@ mkdir -p "$test_root/home/.config" "$test_root/tmp" "$test_root/cache/npm"
+ # Mark the generated root so cleanup can verify ownership before deleting it.
+ touch "$test_root/.pi-test-owned" "$test_root/npm-userconfig" "$test_root/npm-globalconfig"
+ 
++# Windows os.homedir() preserves USERPROFILE verbatim. Give native processes
++# native separators so home-prefix comparisons agree with node:path.join().
++native_home="$test_root/home"
++case "${OSTYPE-}" in
++	msys*|cygwin*) native_home="$(cygpath -w "$native_home")" ;;
++esac
++
+ # Only remove the marked directory created above, never an unverified path.
+ cleanup() {
+ 	local status=$?
+@@ -40,8 +47,8 @@ trap cleanup EXIT
+ test_env=(
+ 	"PATH=$PATH"
+ 	"PWD=$PWD"
+-	"HOME=$test_root/home"
+-	"USERPROFILE=$test_root/home"
++	"HOME=$native_home"
++	"USERPROFILE=$native_home"
+ 	"TMPDIR=$test_root/tmp"
+ 	"TMP=$test_root/tmp"
+ 	"TEMP=$test_root/tmp"
+@@ -63,6 +70,12 @@ test_env=(
+ 	"AWS_EC2_METADATA_DISABLED=true"
+ )
+ 
++# The durable suite's second pass sets its retention environment in the shell.
++# npm otherwise selects cmd.exe on Windows even when this runner uses Bash.
++case "${OSTYPE-}" in
++	msys*|cygwin*) test_env+=("NPM_CONFIG_SCRIPT_SHELL=$(cygpath -w "$(type -P bash)")") ;;
++esac
++
+ # Native Windows needs these inherited values to launch child processes.
+ for name in SystemRoot SYSTEMROOT WINDIR COMSPEC PATHEXT; do
+ 	value="${!name-}"

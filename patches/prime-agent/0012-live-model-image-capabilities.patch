@@ -1,0 +1,776 @@
+diff --git a/crates/pa-agent/src/agent.rs b/crates/pa-agent/src/agent.rs
+index 57f6ba8..ca3eb6d 100644
+--- a/crates/pa-agent/src/agent.rs
++++ b/crates/pa-agent/src/agent.rs
+@@ -845,6 +845,19 @@ impl Agent {
+         shared.state.thinking_level = thinking_level;
+     }
+ 
++    /// Update the model, reasoning level, and its prompt in one state snapshot.
++    pub async fn set_model_and_thinking_level_with_prompt(
++        &self,
++        model: Model,
++        thinking_level: ThinkingLevel,
++        system_prompt: String,
++    ) {
++        let mut shared = self.inner.shared.lock().await;
++        shared.state.model = model;
++        shared.state.thinking_level = thinking_level;
++        shared.state.system_prompt = system_prompt;
++    }
++
+     /// Per-run model override: `None` returns to the session model.
+     pub fn set_model_override(&self, model_override: Option<AgentModelOverride>) {
+         *self
+@@ -1427,7 +1440,7 @@ mod tests {
+     }
+ 
+     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+-    async fn a_model_switch_updates_the_model_and_level_atomically() {
++    async fn a_model_switch_updates_the_model_level_and_prompt_atomically() {
+         fn model(id: &str) -> Model {
+             Model {
+                 id: id.to_string(),
+@@ -1443,13 +1456,12 @@ mod tests {
+             }
+         }
+ 
+-        // The initial pair matches the writer's first target pair, so a
+-        // reader that samples before the writer's first update observes
+-        // a consistent state, not the boot default.
++        // A reader sampling before the first update needs a matching initial state.
+         let agent = Arc::new(Agent::new(AgentOptions {
+             initial_state: AgentInitialState {
+                 model: Some(model("model-a")),
+                 thinking_level: Some(crate::types::ThinkingLevel::High),
++                system_prompt: Some("model-a prompt".to_string()),
+                 ..Default::default()
+             },
+             ..Default::default()
+@@ -1458,15 +1470,17 @@ mod tests {
+         let switcher = tokio::spawn(async move {
+             for _ in 0..2_000 {
+                 writer
+-                    .set_model_and_thinking_level(
++                    .set_model_and_thinking_level_with_prompt(
+                         model("model-a"),
+                         crate::types::ThinkingLevel::High,
++                        "model-a prompt".to_string(),
+                     )
+                     .await;
+                 writer
+-                    .set_model_and_thinking_level(
++                    .set_model_and_thinking_level_with_prompt(
+                         model("model-b"),
+                         crate::types::ThinkingLevel::Off,
++                        "model-b prompt".to_string(),
+                     )
+                     .await;
+             }
+@@ -1478,9 +1492,11 @@ mod tests {
+             while samples < 20_000 {
+                 let state = reader.state().await;
+                 let mixed_state = (state.model.id == "model-a"
+-                    && state.thinking_level != crate::types::ThinkingLevel::High)
++                    && (state.thinking_level != crate::types::ThinkingLevel::High
++                        || state.system_prompt != "model-a prompt"))
+                     || (state.model.id == "model-b"
+-                        && state.thinking_level != crate::types::ThinkingLevel::Off);
++                        && (state.thinking_level != crate::types::ThinkingLevel::Off
++                            || state.system_prompt != "model-b prompt"));
+                 mixed += u64::from(mixed_state);
+                 samples += 1;
+             }
+@@ -1490,7 +1506,7 @@ mod tests {
+         let mixed = observed.await.unwrap();
+         assert_eq!(
+             mixed, 0,
+-            "every snapshot carries a consistent (model, level) pair"
++            "every snapshot carries a consistent model, level, and prompt"
+         );
+     }
+ }
+diff --git a/crates/pa-core/src/prompts/system_prompt.rs b/crates/pa-core/src/prompts/system_prompt.rs
+index 0a407a8..e3ea493 100644
+--- a/crates/pa-core/src/prompts/system_prompt.rs
++++ b/crates/pa-core/src/prompts/system_prompt.rs
+@@ -60,6 +60,59 @@ pub struct SystemPromptBreakdown {
+     pub cached_prefix_len: usize,
+ }
+ 
++impl SystemPromptBreakdown {
++    pub(crate) fn update_model(&mut self, selector: &str, vision_capable: bool) {
++        self.segments.retain(|segment| segment.name != "per-model");
++        if !self.segments.iter().any(|segment| segment.name == "custom") {
++            let per_model = layers::per_model_text(Some(selector));
++            if !per_model.is_empty() {
++                let prefix_end = self
++                    .segments
++                    .iter()
++                    .take_while(|segment| segment.kind == SegmentKind::Static)
++                    .count();
++                self.segments.insert(
++                    prefix_end,
++                    PromptSegment::static_segment(
++                        "per-model",
++                        layers::layer_source("per-model").unwrap_or_default(),
++                        per_model.join("\n\n"),
++                    ),
++                );
++            }
++        }
++        self.segments
++            .retain(|segment| segment.name != "image-capability");
++        if let Some(environment) = self
++            .segments
++            .iter()
++            .position(|segment| segment.name == "environment")
++        {
++            self.segments
++                .insert(environment + 1, image_capability_segment(vision_capable));
++        }
++        self.reassemble();
++    }
++
++    fn reassemble(&mut self) {
++        let prefix_segments = self
++            .segments
++            .iter()
++            .take_while(|segment| segment.kind == SegmentKind::Static);
++        let prefix_count = prefix_segments.clone().count();
++        self.cached_prefix_len = prefix_segments
++            .map(|segment| segment.text.len())
++            .sum::<usize>()
++            + 2 * prefix_count.saturating_sub(1);
++        self.assembled = self
++            .segments
++            .iter()
++            .map(|segment| segment.text.as_str())
++            .collect::<Vec<_>>()
++            .join("\n\n");
++    }
++}
++
+ /// Inputs for one session's prompt. Static inputs (`custom_prompt`, `model`)
+ /// select the cached prefix; everything else feeds the dynamic tail.
+ #[derive(Debug, Default)]
+@@ -137,14 +190,8 @@ pub fn system_prompt_breakdown(options: &BuildSystemPromptOptions) -> SystemProm
+             }
+         }
+     }
+-    let cached_prefix_len = segments
+-        .iter()
+-        .map(|segment| segment.text.len())
+-        .sum::<usize>()
+-        + 2 * segments.len().saturating_sub(1);
+-
+     // The dynamic tail, in fixed order: packages -> project context ->
+-    // skills inventory -> MCP servers -> environment -> session role ->
++    // skills inventory -> MCP servers -> environment -> image capability -> session role ->
+     // additional guidance -> appended prompt.
+     let tools: Vec<&str> = options
+         .selected_tools
+@@ -198,6 +245,9 @@ pub fn system_prompt_breakdown(options: &BuildSystemPromptOptions) -> SystemProm
+         "session configuration",
+         environment_section(options),
+     ));
++    if let Some(vision_capable) = options.vision_capable {
++        segments.push(image_capability_segment(vision_capable));
++    }
+ 
+     let role = session_role_section(options, has_ipython);
+     if !role.is_empty() {
+@@ -231,16 +281,13 @@ pub fn system_prompt_breakdown(options: &BuildSystemPromptOptions) -> SystemProm
+         }
+     }
+ 
+-    let assembled = segments
+-        .iter()
+-        .map(|segment| segment.text.as_str())
+-        .collect::<Vec<_>>()
+-        .join("\n\n");
+-    SystemPromptBreakdown {
++    let mut breakdown = SystemPromptBreakdown {
+         segments,
+-        assembled,
+-        cached_prefix_len,
+-    }
++        assembled: String::new(),
++        cached_prefix_len: 0,
++    };
++    breakdown.reassemble();
++    breakdown
+ }
+ 
+ fn packages_section() -> String {
+@@ -279,22 +326,21 @@ fn environment_section(options: &BuildSystemPromptOptions) -> String {
+         .clone()
+         .unwrap_or_else(|| "not persisted".to_string())
+         .replace('\\', "/");
+-    let mut lines = vec![
++    [
+         format!("Current date: {}", today()),
+         format!("Working directory: {cwd}"),
+         format!("Conversation log: {messages_path}"),
+-    ];
+-    match options.vision_capable {
+-        Some(true) => lines.push(
+-            "Image input: this model can see images; `attach_image` loads them into context."
+-                .to_string(),
+-        ),
+-        Some(false) => lines.push(
+-            "Image input: this model cannot see images; `attach_image` errors for it.".to_string(),
+-        ),
+-        None => {}
+-    }
+-    lines.join("\n")
++    ]
++    .join("\n")
++}
++
++fn image_capability_segment(vision_capable: bool) -> PromptSegment {
++    let text = if vision_capable {
++        "Image input: this model can see images; `attach_image` loads them into context."
++    } else {
++        "Image input: this model cannot see images; `attach_image` errors for it."
++    };
++    PromptSegment::dynamic_segment("image-capability", "resolved model input", text.to_string())
+ }
+ 
+ fn session_role_section(options: &BuildSystemPromptOptions, has_ipython: bool) -> String {
+diff --git a/crates/pa-core/src/session_engine/engine.rs b/crates/pa-core/src/session_engine/engine.rs
+index 4d0fa4a..3a59c31 100644
+--- a/crates/pa-core/src/session_engine/engine.rs
++++ b/crates/pa-core/src/session_engine/engine.rs
+@@ -95,7 +95,9 @@ pub struct SessionEngine {
+     pub skill_diagnostics: Vec<crate::skills::ResourceDiagnostic>,
+     pub prompt_templates: Vec<PromptTemplate>,
+     pub agents_files: Vec<crate::resources::ContextFile>,
+-    pub system_prompt: String,
++    pub(super) prompt_breakdown:
++        std::sync::RwLock<crate::prompts::system_prompt::SystemPromptBreakdown>,
++    pub(super) model_selection: tokio::sync::Mutex<()>,
+     /// The same instance the kernel `goal.*` host handlers reach, so `/goal`
+     /// and `goal.complete()` observe one state machine.
+     pub goal_driver: std::sync::Arc<tokio::sync::Mutex<super::goal_driver::GoalDriver>>,
+@@ -465,7 +467,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
+ 
+     let prompt_model_selector = Some(format!("{}/{}", model_info.provider, model_info.id));
+     let prompt_vision_capable = Some(model_info.input.contains(&pa_types::ai::ModelInput::Image));
+-    let system_prompt = crate::prompts::system_prompt::build_system_prompt(
++    let prompt_breakdown = crate::prompts::system_prompt::system_prompt_breakdown(
+         &crate::prompts::system_prompt::BuildSystemPromptOptions {
+             custom_prompt: resources.system_prompt.clone(),
+             model: prompt_model_selector.as_deref(),
+@@ -582,7 +584,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
+     };
+     let agent = Agent::new(AgentOptions {
+         initial_state: AgentInitialState {
+-            system_prompt: Some(system_prompt.clone()),
++            system_prompt: Some(prompt_breakdown.assembled.clone()),
+             model: Some(model),
+             thinking_level: Some(thinking_level),
+             tools: Some(tools),
+@@ -765,7 +767,8 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
+         skill_diagnostics: resources.skill_diagnostics,
+         prompt_templates: resources.prompts,
+         agents_files: resources.agents_files,
+-        system_prompt,
++        prompt_breakdown: std::sync::RwLock::new(prompt_breakdown),
++        model_selection: tokio::sync::Mutex::new(()),
+         goal_driver,
+         queued_goal_context_purge: config.queued_goal_context_purge.clone(),
+         mcp_manager,
+@@ -778,20 +781,6 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
+ }
+ 
+ impl SessionEngine {
+-    /// After a model switch, the `model.info` handler and the usage
+-    /// estimate's context window follow the model the session now runs.
+-    pub fn update_model_facts(&self, model: &pa_types::ai::Model) {
+-        super::turn_boundary::TurnBoundaryRequests::rebind_model_facts(
+-            &self.turn_boundary,
+-            super::turn_boundary::ModelInfo {
+-                id: model.id.clone(),
+-                provider: model.provider.clone(),
+-                input: model.input.clone(),
+-            },
+-            (model.context_window > 0).then_some(model.context_window),
+-        );
+-    }
+-
+     /// A weak reference for lock-free kernel liveness probes without
+     /// joining the strong ownership graph.
+     pub fn kernel_provisioner_weak(
+diff --git a/crates/pa-core/src/session_engine/engine/tests.rs b/crates/pa-core/src/session_engine/engine/tests.rs
+index 46ee099..9b943bd 100644
+--- a/crates/pa-core/src/session_engine/engine/tests.rs
++++ b/crates/pa-core/src/session_engine/engine/tests.rs
+@@ -92,9 +92,9 @@ async fn engine_runs_tool_loop_and_persists() {
+ 
+     // The system prompt is the layered assembly: static core layer
+     // first, dynamic tail after.
+-    assert!(engine.system_prompt.starts_with("# prime-agent harness"));
++    assert!(engine.system_prompt().starts_with("# prime-agent harness"));
+     assert!(engine
+-        .system_prompt
++        .system_prompt()
+         .contains("Recursive agent depth: 0 (root)"));
+ 
+     let outcome = engine
+@@ -190,9 +190,9 @@ async fn spawned_child_prompt_stamps_its_depth() {
+     .unwrap();
+ 
+     assert!(engine
+-        .system_prompt
++        .system_prompt()
+         .contains("Recursive agent depth: 2 (not root)"));
+-    assert!(!engine.system_prompt.contains("depth: 0 (root)"));
++    assert!(!engine.system_prompt().contains("depth: 0 (root)"));
+ }
+ 
+ /// The login chain's prompt-gating end to end: a settings-declared OAuth
+@@ -281,7 +281,7 @@ async fn oauth_creds_unlock_generic_mcp_gating_in_new_sessions() {
+     let engine = create_session(config(&cwd, &agent_dir, provider.stream_fn()))
+         .await
+         .unwrap();
+-    assert!(!engine.system_prompt.contains("# Generic MCP Connections"));
++    assert!(!engine.system_prompt().contains("# Generic MCP Connections"));
+ 
+     // The persisted credential begin_login leaves behind (the TS
+     // McpCredentials shape, endpoint-bound).
+@@ -310,14 +310,14 @@ async fn oauth_creds_unlock_generic_mcp_gating_in_new_sessions() {
+     let engine = create_session(config(&cwd, &agent_dir, provider.stream_fn()))
+         .await
+         .unwrap();
+-    assert!(!engine.system_prompt.contains("# Generic MCP Connections"));
++    assert!(!engine.system_prompt().contains("# Generic MCP Connections"));
+ 
+     write_credential("https://fixture.example/mcp");
+     let engine = create_session(config(&cwd, &agent_dir, provider.stream_fn()))
+         .await
+         .unwrap();
+-    assert!(engine.system_prompt.contains("# Generic MCP Connections"));
+-    assert!(engine.system_prompt.contains("`fixture-oauth`"));
++    assert!(engine.system_prompt().contains("# Generic MCP Connections"));
++    assert!(engine.system_prompt().contains("`fixture-oauth`"));
+ }
+ 
+ #[tokio::test]
+diff --git a/crates/pa-core/src/session_engine/mod.rs b/crates/pa-core/src/session_engine/mod.rs
+index e1c1e2b..81f2c67 100644
+--- a/crates/pa-core/src/session_engine/mod.rs
++++ b/crates/pa-core/src/session_engine/mod.rs
+@@ -47,6 +47,7 @@ pub mod turn_boundary;
+ 
+ mod admission;
+ mod compaction_arms;
++mod model_selection;
+ mod wiring;
+ 
+ use std::sync::Arc;
+diff --git a/crates/pa-core/src/session_engine/model_selection.rs b/crates/pa-core/src/session_engine/model_selection.rs
+new file mode 100644
+index 0000000..0787f34
+--- /dev/null
++++ b/crates/pa-core/src/session_engine/model_selection.rs
+@@ -0,0 +1,178 @@
++//! Live model selection and the prompt facts derived from the full model descriptor.
++
++use pa_agent::types::ThinkingLevel;
++use pa_types::ai::{Model, ModelInput};
++
++use super::engine::SessionEngine;
++use super::provider_adapter::json_round_trip;
++use super::turn_boundary::{ModelInfo, TurnBoundaryRequests};
++
++impl SessionEngine {
++    #[must_use]
++    pub fn system_prompt(&self) -> String {
++        self.prompt_breakdown
++            .read()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .assembled
++            .clone()
++    }
++
++    /// # Errors
++    ///
++    /// Fails when the model cannot cross the loop boundary.
++    pub async fn set_model_and_thinking_level(
++        &self,
++        model: &Model,
++        thinking_level: ThinkingLevel,
++    ) -> anyhow::Result<()> {
++        let _selection = self.model_selection.lock().await;
++        let wire =
++            json_round_trip(model).ok_or_else(|| anyhow::anyhow!("model conversion failed"))?;
++        let mut breakdown = self
++            .prompt_breakdown
++            .read()
++            .unwrap_or_else(std::sync::PoisonError::into_inner)
++            .clone();
++        let selector = format!("{}/{}", model.provider, model.id);
++        breakdown.update_model(&selector, model.input.contains(&ModelInput::Image));
++        self.session
++            .agent()
++            .set_model_and_thinking_level_with_prompt(
++                wire,
++                thinking_level,
++                breakdown.assembled.clone(),
++            )
++            .await;
++        TurnBoundaryRequests::rebind_model_facts(
++            &self.turn_boundary,
++            ModelInfo {
++                id: model.id.clone(),
++                provider: model.provider.clone(),
++                input: model.input.clone(),
++            },
++            (model.context_window > 0).then_some(model.context_window),
++        );
++        *self
++            .prompt_breakdown
++            .write()
++            .unwrap_or_else(std::sync::PoisonError::into_inner) = breakdown;
++        let _ = self
++            .session
++            .shared_persistence()
++            .lock()
++            .await
++            .append_model_change(&model.provider, &model.id);
++        Ok(())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use std::sync::Arc;
++
++    use pa_agent::scripted::ScriptedProvider;
++    use serde_json::json;
++
++    use crate::kernel::shared::{HostRequestHandlers, HostRequestPayload};
++    use crate::session_engine::engine::{create_session, SessionEngineConfig};
++    use crate::session_engine::PromptOptions;
++
++    use super::*;
++
++    #[tokio::test]
++    async fn live_model_selection_updates_the_prompt_and_image_skill_facts() {
++        const REPEATED_CAPABILITY_TEXT: &str =
++            "Image input: this model cannot see images; `attach_image` errors for it.";
++        let directory = tempfile::tempdir().unwrap();
++        let context_text = format!("User documentation: {REPEATED_CAPABILITY_TEXT}");
++        std::fs::write(directory.path().join("AGENTS.md"), &context_text).unwrap();
++        let text_model: Model = serde_json::from_value(json!({
++            "id": "vision-named-text", "name": "Vision", "provider": "test-provider",
++            "api": "test", "baseUrl": "http://localhost", "reasoning": false,
++            "input": ["text"], "contextWindow": 128_000, "maxTokens": 4_096,
++            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
++        }))
++        .unwrap();
++        let image_model: Model = serde_json::from_value(json!({
++            "id": "opaque-alias", "name": "Alias", "provider": "another-provider",
++            "api": "test", "baseUrl": "http://localhost", "reasoning": true,
++            "input": ["text", "image"], "contextWindow": 200_000, "maxTokens": 8_192,
++            "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
++        }))
++        .unwrap();
++        let wire: pa_agent::types::Model = json_round_trip(&text_model).unwrap();
++        let provider = Arc::new(ScriptedProvider::new(wire.clone()));
++        provider.push_text_turn("ok");
++        let custom_prompt = format!("Custom instructions: {REPEATED_CAPABILITY_TEXT}");
++        let engine = create_session(SessionEngineConfig {
++            cwd: directory.path().to_path_buf(),
++            agent_dir: directory.path().join("agent"),
++            model: Some(wire),
++            model_info: Some(text_model.clone()),
++            stream_fn: Some(provider.stream_fn()),
++            custom_system_prompt: Some(custom_prompt.clone()),
++            prompt_guidelines: vec![format!("Appended instructions: {REPEATED_CAPABILITY_TEXT}")],
++            rlm_depth: Some(1),
++            prewarm_ipython_kernel: Some(false),
++            ..Default::default()
++        })
++        .await
++        .unwrap();
++        let mut handlers = HostRequestHandlers::new();
++        engine.turn_boundary.register_model_info_handler(
++            &mut handlers,
++            ModelInfo {
++                id: text_model.id.clone(),
++                provider: text_model.provider.clone(),
++                input: text_model.input.clone(),
++            },
++        );
++        let model_info = handlers.get("model.info").unwrap();
++        let request = || HostRequestPayload {
++            data: json!({}),
++            cell_source_code: None,
++        };
++        let initial_prompt = engine.system_prompt();
++        assert_eq!(
++            model_info(request()).await.unwrap(),
++            json!({ "id": text_model.id, "provider": text_model.provider, "input": ["text"] })
++        );
++        engine
++            .set_model_and_thinking_level(&image_model, ThinkingLevel::High)
++            .await
++            .unwrap();
++        assert_eq!(
++            model_info(request()).await.unwrap(),
++            json!({ "id": image_model.id, "provider": image_model.provider,
++                "input": ["text", "image"] })
++        );
++        let image_prompt = engine.system_prompt();
++        assert!(image_prompt.starts_with(&custom_prompt));
++        assert!(image_prompt.contains(&context_text));
++        assert_eq!(image_prompt.matches(REPEATED_CAPABILITY_TEXT).count(), 3);
++        assert!(image_prompt.contains("Image input: this model can see images"));
++        let state = engine.session.agent().state().await;
++        assert_eq!(state.system_prompt, image_prompt);
++        assert_eq!(state.model.id, image_model.id);
++        assert_eq!(state.thinking_level, ThinkingLevel::High);
++        engine.prompt("ok", PromptOptions::default()).await.unwrap();
++        assert_eq!(
++            provider.calls()[0].system_prompt.as_deref(),
++            Some(image_prompt.as_str())
++        );
++
++        engine
++            .set_model_and_thinking_level(&text_model, ThinkingLevel::Off)
++            .await
++            .unwrap();
++        assert_eq!(engine.system_prompt(), initial_prompt);
++        assert_eq!(
++            model_info(request()).await.unwrap(),
++            json!({ "id": text_model.id, "provider": text_model.provider, "input": ["text"] })
++        );
++        assert_eq!(
++            engine.session.agent().state().await.system_prompt,
++            initial_prompt
++        );
++    }
++}
+diff --git a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
+index 046c647..2229da9 100644
+--- a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
++++ b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
+@@ -418,16 +418,10 @@ impl SessionEngine for AgentSessionEngine {
+         }
+         let session = self.session.blocking_lock();
+         if let Some(core) = session.as_deref() {
+-            let provider = model.provider.clone();
+-            let model_id = model.id.clone();
+-            // ONE agent-lock acquisition updates model and level together
+-            // (a mid-switch turn never sees a mismatch). No durable
+-            // `thinking_level_change` row — `/thinking` owns it.
+             let level = map_thinking_level(self.effective_thinking());
+-            let _ = self.runtime.block_on(
+-                core.session
+-                    .set_model_and_thinking_level(&model, &provider, &model_id, level),
+-            );
++            let _ = self
++                .runtime
++                .block_on(core.set_model_and_thinking_level(&model, level));
+         }
+         if let Some(children) = &self.children {
+             children.set_model(format!("{}/{}", model.provider, model.id));
+@@ -470,7 +464,9 @@ impl SessionEngine for AgentSessionEngine {
+     /// The built session's assembled prompt (the export embeds it); best-effort.
+     fn export_system_prompt(&self) -> Option<String> {
+         let session = self.session.try_lock().ok()?;
+-        session.as_deref().map(|core| core.system_prompt.clone())
++        session
++            .as_deref()
++            .map(pa_core::session_engine::engine::SessionEngine::system_prompt)
+     }
+ 
+     /// The built session's live tool registry mapped to the export's tools
+@@ -535,6 +531,11 @@ impl SessionEngine for AgentSessionEngine {
+             "api": model.api,
+             "provider": model.provider,
+             "reasoning": model.reasoning,
++            "thinkingLevelMap": model.thinking_level_map,
++            "input": model.input,
++            "cost": model.cost,
++            "contextWindow": model.context_window,
++            "maxTokens": model.max_tokens,
+         }))
+     }
+ 
+@@ -1155,7 +1156,7 @@ impl SessionEngine for AgentSessionEngine {
+             self.ensure_core_session_async(&model).await?;
+             let guard = self.session.lock().await;
+             let engine = guard.as_deref().expect("session built above");
+-            Ok(engine.system_prompt.clone())
++            Ok(engine.system_prompt())
+         })
+     }
+ 
+diff --git a/crates/pa-daemon/src/rpc/model_commands.rs b/crates/pa-daemon/src/rpc/model_commands.rs
+index 6c47045..ab4fd16 100644
+--- a/crates/pa-daemon/src/rpc/model_commands.rs
++++ b/crates/pa-daemon/src/rpc/model_commands.rs
+@@ -5,7 +5,7 @@ use std::sync::Arc;
+ 
+ use serde_json::{json, Value};
+ 
+-use pa_core::session_engine::provider_adapter::{json_round_trip, ProviderTarget};
++use pa_core::session_engine::provider_adapter::ProviderTarget;
+ use pa_types::ai::{Model, ModelThinkingLevel};
+ 
+ use super::commands::RpcState;
+@@ -81,27 +81,21 @@ async fn apply_model_selection(
+             .write()
+             .map_err(|error| error.to_string())? = Some(provider_target);
+         let agent = handle.engine.session.agent();
+-        let agent_model: pa_agent::types::Model =
+-            json_round_trip(model).ok_or_else(|| "model conversion failed".to_string())?;
+-        agent.set_model(agent_model).await;
+         // TS `_getThinkingLevelForModelSwitch`: keep the level when the
+         // new model supports it, else clamp.
+         let current = agent.state().await.thinking_level;
+         let requested = pa_core::session_engine::provider_adapter::model_thinking_level(current);
+         let clamped = pa_ai::models::clamp_thinking_level(model, requested);
+-        agent
+-            .set_thinking_level(
++        handle
++            .engine
++            .set_model_and_thinking_level(
++                model,
+                 pa_core::session_engine::provider_adapter::map_thinking_level(clamped),
+             )
+-            .await;
++            .await
++            .map_err(|error| error.to_string())?;
+         handle.model.clone_from(model);
+         handle.api_key.clone_from(&resolved.api_key);
+-        // The turn-boundary model facts follow the switch: `model.info` and
+-        // the usage estimate's context window report the model NOW running.
+-        handle.engine.update_model_facts(model);
+-        let persistence = handle.engine.session.shared_persistence();
+-        let mut manager = persistence.lock().await;
+-        let _ = manager.append_model_change(&model.provider, &model.id);
+     }
+     let mut settings =
+         pa_core::settings::SettingsManager::create(&state.settings_cwd().await, &state.agent_dir);
+diff --git a/crates/pa-daemon/src/rpc/session_commands.rs b/crates/pa-daemon/src/rpc/session_commands.rs
+index 190e275..ed470f1 100644
+--- a/crates/pa-daemon/src/rpc/session_commands.rs
++++ b/crates/pa-daemon/src/rpc/session_commands.rs
+@@ -443,7 +443,7 @@ async fn export_html(state: &Arc<RpcState>, payload: &Value) -> Result<ResponseD
+             let manager = persistence.lock().await;
+             manager.get_leaf_id().map(str::to_string)
+         },
+-        system_prompt: Some(handle.engine.system_prompt.clone()),
++        system_prompt: Some(handle.engine.system_prompt()),
+         tools: Some(tools),
+         rendered_tools: None,
+     };
+diff --git a/crates/pa-daemon/tests/model_capabilities.rs b/crates/pa-daemon/tests/model_capabilities.rs
+new file mode 100644
+index 0000000..2b0b909
+--- /dev/null
++++ b/crates/pa-daemon/tests/model_capabilities.rs
+@@ -0,0 +1,99 @@
++use std::sync::Arc;
++
++use pa_daemon::agent_engine::{AgentEngineConfig, AgentSessionEngine};
++use pa_daemon::engine::{EngineModelSelection, RlmSessionIdentity, SessionEngine};
++use serde_json::json;
++
++#[tokio::test]
++async fn live_switch_refreshes_model_capabilities_in_the_prompt() {
++    let directory = tempfile::tempdir().unwrap();
++    let agent_dir = directory.path().join("agent");
++    std::fs::create_dir_all(&agent_dir).unwrap();
++    std::fs::write(
++        agent_dir.join("models.json"),
++        json!({
++            "providers": {
++                "test-provider": {
++                    "api": "openai-completions",
++                    "baseUrl": "http://127.0.0.1:9",
++                    "apiKey": "test-key",
++                    "headers": { "Authorization": "secret-model-header" },
++                    "compat": { "supportsStore": false },
++                    "models": [
++                        { "id": "vision-named-text", "input": ["text"] },
++                        { "id": "opaque-alias", "input": ["text", "image"] }
++                    ]
++                }
++            }
++        })
++        .to_string(),
++    )
++    .unwrap();
++    let engine = Arc::new(
++        AgentSessionEngine::new(AgentEngineConfig {
++            cwd: directory.path().to_path_buf(),
++            agent_dir,
++            provider: Some("test-provider".to_string()),
++            model: Some("vision-named-text".to_string()),
++            api_key: None,
++            thinking: None,
++            session_dir: None,
++            session_file: None,
++            faux_script: None,
++            supervisor_link: None,
++            telemetry_disabled: Some(true),
++            cron_store: None,
++            queued_steering_probe: None,
++        })
++        .unwrap(),
++    );
++    engine
++        .configure_rlm_identity(RlmSessionIdentity {
++            rlm_depth: 1,
++            ..Default::default()
++        })
++        .unwrap();
++    let initial_prompt = engine.system_prompt().await.unwrap();
++    assert!(initial_prompt.contains("this model cannot see images"));
++
++    let switching_engine = Arc::clone(&engine);
++    assert!(tokio::task::spawn_blocking(move || {
++        switching_engine.switch_model(EngineModelSelection {
++            provider: Some("test-provider".to_string()),
++            model: Some("opaque-alias".to_string()),
++            ..Default::default()
++        })
++    })
++    .await
++    .unwrap());
++    let metadata = engine.model_metadata().unwrap();
++    assert_eq!(metadata["input"], json!(["text", "image"]));
++    assert_eq!(metadata["contextWindow"], 128_000);
++    assert_eq!(metadata["maxTokens"], 16_384);
++    assert_eq!(
++        metadata["cost"],
++        json!({
++            "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0
++        })
++    );
++    assert!(metadata.get("headers").is_none());
++    assert!(metadata.get("baseUrl").is_none());
++    assert!(metadata.get("compat").is_none());
++    let vision_prompt = engine.system_prompt().await.unwrap();
++    assert!(vision_prompt.contains("this model can see images"));
++    assert!(!vision_prompt.contains("this model cannot see images"));
++
++    let switching_engine = Arc::clone(&engine);
++    assert!(tokio::task::spawn_blocking(move || {
++        switching_engine.switch_model(EngineModelSelection {
++            provider: Some("test-provider".to_string()),
++            model: Some("vision-named-text".to_string()),
++            ..Default::default()
++        })
++    })
++    .await
++    .unwrap());
++    assert_eq!(engine.system_prompt().await.unwrap(), initial_prompt);
++    assert_eq!(engine.model_metadata().unwrap()["input"], json!(["text"]));
++    engine.dispose_kernel().await;
++}
