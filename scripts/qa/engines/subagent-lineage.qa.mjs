@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { rename } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import { launchApp, reportShotsDir } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
 import { until } from '../chat/helpers.mjs'
@@ -229,11 +230,19 @@ try {
   await fixture.stopNativeDaemon()
   const providerRequests = fixture.primeServer.requests.length
   assert.ok(independent.sessionPath, 'the independent native root has saved history')
-  assert.equal(
-    (await listedSessions(cwd)).some((entry) => samePath(entry.path, independent.sessionPath)),
-    false,
-    'the custom-folder listing excludes the native default-folder root'
+  assert.ok(
+    samePath(dirname(independent.sessionPath), fixture.sessionDirectory),
+    'the independent root inherits the configured custom session folder'
   )
+  const scoped = await application.invoke('sessions:list', { engine: 'prime', cwd })
+  assert.ok(samePath(scoped.sessionDir, fixture.sessionDirectory))
+  const scopedIndependent = scoped.sessions.find((entry) =>
+    samePath(entry.path, independent.sessionPath)
+  )
+  assert.ok(scopedIndependent, 'the configured-folder listing discovers the independent root')
+  assert.equal(scopedIndependent.name, ROOT_NAME)
+  assert.equal(scopedIndependent.lineage?.depth, 0)
+  assert.equal(scopedIndependent.lineage?.childId, undefined)
   const savedIndependent = (await listedSessions(null)).find((entry) =>
     samePath(entry.path, independent.sessionPath)
   )
