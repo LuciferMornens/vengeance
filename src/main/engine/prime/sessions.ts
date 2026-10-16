@@ -173,9 +173,11 @@ export async function listPrimeSessions(
 async function loadPrimeSessions(query: SessionListQuery): Promise<SessionListResult> {
   const sessionDir = await primeSessionRoot(query.cwd)
   const directories = query.cwd ? [sessionDir] : await primeSessionRoots()
+  // Native child ledgers can use the default root when saved files use a custom folder.
+  const ledgerRoots = query.cwd ? await primeSessionRoots() : directories
   const [roots, lineage] = await Promise.all([
     sessionIndex.list(directories),
-    savedLineage(directories)
+    savedLineage(ledgerRoots)
   ])
   const sessions = new Map(roots.map((session) => [comparablePath(session.path), session]))
   const excluded = savedExclusions(lineage)

@@ -10,6 +10,7 @@ import type {
   WorkspaceDiscovery
 } from '../../src/shared/api/sessions'
 import { SessionIndex } from '../../src/main/features/sessions/index'
+import { samePath } from '../../src/main/paths'
 import { check } from './harness'
 
 interface SavedSessionApi {
@@ -48,6 +49,13 @@ await check(
     let childDeletes = 0
     let allowRootActions = false
     let rootDeletes = 0
+    let customLineage:
+      | {
+          sessions: { path: string; lineage: SessionLineage }[]
+          excludedPaths: string[]
+        }
+      | undefined
+    let observedRoots: string[] = []
 
     async function session(
       path: string,
@@ -167,10 +175,16 @@ await check(
           assert.equal(lineage.childId, 'sub-child')
           childDeletes++
         },
-        lineage: async () => {
+        lineage: async (_agentDirectory: string, directories: string[]) => {
           lineageCalls++
           if (failAfter !== undefined && lineageCalls > failAfter)
             throw new Error('Helper unavailable')
+          if (customLineage) {
+            observedRoots = directories
+            return directories.some((path) => samePath(path, sessions))
+              ? customLineage
+              : { sessions: [], excludedPaths: [] }
+          }
           return {
             sessions: !includeChildren
               ? []
@@ -227,6 +241,64 @@ await check(
       assert.equal(engineCalls, 0)
       warning = undefined
       includeChildren = true
+
+      const customSessions = join(agentDir, 'custom-sessions')
+      const customWorkspace = join(directory, 'custom-workspace')
+      const customRoot = join(customSessions, 'custom-root.jsonl')
+      const customDeleted = join(customSessions, 'custom-deleted.jsonl')
+      const defaultOnly = join(sessions, 'default-only.jsonl')
+      const customChild = join(
+        agentDir,
+        'session-artifacts',
+        'custom-root',
+        'sub-custom-child',
+        'custom-child.jsonl'
+      )
+      const customGrandchild = join(
+        agentDir,
+        'session-artifacts',
+        'custom-child',
+        'sub-custom-grandchild',
+        'custom-grandchild.jsonl'
+      )
+      await session(customRoot, 'custom-root', customWorkspace)
+      await session(defaultOnly, 'default-only', customWorkspace)
+      await session(customDeleted, 'custom-deleted', customWorkspace, 1, customRoot)
+      await session(customChild, 'custom-child', customWorkspace, 1, customRoot)
+      await session(customGrandchild, 'custom-grandchild', customWorkspace, 2, customChild)
+      await writeFile(
+        join(agentDir, 'settings.json'),
+        JSON.stringify({ sessionDir: customSessions })
+      )
+      customLineage = {
+        sessions: [customChild, customGrandchild].map((path, index) => ({
+          path,
+          lineage: {
+            parentSessionPath: index === 0 ? customRoot : customChild,
+            depth: index + 1,
+            childId: index === 0 ? 'sub-custom-child' : 'sub-custom-grandchild',
+            runtimeKind: 'subagent'
+          }
+        })),
+        excludedPaths: [customDeleted]
+      }
+      const scoped = await api.listPrimeSessions({ cwd: customWorkspace })
+      assert.ok(
+        observedRoots.some((path) => samePath(path, sessions)),
+        'Scoped listing must observe the native default ledger'
+      )
+      assert.ok(observedRoots.some((path) => samePath(path, customSessions)))
+      assert.deepEqual(
+        new Set(scoped.sessions.map((item) => item.path)),
+        new Set([customRoot, customChild, customGrandchild])
+      )
+      assert.equal(
+        scoped.sessions.find((item) => item.path === customGrandchild)?.lineage?.depth,
+        2
+      )
+      assert.equal(engineCalls, 0, 'Offline scoped family discovery must not start native workers')
+      customLineage = undefined
+
       failAfter = lineageCalls + 1
       await api.deletePrimeSession(child)
       assert.equal(childDeletes, 1)
