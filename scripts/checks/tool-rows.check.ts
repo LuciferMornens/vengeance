@@ -83,7 +83,7 @@ await check('stripCdPrefix: a bare cd stays as the command', () => {
 
 const RUN_A = '0e38f601-1c30-4021-a60c-fa0d664c5cda'
 const RUN_B = 'ec99fe3f-84d9-415a-89f9-0ecae8f1fba6'
-const RUNS_DIR = 'C:/Users/dev/AppData/Local/Temp/pi-subagents-user-mitte/async-subagent-runs'
+const RUNS_DIR = 'C:/Users/dev/AppData/Local/Temp/pi-subagents-user-qa/async-subagent-runs'
 
 await check('describeSubagentPeek: tail/sleep/echo of run output logs is a peek', () => {
   assert.deepEqual(describeSubagentPeek(`tail -c 900 "${RUNS_DIR}/${RUN_A}/output-0.log"`), {
