@@ -314,8 +314,38 @@ export async function connectPrimeDaemon(
     environment,
     stringValue(existing?.socketPath)
   )
-  await client.connect()
-  return client
+  const cachedDaemon = daemons.get(client.socketPath)
+  try {
+    await client.connect()
+    return client
+  } catch (error) {
+    client.close()
+    // Adopted daemons have no child-process exit listener to clear their startup promise.
+    if (
+      !cachedDaemon ||
+      cachedDaemon.child ||
+      restartFailures.has(client.socketPath) ||
+      !isMissingDaemonEndpoint(error)
+    ) {
+      throw error
+    }
+    const replacement = new PrimeDaemonClient(location, agentDir, environment, client.socketPath)
+    try {
+      await replacement.connect()
+      return replacement
+    } catch (replacementError) {
+      replacement.close()
+      throw replacementError
+    }
+  }
+}
+
+function isMissingDaemonEndpoint(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    (error.code === 'ENOENT' || error.code === 'ECONNREFUSED')
+  )
 }
 
 export function beginPrimeDaemonRestart(
