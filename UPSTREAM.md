@@ -22,7 +22,7 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 `engines.lock.json` is the source of truth. Current stable bases are pi `v1.3.0` at
 `71023aec1546d6d677a65669c5665c0927ce0dd0` and Prime `v0.10.0` at
 `763094e1b6a7c17450ee8399b06cda1853847ca5`. The builds identify as `1.3.0+vengeance.1` and
-`0.10.0+vengeance.8`. Never reuse a Vengeance build version for different shipped behavior.
+`0.10.0+vengeance.9`. Never reuse a Vengeance build version for different shipped behavior.
 
 The current Prime source comparison and patch decisions are recorded in
 [PRIME-STABLE-AUDIT-2026-10-16.md](docs/PRIME-STABLE-AUDIT-2026-10-16.md).

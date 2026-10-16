@@ -6,7 +6,7 @@ tools, authentication, configuration and saved sessions.
 
 The app version is defined in [package.json](package.json). Engine revisions, distribution versions
 and ordered patches are pinned in [engines.lock.json](engines.lock.json); engines update with the app.
-The current native builds are Engine `1.3.0+vengeance.1` and Engine 2 `0.10.0+vengeance.8`.
+The current native builds are Engine `1.3.0+vengeance.1` and Engine 2 `0.10.0+vengeance.9`.
 
 Engine includes all three Abliteration models. Connect in **Settings → Providers & accounts →
 Abliteration**, or supply `ABLIT_KEY` in the launch environment. Abliterated Model Large V2 offers

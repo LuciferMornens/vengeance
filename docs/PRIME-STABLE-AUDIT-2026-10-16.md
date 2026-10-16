@@ -2,7 +2,7 @@
 
 Engine 2 remains based on official stable `v0.10.0`, commit
 `763094e1b6a7c17450ee8399b06cda1853847ca5`. The Vengeance build is
-`0.10.0+vengeance.8`; the ordered patches and exact inputs are in
+`0.10.0+vengeance.9`; the ordered patches and exact inputs are in
 [engines.lock.json](../engines.lock.json). No nightly or beta base was adopted.
 
 ## Upstream identity

@@ -3,7 +3,7 @@
 Follow [UPSTREAM.md](../../UPSTREAM.md) for reconstruction and qualification.
 
 Vengeance ships a source build of stable `v0.10.0`, upstream commit
-`763094e1b6a7c17450ee8399b06cda1853847ca5`, identified as `0.10.0+vengeance.8`.
+`763094e1b6a7c17450ee8399b06cda1853847ca5`, identified as `0.10.0+vengeance.9`.
 The exact source, catalog revision, toolchain and patch order live in
 [engines.lock.json](../../engines.lock.json). The native helper links this same stable base.
 
