@@ -337,8 +337,8 @@ saved sessions remain available in Background sessions, including future schedul
 keeps native identity, worker and history; explicit Stop ends the worker without deleting saved history.
 
 `node scripts/qa/performance/prime-long-history.qa.mjs` transfers 3,000 tool calls through public
-engine switching and Engine 2's native session writer. The resulting depth-zero history then passes
-three cold file opens, resident reopens and cached workspace roundtrips. Reports include native
+engine switching and Engine 2's native session writer. The suite then checks the depth-zero history
+through three cold file opens, resident reopens and cached workspace roundtrips. Reports include native
 executable identity, open/switch timings, frame gaps, mounted segments, retained renderer/main heap
 and zero local-provider requests. Run after native builds and workspace tests finish so CPU contention
 does not distort the 8-second open and 2-second cached-switch gates. The shared renderer's

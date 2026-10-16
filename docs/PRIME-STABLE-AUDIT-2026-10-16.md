@@ -43,7 +43,7 @@ identifies candidates for future qualification; it does not qualify that develop
 | 0016  | Read-only ledger observation, atomic topology/tombstone snapshot and orphan/moved endpoints; native `read_only_roster` and helper lineage tests.   | Local integration boundary. Native ledger reads otherwise may migrate a missing legacy ledger.                                              |
 | 0017  | rustls 0.23.46 maintenance in native and helper lockfiles.                                                                                         | Lock-only backport from upstream `d4b36cc`; all other dependency versions/features stay pinned.                                             |
 | 0018  | OAuth refresh flight covers credential persistence and reload; native paused-write regression plus duplicate-refresh and peer-write tests.         | Stable-base race confirmed during qualification; production lookup and failing test match unpatched stable. Requalify on each future base.  |
-| 0019  | Deterministic coalescing ticks, queued goal-pause admission and telemetry retry-expiry tests.                                                      | Test-only qualification fixes for stable fixtures; no production coalescing, goal or retry behavior changes.                                |
+| 0019  | Deterministic timing/lifecycle fixtures and a private piped-input receive seam.                                                                    | Preserve production receive behavior and coalescing, goal and retry contracts; requalify the small collection refactor.                     |
 
 Relevant source changes are
 [compaction controls](https://github.com/PrimeIntellect-ai/prime-agent/commit/7e86390ea99550f04fc706fac54c8f9ce0161327),
@@ -107,8 +107,17 @@ in Tokio runtime teardown, waiting for blocking subprocess pipe reads, after its
 Patch 0019 also gives that fixture an owned temporary workspace and orderly native worker shutdown.
 The interrupted daemon target remains a failed qualification attempt until a complete rerun passes.
 The helper's nine tests, formatting and strict Clippy passed against the preceding reconstructed source
-`3038c8f7`; this final amendment changes only test fixtures. The release helper must still be rebuilt
+`3038c8f7`; subsequent changes affect daemon fixtures and CLI piped-input collection, outside the helper's
+linked production APIs. The release helper must still be rebuilt
 against the final source, with its identity and packaged runtime checks recorded in the release evidence.
+
+The next full run exposed another unchanged stable fixture race: a live piped-input producer slept
+20 ms between writes against a 60 ms idle deadline, which Windows scheduling could exceed. Its CLI
+target failed with 260 tests passing and one failing; that run is not a clean full-workspace pass.
+Patch 0019 gives the private collection loop an injected receive function for deterministic arrival and
+deadline assertions. Production supplies the same standard receiver's `recv_timeout`; the shared loop,
+data handling and error behavior remain unchanged. This small refactor means the patch is not entirely
+test-only and requires qualification together with the remaining native gates.
 
 The read-only upstream audit did not rerun native or app suites. Current release validation is recorded
 with the release evidence rather than inferred from this source review. In particular, the earlier

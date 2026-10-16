@@ -27,7 +27,7 @@ The exact source, catalog revision, toolchain and patch order live in
 | 0016  | Read native lineage without legacy migration; resolve endpoints and tombstones from one ledger snapshot.  |
 | 0017  | Backport the upstream rustls 0.23.46 lockfile maintenance without changing other dependency pins.         |
 | 0018  | Keep each OAuth refresh flight through credential persistence so waiting callers reuse its token.         |
-| 0019  | Coordinate native coalescing, queued goal pause and telemetry retry fixtures without wall-clock races.    |
+| 0019  | Coordinate native timing/lifecycle fixtures and expose a private receive seam for piped-input tests.      |
 
 Patch 0014 comes from upstream commit
 [`7b89c111da0f1d9e67849b34f10552bbb4bd1bd1`](https://github.com/PrimeIntellect-ai/prime-agent/commit/7b89c111da0f1d9e67849b34f10552bbb4bd1bd1).
@@ -46,9 +46,11 @@ Patch 0018 fixes a stable-base concurrency race: releasing a provider's refresh 
 its credential could spend a single-use refresh token twice. The gate covers persistence and reload;
 token HTTP stays outside the document lock. A regression pauses the first credential write while
 a second public resolver attempts to refresh. Existing peer-writer and refresh tests also qualify it.
-Patch 0019 changes tests only: virtual timer ticks verify coalescing and retry expiry, while a native
+Patch 0019 primarily changes fixtures: virtual timer ticks verify coalescing and retry expiry, while a native
 admission barrier verifies that goal pause withdraws an actual queued continuation. The retry-broadcast
 fixture shuts down its native worker before dropping its runtime, closing subprocess pipe readers.
+Piped-input collection accepts a private receive function so its reset test can script arrivals;
+production still calls the standard receiver's `recv_timeout` with the full idle window on every read.
 Assertions keep their behavioral contracts rather than relying on provider speed or scheduler timing.
 
 The first three patches originated on development commit

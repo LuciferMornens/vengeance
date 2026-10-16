@@ -88,6 +88,13 @@ The retry-broadcast fixture shuts down its native worker before dropping its tes
 the kernel pipe readers that caused the historical teardown stall. No production streaming, goal or
 telemetry behavior changed in these fixture patches.
 
+The stdin collector exposes its receive call through a private adapter for deterministic idle-window
+tests. Production still calls the standard channel's `recv_timeout` with the full idle window for
+each receive; collection, EOF and timeout behavior remain intact. A single-deadline mutant fails the
+reset test, while all four correct-source tests pass, including real-channel EOF and idle checks.
+Patch author headers use the public noreply identity, so native build fingerprints use the exact
+published patch bytes.
+
 The Engine workspace runner builds the locked standalone Env daemon before its full suite, matching
 upstream CI. Windows child processes receive Git Bash utilities even when the runner starts in
 PowerShell. This test prerequisite adds no daemon to the shipped SDK.
@@ -108,3 +115,42 @@ Helper native tests: 9 passed; 0 failed
 Helper Clippy: passed with warnings denied
 All native test wrappers: real account configuration guards passed
 ```
+
+## Complete Engine workspace
+
+The final reconstructed Engine workspace passed upstream `./test.sh` through
+`node scripts/checks/pi-workspace.mjs`, including the locked Env build prerequisite and both
+filesystem-retention passes. It ran from 21:40 to 21:53 local time on 16 October, with one CPU/worker,
+one Rust build job and a one-hour outer deadline. Both real-account configuration guards passed.
+
+| Package                     | Passed | Skipped |
+| --------------------------- | -----: | ------: |
+| Scripts                     |     44 |       0 |
+| Agent                       |     91 |       0 |
+| AI                          |  1,358 |     865 |
+| Chord                       |    517 |       0 |
+| Codemode                    |    226 |       0 |
+| Coding agent                |  2,695 |      55 |
+| Durable, each of two passes |  1,212 |       9 |
+| Env                         |     63 |      18 |
+| Evals                       |     55 |       0 |
+| MCP                         |     44 |       1 |
+| Telemetry                   |     15 |       0 |
+
+TUI passed; its reporter prints dots rather than a leaf-test count. Skips include credential-dependent
+provider tests, external SSH fixtures and platform-specific cases. No live provider sign-in or paid
+inference was required for this release's qualification.
+
+```text
+node scripts/checks/pi-workspace.mjs
+  ✓ isolated native Engine checks passed
+  ✓ both real account configurations remained unchanged
+
+node scripts/checks/pi-workspace.mjs check
+  1,491 files checked; no formatting fixes
+  ✓ isolated native Engine checks passed
+```
+
+The staged Engine contains 14,956 files. Source-receipt verification and the catalog/changelog gates
+passed. The SDK worker-lifetime regression also passed all 14 tests under the shipped Electron Node
+24.21.0 runtime.
