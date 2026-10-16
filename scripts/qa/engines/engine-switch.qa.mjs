@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -232,6 +233,18 @@ try {
     await assert.rejects(switchEngine(agentId, 'prime', cwd), /idle|active|finish|wait/i)
     await application.rpc({ type: 'abort' }, agentId)
     await waitForEngine(agentId, 'pi')
+  })
+
+  await check('A new Engine 2 conversation stays empty after switching to Engine', async () => {
+    const emptyId = randomUUID()
+    try {
+      await application.invoke('engine:create', { engine: 'prime', cwd }, emptyId)
+      await switchEngine(emptyId, 'pi', cwd)
+      const { messages } = await application.rpc({ type: 'get_messages' }, emptyId)
+      assert.deepEqual(messages, [], 'Native startup metadata must not become conversation text')
+    } finally {
+      await application.invoke('engine:dispose', emptyId)
+    }
   })
 
   report.screenshots.push(await application.screenshot('engine-switch-roundtrip'))
