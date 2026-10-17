@@ -73,6 +73,11 @@ every command. Check a download against `SHA256SUMS`, or confirm the release wor
   Engine 2 toolbar no longer wrap, squeeze or overflow. The transcript stays pinned to the bottom
   when the composer grows, pasted images keep their paste order, Settings keeps the selected section
   in view, and the image viewer's close button no longer sits under the window buttons.
+- Toasts no longer cover the **Jump to latest** pill, the session tree shows a failed reply's readable
+  error instead of the provider's raw payload, the command palette keeps workspace names readable
+  beside long paths, and "Show in folder" now names Explorer, Finder or the file manager. Clock times
+  follow your locale without a leading zero, and a number typed into a settings field while its
+  value loads is no longer merged with that value.
 
 ## Known limits
 

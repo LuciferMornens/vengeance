@@ -732,6 +732,7 @@ function AgentTranscript({ agentId }: { agentId: string }) {
             {detached && !empty && (
               <motion.button
                 type="button"
+                data-jump-latest
                 initial={{ opacity: 0, y: 10, scale: 0.94 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 8, scale: 0.96 }}

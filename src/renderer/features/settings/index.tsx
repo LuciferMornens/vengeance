@@ -174,10 +174,15 @@ export function SettingsSheet() {
   const load = useSettings((s) => s.load)
   const overridden = useOverriddenSections()
   const searchRef = useRef<HTMLInputElement>(null)
+  const navListRef = useRef<HTMLDivElement>(null)
   const activeNavRef = useRef<HTMLDivElement>(null)
+  const activeGroupRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrolled, setScrolled] = useState(false)
   const searching = query.trim().length > 0
+  const activeGroupId = sections
+    .slice(0, sections.findIndex((s) => s.id === section.id) + 1)
+    .findLast((s) => s.groupLabel)?.id
   const placeKey = JSON.stringify([engine, cwd])
   const contentKey = JSON.stringify([
     placeKey,
@@ -192,10 +197,19 @@ export function SettingsSheet() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 })
   }, [engine, cwd, section.id, searching])
-  // Keep the active nav item in view: a section opened from elsewhere (palette, search, a link) can sit below the
-  // fold of a short window, and the isolated-config footer shortens the list once the snapshot loads.
+  // Keep the active nav item in view: a section opened from elsewhere (palette, search, a link) can sit outside the
+  // visible part of a short window, and the isolated-config footer shortens the list once the snapshot loads. An
+  // item less than 8px clear of an edge comes back under its group heading when both fit, otherwise 8px clear of
+  // that edge (`top` and `bottom` are those two scroll offsets, relative to the list, which is positioned).
   useEffect(() => {
-    activeNavRef.current?.scrollIntoView({ block: 'nearest' })
+    const list = navListRef.current
+    const item = activeNavRef.current
+    if (!list || !item) return
+    const top = item.offsetTop - 8
+    const bottom = item.offsetTop + item.offsetHeight + 8 - list.clientHeight
+    const heading = activeGroupRef.current?.offsetTop ?? top
+    if (list.scrollTop > top) list.scrollTop = heading >= bottom ? heading : top
+    else if (list.scrollTop < bottom) list.scrollTop = bottom
   }, [engine, section.id, snapshot?.isolated])
   // Toasts dock over the nav column while Settings is open (globals.css), clear of the centered content.
   useEffect(() => {
@@ -271,11 +285,12 @@ export function SettingsSheet() {
             )}
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+        <div ref={navListRef} className="relative min-h-0 flex-1 overflow-y-auto px-2 pb-4">
           {sections.map((s, i) => (
             <div key={s.id} ref={s.id === section.id ? activeNavRef : undefined}>
               {s.groupLabel && (
                 <div
+                  ref={s.id === activeGroupId ? activeGroupRef : undefined}
                   className={cn(
                     'px-2.5 pb-1.5 text-xs font-medium text-fg-3',
                     i === 0 ? 'pt-1' : 'pt-4'
@@ -324,7 +339,7 @@ export function SettingsSheet() {
       <div
         ref={scrollRef}
         onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}
-        className="relative min-h-0 flex-1 scroll-pt-14 overflow-y-auto bg-[color-mix(in_srgb,var(--surface-2)_40%,var(--surface-1))] [scrollbar-gutter:stable]"
+        className="relative min-h-0 flex-1 scroll-pt-16 overflow-y-auto bg-[color-mix(in_srgb,var(--surface-2)_40%,var(--surface-1))] [scrollbar-gutter:stable]"
       >
         <SheetHeader scrolled={scrolled}>
           {(searching || section.scoped) && <ScopeSwitch />}

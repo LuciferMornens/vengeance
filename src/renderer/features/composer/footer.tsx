@@ -20,7 +20,7 @@ import { TokenSpeed } from './token-speed'
  *               62em (engines/SessionEngineMenu.tsx, engines/prime-controls.tsx);
  *   below 40em  thinking and speed keep only their glyphs and the context
  *               meter keeps only its ring.
- * Between steps the model name truncates to absorb what is left.
+ * Between steps the mode hint, then the model name, truncates to absorb what is left.
  */
 const compactLabel = '@max-[52em]/composer:hidden'
 const compactIconButton = '@max-[52em]/composer:w-8 @max-[52em]/composer:px-0'

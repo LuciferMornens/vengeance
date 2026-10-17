@@ -79,7 +79,8 @@ export function ModeHint({ text, bashMode, engine }: ModeHintProps) {
         ? { icon: <AtSign />, label: 'Files mentioned', tone: 'text-fg-3' }
         : null
   return (
-    // popLayout: a changed hint shows at once while the old one fades out in place.
+    // popLayout: a changed hint shows at once while the old one fades out in place. A zero basis gives the hint
+    // only the footer space the controls leave, so it truncates to its glyph before the model name gives way.
     <AnimatePresence mode="popLayout">
       {hint && (
         <motion.span
@@ -88,13 +89,14 @@ export function ModeHint({ text, bashMode, engine }: ModeHintProps) {
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0 }}
           transition={spring.snappy}
+          title={hint.label}
           className={cn(
-            'ml-1 hidden items-center gap-1.5 truncate text-xs @min-[52em]/composer:inline-flex [&_svg]:size-3.5 [&_svg]:shrink-0',
+            'ml-1 hidden min-w-5 grow basis-0 items-center gap-1.5 text-xs @min-[52em]/composer:inline-flex [&_svg]:size-3.5 [&_svg]:shrink-0',
             hint.tone
           )}
         >
           {hint.icon}
-          {hint.label}
+          <span className="truncate">{hint.label}</span>
         </motion.span>
       )}
     </AnimatePresence>

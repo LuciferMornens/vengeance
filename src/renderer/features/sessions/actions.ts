@@ -14,7 +14,7 @@ import { bridge } from '../../lib/bridge'
 import { rpc } from '../../lib/engine'
 import { invoke } from '../../lib/ipc'
 import { normalizePath, samePath } from '../../lib/paths'
-import { TRASH_NAME } from '../../lib/platform-copy'
+import { REVEAL_LABEL, TRASH_NAME } from '../../lib/platform-copy'
 import { useAgents } from '../../store/agents'
 import { useApp, workspaceEngine } from '../../store/app'
 import { toast } from '../../ui'
@@ -467,7 +467,7 @@ export async function exportSession(
         level: 'success',
         title: written.format === 'html' ? 'Exported as a web page' : 'Exported as a session file',
         description: written.path,
-        action: { label: 'Show in folder', onClick: () => void invoke('sys:reveal', written.path) }
+        action: { label: REVEAL_LABEL, onClick: () => void invoke('sys:reveal', written.path) }
       })
     }
   } catch (error) {

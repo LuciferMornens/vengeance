@@ -152,9 +152,10 @@ function Item({
         iconTile
         title={
           <span className="flex min-w-0 items-baseline gap-2">
+            {/* The subtitle grows from a zero basis, so it truncates first; the title shrinks once the subtitle is down to 48px. */}
             <span className="min-w-0 truncate text-fg">{entry.title}</span>
             {entry.subtitle && (
-              <span className="min-w-12 shrink-[4] truncate text-sm font-normal text-fg-3">
+              <span className="min-w-12 flex-1 truncate text-sm font-normal text-fg-3">
                 {entry.subtitle}
               </span>
             )}

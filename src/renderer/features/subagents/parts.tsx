@@ -170,7 +170,10 @@ function workflowTitle(steps: number): string {
   return steps > 0 ? `${steps}-step workflow` : 'Workflow'
 }
 
-/** One 36px run row: glyph · agent · title · activity · elapsed · ⋯. */
+/**
+ * One 36px run row: glyph · agent · title · activity · elapsed. The ⋯ menu shows over the elapsed cell (on hover,
+ * focus or while open) rather than in a slot of its own, so the title keeps that room in a narrow panel.
+ */
 export function AgentRow({
   view,
   now,
@@ -190,7 +193,7 @@ export function AgentRow({
     view.title ?? (view.kind === 'workflow' ? workflowTitle(view.children.length) : undefined)
   return (
     <div
-      className={cn(listRowClass({ density: 'list' }), 'cursor-default pr-1')}
+      className={cn(listRowClass({ density: 'list' }), 'cursor-default')}
       data-subagent-row={view.state}
     >
       <button
@@ -214,24 +217,25 @@ export function AgentRow({
           {activity.text}
         </span>
       )}
-      <span className="tabular pointer-events-none w-11 shrink-0 text-right text-xs text-fg-3">
-        {elapsed}
-      </span>
-      {menu ? (
-        <span className="relative opacity-0 transition-opacity duration-[var(--dur-instant)] group-hover/row:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100">
-          <DropdownMenu
-            align="end"
-            items={menu}
-            trigger={
-              <IconButton label="More" size="xs">
-                <MoreHorizontal />
-              </IconButton>
-            }
-          />
+      {/* Clicks pass through the cell to the open button; only the ⋯ trigger takes them. */}
+      <span className="group/end pointer-events-none relative flex w-11 shrink-0 justify-end">
+        <span className="tabular text-xs text-fg-3 transition-opacity duration-[var(--dur-instant)] group-hover/row:opacity-0 group-focus-within/end:opacity-0 group-has-[[data-state=open]]/end:opacity-0">
+          {elapsed}
         </span>
-      ) : (
-        <span className="w-6 shrink-0" />
-      )}
+        {menu && (
+          <span className="pointer-events-auto absolute top-1/2 right-0 -translate-y-1/2 opacity-0 transition-opacity duration-[var(--dur-instant)] group-hover/row:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100">
+            <DropdownMenu
+              align="end"
+              items={menu}
+              trigger={
+                <IconButton label="More" size="xs">
+                  <MoreHorizontal />
+                </IconButton>
+              }
+            />
+          </span>
+        )}
+      </span>
     </div>
   )
 }
@@ -256,7 +260,7 @@ export function ChildRows({
             key={child.id}
             type="button"
             onClick={() => onOpen(child)}
-            className={cn(listRowClass({ density: 'menu' }), 'pl-6')}
+            className={cn(listRowClass({ density: 'menu' }), 'pr-2.5 pl-6')}
             data-subagent-child={child.state}
           >
             <RunGlyph state={child.state} />
@@ -275,7 +279,6 @@ export function ChildRows({
             <span className="tabular w-11 shrink-0 text-right text-xs text-fg-3">
               {elapsedLabel(child, now)}
             </span>
-            <span className="w-6 shrink-0" />
           </button>
         )
       })}

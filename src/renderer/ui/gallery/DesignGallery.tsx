@@ -356,7 +356,7 @@ export function DesignGallery() {
           </Row>
           <Row>
             <span className="w-20 text-xs text-fg-3">Toasts</span>
-            <Button size="sm" onClick={() => toast({ level: 'success', title: 'Session exported', description: 'Saved to Downloads/aurora.html', action: { label: 'Show in folder', onClick: () => undefined } })}>
+            <Button size="sm" onClick={() => toast({ level: 'success', title: 'Session exported', description: 'Saved to Downloads/aurora.html', action: { label: REVEAL_LABEL, onClick: () => undefined } })}>
               Success
             </Button>
             <Button size="sm" onClick={() => toast({ level: 'info', title: 'Answer recorded: No, just SessionStore' })}>

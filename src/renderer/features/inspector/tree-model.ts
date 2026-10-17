@@ -1,6 +1,7 @@
 import { NATIVE_COMPACTION_ENTRY } from '@shared/api/engine'
 import type { FlatTreeNode, SessionEntry } from '@shared/engine-types'
 import { asControlEvent, asNotifyDetails, asSupervisorRequest, isSubagentMessageType, parseNotifyContent, parseSupervisorReplyPrompt, SUBAGENT_MESSAGE_TYPES, SUBAGENT_WAKE_PREFIX } from '@shared/subagents'
+import { parseProviderError } from '../chat/provider-error'
 import { userText } from '../chat/transcript-items'
 
 export type BranchNodeKind = 'start' | 'user' | 'assistant' | 'compaction' | 'branch_summary' | 'custom' | 'subagent' | 'bash' | 'tool' | 'meta'
@@ -138,7 +139,12 @@ function classify(entry: SessionEntry): Classified {
       if (m.role === 'assistant') {
         const text = m.content.flatMap((c) => (c.type === 'text' ? [c.text] : [])).join(' ')
         const tools = m.content.flatMap((c) => (c.type === 'toolCall' ? [c.name] : []))
-        return { kind: 'assistant', text: text || (m.errorMessage ?? ''), tools }
+        // A failed reply without text reads as the chat's error headline, not the provider's raw payload.
+        return {
+          kind: 'assistant',
+          text: text || (m.errorMessage ? parseProviderError(m.errorMessage).title : ''),
+          tools
+        }
       }
       if (m.role === 'bashExecution') return { kind: 'bash', text: m.command, tools: [] }
       if (m.role === 'custom') return m.display ? customNode(m.customType, m.content, m.details) : null
