@@ -22,6 +22,8 @@ import type { TrustChoice, TrustPreflight, TrustResourceKind } from '@shared/api
 import { cn } from '../../lib/cn'
 import { basename, pluralize } from '../../lib/format'
 import { invoke } from '../../lib/ipc'
+import { isImeComposing } from '../../lib/keybindings'
+import { REVEAL_LABEL, revealLabelFor } from '../../lib/platform-copy'
 import { spring } from '../../lib/motion'
 import { useAgents } from '../../store/agents'
 import { Badge, Checkbox, Tooltip } from '../../ui'
@@ -196,11 +198,11 @@ function ResourceList({ preflight }: { preflight: TrustPreflight }) {
                 {pluralize(resource.entries, 'item')}
               </span>
             )}
-            <Tooltip content="Show in Explorer">
+            <Tooltip content={REVEAL_LABEL}>
               <button
                 type="button"
                 tabIndex={-1}
-                aria-label={`Show ${resource.label} in Explorer`}
+                aria-label={revealLabelFor(resource.label)}
                 onClick={() => void invoke('sys:reveal', resource.path)}
                 className="flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-3 opacity-0 transition-opacity group-hover/res:opacity-100 hover:bg-hover hover:text-fg"
               >
@@ -332,7 +334,7 @@ export function TrustDialog({ request, open }: { request: TrustRequest; open: bo
             (selected + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length
           setSelected(next)
           event.currentTarget.querySelectorAll<HTMLElement>('[role="option"]')[next]?.focus()
-        } else if (event.key === 'Enter') {
+        } else if (event.key === 'Enter' && !isImeComposing(event)) {
           event.preventDefault()
           const option = options[selected]
           if (option) choose(option.value)

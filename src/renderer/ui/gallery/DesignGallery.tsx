@@ -6,6 +6,8 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Bell, Copy, FileCode2, FolderOpen, GitFork, Search, Settings, Sparkles, SquarePen, Trash2, TriangleAlert } from 'lucide-react'
 import type { AccentName } from '@shared/api/app'
 import { cn } from '../../lib/cn'
+import { shortcutText } from '../../lib/keybindings'
+import { REVEAL_LABEL, TRASH_NAME } from '../../lib/platform-copy'
 import {
   Avatar,
   Badge,
@@ -112,7 +114,7 @@ export function DesignGallery() {
 
   return (
     <div data-gallery className="h-full overflow-y-auto">
-      <header className="drag sticky top-0 z-10 flex h-[var(--titlebar-h)] items-center gap-3 border-b border-hairline-soft bg-[var(--glass-strong)] pr-[calc(var(--caption-w)+12px)] pl-4 backdrop-blur-xl">
+      <header className="drag sticky top-0 z-10 flex h-[var(--titlebar-h)] items-center gap-3 border-b border-hairline-soft bg-[var(--glass-strong)] pr-[calc(var(--titlebar-inset-end)+12px)] pl-[max(16px,var(--titlebar-inset-start))] backdrop-blur-xl">
         <Mark size={16} />
         <span className="text-sm font-medium text-fg">Design system</span>
         <span className="text-sm text-fg-3">Obsidian &amp; Ember</span>
@@ -283,7 +285,7 @@ export function DesignGallery() {
               ]}
             />
             <Select value={undefined} onValueChange={() => undefined} placeholder="Choose a provider" options={[{ value: 'a', label: 'Anthropic' }]} />
-            <Textarea className="col-span-2 min-h-16" placeholder="Steer the agent — or Alt+Enter to queue a follow-up" />
+            <Textarea className="col-span-2 min-h-16" placeholder={`Steer the agent — or ${shortcutText('alt+enter')} to queue a follow-up`} />
           </div>
           <Row className="gap-5">
             <Switch checked={checked} onCheckedChange={setChecked} aria-label="Switch" />
@@ -331,7 +333,7 @@ export function DesignGallery() {
         <Section title="List rows (menu · list · rich)" className="col-span-5">
           <div className={cn(floatingSurface, 'relative z-0 w-full')}>
             <ListRow density="menu" icon={<GitFork />} title="Fork from here" trailing={<Kbd combo="mod+shift+f" size="xs" />} />
-            <ListRow density="menu" icon={<FolderOpen />} title="Reveal in Explorer" data-highlighted="" />
+            <ListRow density="menu" icon={<FolderOpen />} title={REVEAL_LABEL} data-highlighted="" />
             <ListRow density="menu" icon={<Trash2 />} title="Delete session" danger />
           </div>
           <div className="flex flex-col gap-0.5">
@@ -354,7 +356,7 @@ export function DesignGallery() {
           </Row>
           <Row>
             <span className="w-20 text-xs text-fg-3">Toasts</span>
-            <Button size="sm" onClick={() => toast({ level: 'success', title: 'Session exported', description: 'Saved to Downloads/aurora.html', action: { label: 'Show in folder', onClick: () => undefined } })}>
+            <Button size="sm" onClick={() => toast({ level: 'success', title: 'Session exported', description: 'Saved to Downloads/aurora.html', action: { label: REVEAL_LABEL, onClick: () => undefined } })}>
               Success
             </Button>
             <Button size="sm" onClick={() => toast({ level: 'info', title: 'Answer recorded: No, just SessionStore' })}>
@@ -406,7 +408,7 @@ export function DesignGallery() {
         icon={dialog === 'confirm' ? <Trash2 /> : <GitFork />}
         iconTone={dialog === 'confirm' ? 'danger' : 'neutral'}
         title={dialog === 'confirm' ? 'Delete this session?' : 'Fork from a message'}
-        description={dialog === 'confirm' ? 'The session file moves to the Recycle Bin. Open agents keep running.' : 'Pick the message to branch from. The original session stays untouched.'}
+        description={dialog === 'confirm' ? `The session file moves to the ${TRASH_NAME}. Open agents keep running.` : 'Pick the message to branch from. The original session stays untouched.'}
         hint={dialog === 'confirm' ? undefined : { combo: 'enter', label: 'to fork' }}
         footer={
           <>

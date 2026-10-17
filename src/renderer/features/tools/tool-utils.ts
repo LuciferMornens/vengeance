@@ -1,4 +1,5 @@
 import type { ImageContent, ToolCall, ToolResultPayload } from '@shared/engine-types'
+import { isWindowsPath } from '../../lib/path-kind'
 import type { ToolExecution } from '../../store/agent-state'
 
 /** Display phase of a tool row (adds `aborted` for interrupted/cancelled calls on top of the store's ToolStatus). */
@@ -125,8 +126,12 @@ export function fileErrorReason(text: string, shownPath: string): string {
 
 // ─── Paths ────────────────────────────────────────────────────────────────────
 
-/** Forward slashes, Git Bash drive form (`/d/x`) as `d:/x`, no trailing slash, lowercase: for comparing paths. */
-export function normalizePath(path: string): string {
+/**
+ * For comparing paths: no trailing slash; Windows paths (see isWindowsPath) also with forward slashes, the Git Bash
+ * drive form (`/d/x`) as `d:/x`, and lowercase. POSIX paths keep their case and backslashes.
+ */
+export function normalizePath(path: string, windows: boolean): string {
+  if (!windows) return path.replace(/\/+$/, '')
   return path
     .replace(/\\/g, '/')
     .replace(/^\/([a-z])(?=\/|$)/i, '$1:')
@@ -136,10 +141,12 @@ export function normalizePath(path: string): string {
 
 /** Path relative to the workspace when inside it, with forward slashes for display. */
 export function displayPath(path: string, cwd: string | undefined): string {
-  const p = path.replace(/^@/, '').replace(/\\/g, '/')
+  const bare = path.replace(/^@/, '')
+  const windows = isWindowsPath(cwd || bare)
+  const p = windows ? bare.replace(/\\/g, '/') : bare
   if (cwd) {
-    const base = normalizePath(cwd)
-    const full = normalizePath(p)
+    const base = normalizePath(cwd, windows)
+    const full = normalizePath(p, windows)
     // normalizePath keeps character positions, so the prefix length carries over to `p`.
     if (full === base) return '.'
     if (full.startsWith(`${base}/`)) return p.slice(base.length + 1)
@@ -152,11 +159,13 @@ export function isAbsolutePath(path: string): boolean {
   return /^([a-z]:)?\//i.test(path)
 }
 
-/** A path outside the workspace as `…/parent/name` (the full path belongs in a tooltip). */
+/** A path outside the workspace as `…/parent/name` (the full path belongs in a tooltip); `/etc/hosts` stays whole. */
 export function shortPath(path: string): string {
   if (!isAbsolutePath(path)) return path
   const parts = path.replace(/\/+$/, '').split('/')
-  return parts.length > 2 ? `\u2026/${parts.slice(-2).join('/')}` : path
+  // A POSIX path's leading '' is its root, not a name; a Windows path's drive counts as one.
+  const segments = isWindowsPath(path) ? parts.length : parts.length - 1
+  return segments > 2 ? `\u2026/${parts.slice(-2).join('/')}` : path
 }
 
 /** Last segment of a path (either separator). */
@@ -180,7 +189,8 @@ export function stripCdPrefix(command: string, cwd: string | undefined): { comma
   const dir = match[2] ?? match[3] ?? match[4] ?? ''
   const rest = command.slice(match[0].length)
   if (!rest.trim()) return { command }
-  const same = cwd !== undefined && normalizePath(dir) === normalizePath(cwd)
+  const windows = cwd !== undefined && isWindowsPath(cwd)
+  const same = cwd !== undefined && normalizePath(dir, windows) === normalizePath(cwd, windows)
   return same ? { command: rest } : { command: rest, dir }
 }
 
@@ -247,17 +257,24 @@ export function describeSubagentPeek(command: string): SubagentPeek | null {
 
 /** A drive-letter path in a command (not the `s://` of a URL). */
 const DRIVE_PATH = /(?<![\w/\\])[A-Za-z]:[\\/][^\s"'`;|&<>()]*/g
+/**
+ * An absolute POSIX path of two or more names in a command. Not the `//host/x` of a URL or a path continued from
+ * `~`, `.`, `$HOME`, `${x}`, `$(pwd)` or a glob; `:` and `,` end it (`PATH` lists, `sed '/a/,/b/p'` ranges).
+ */
+const POSIX_PATH = /(?<![\w/\\:.~$}*)-])\/[^\s"'`;|&<>(),:/]+(?:\/[^\s"'`;|&<>(),:/]*)+/g
 
 /** Text of a command, or a background run's file (shown by the run's name instead of its path). */
 export type CommandPart = string | { runId: string }
 
 /**
  * A command for display: background run files become run references, workspace paths become relative and
- * other absolute paths `…/parent/name`.
+ * other absolute paths `…/parent/name`. Paths are drive-letter paths in a Windows workspace (or without one) and
+ * POSIX paths in a macOS or Linux one.
  */
 export function humanizeCommand(command: string, cwd: string | undefined): CommandPart[] {
+  const paths = cwd && !isWindowsPath(cwd) ? POSIX_PATH : DRIVE_PATH
   const shorten = (text: string) =>
-    text.replace(DRIVE_PATH, (path) => {
+    text.replace(paths, (path) => {
       const shown = displayPath(path, cwd)
       return isAbsolutePath(shown) ? shortPath(shown) : shown
     })

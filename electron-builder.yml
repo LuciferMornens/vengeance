@@ -28,12 +28,17 @@ extraResources:
     to: bridge
     filter:
       - '**/*.ts'
+  # The native helper is a host build (scripts/build-prime-auth.mjs): .exe on Windows only.
   - from: resources/prime-auth/bin
     to: prime-auth
     filter:
+      - vengeance-prime-auth
       - vengeance-prime-auth.exe
   - from: resources/prime-auth/THIRD-PARTY-NOTICES.txt
     to: prime-auth/THIRD-PARTY-NOTICES.txt
+# Each platform packages natively on its own host, one arch per run (the staged engines are host builds).
+# Package with scripts/dist.mjs: it builds these targets for the host arch (pacman on x64 only) and gives
+# deb, rpm and pacman their own runs (see there).
 win:
   target:
     - target: nsis
@@ -54,8 +59,105 @@ nsis:
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
   artifactName: Vengeance-Setup-${version}.${ext}
+mac:
+  # zip is the format electron-updater reads on macOS; ${arch} keeps the two Mac builds apart.
+  target:
+    - dmg
+    - zip
+  category: public.app-category.developer-tools
+  icon: build/icon.png
+  minimumSystemVersion: '13.0'
+  # Ad-hoc signature, no Developer ID: Apple silicon only runs signed code, and electron-builder's Info.plist
+  # edits would otherwise break Electron's seal. The hardened runtime only matters for notarization.
+  identity: '-'
+  hardenedRuntime: false
+  # Signing runs after scripts/engines/after-pack.cjs has checked the engine payloads byte for byte against
+  # their staged hashes, so it must not rewrite them. The engine builds ad-hoc sign every Mach-O file there
+  # before hashing it: prime-agent, the auth helper and pi-tui's prebuilt darwin addons. The app's own
+  # signature seals all of these files as resources. Patterns are regexes over each file's absolute path.
+  signIgnore:
+    - /Contents/Resources/engines/
+    - /Contents/Resources/prime-auth/
+  # Folders dropped on the Dock icon or opened with Finder's Open With arrive as open-file events
+  # (src/main/index.ts). Alternate rank: Vengeance never becomes the default for folders.
+  extendInfo:
+    CFBundleDocumentTypes:
+      - CFBundleTypeName: Folder
+        CFBundleTypeRole: Viewer
+        LSHandlerRank: Alternate
+        LSItemContentTypes:
+          - public.folder
+  artifactName: Vengeance-${version}-mac-${arch}.${ext}
+linux:
+  target:
+    - AppImage
+    - deb
+    - rpm
+    - pacman
+    - tar.gz
+  executableName: vengeance
+  # Electron sets the Wayland app_id from package.json desktopName (vengeance.desktop → vengeance) and the X11
+  # WM_CLASS from the product name (vengeance, Vengeance). This names /usr/share/applications/vengeance.desktop
+  # after desktopName, and electron-builder derives StartupWMClass=vengeance from it as well.
+  syncDesktopName: true
+  icon: build/icons
+  category: Development
+  synopsis: Desktop coding agent
+  artifactName: Vengeance-${version}-linux-${arch}.${ext}
+deb:
+  # Ubuntu 24.04 and Debian 13 renamed several of these with a t64 suffix.
+  depends:
+    - 'libgtk-3-0 | libgtk-3-0t64'
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - 'libatspi2.0-0 | libatspi2.0-0t64'
+    - libuuid1
+    - libsecret-1-0
+    - libgbm1
+    - 'libasound2 | libasound2t64'
+  # The default (libappindicator3-1) is only for tray icons; Vengeance has none.
+  recommends: []
+rpm:
+  depends:
+    - gtk3
+    - libnotify
+    - nss
+    - libXScrnSaver
+    - '(libXtst or libXtst6)'
+    - xdg-utils
+    - at-spi2-core
+    - '(libuuid or libuuid1)'
+    - '(libsecret or libsecret-1-0)'
+    - '(mesa-libgbm or libgbm1)'
+    - '(alsa-lib or libasound2)'
+  # No /usr/lib/.build-id links: other Electron apps ship the same binaries, and their links would conflict.
+  fpm:
+    - '--rpm-rpmbuild-define=_build_id_links none'
+pacman:
+  # Replaces the default list: it needs http-parser, which current Arch repos no longer carry, plus a tray
+  # library and codecs that Electron does not use or bundles itself.
+  depends:
+    - gtk3
+    - nss
+    - alsa-lib
+    - libxss
+    - libxtst
+    - libnotify
+    - xdg-utils
+    - libsecret
+    - at-spi2-core
+    - mesa
+toolsets:
+  # The static AppImage runtime: no libfuse2 needed on the user's system.
+  appimage: '1.0.3'
 npmRebuild: false
 beforePack: scripts/engines/before-pack.cjs
 afterPack: scripts/engines/after-pack.cjs
-# Builds never publish. The generic self-update feed is opt-in via
-# VENGEANCE_UPDATE_FEED (scripts/dist.mjs). No file associations.
+# Builds never publish, and no GH_TOKEN/GITHUB_TOKEN in the environment turns on a publisher. The generic
+# self-update feed is opt-in via VENGEANCE_UPDATE_FEED (scripts/dist.mjs). No file associations. Linux
+# registers no inode/directory MIME type either: some desktops would make the newest handler of it their
+# default folder opener. Launchers still pass folders through the desktop entry's %U.
+publish: null

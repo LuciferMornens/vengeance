@@ -18,18 +18,36 @@ node scripts/qa/settings/thinking.qa.mjs   # one suite directly
   `PI_CODING_AGENT_DIR` from `createAgentDir()` and a separate `PRIME_AGENT_CODING_AGENT_DIR` with
   temporary session/kernel roots. The harness refuses account paths outside the QA temp root.
 - **Temp folders live outside the user's profile and outside any git repo** (`lib/tmp.mjs`,
-  `QA_TMP_ROOT`, default `<repo>/../.vengeance-qa-tmp`). The engine treats `.agents/skills` in any
-  ancestor of a workspace as project resources (Trust dialog), so workspaces never sit below the
-  profile; a git-ignored folder would hide workspace files from `git ls-files` (@-mentions).
+  `QA_TMP_ROOT`, default `<repo>/../.vengeance-qa-tmp` on Windows, `/private/tmp/vq` on macOS and
+  `/tmp/vq` on Linux, short enough for Engine 2's Unix sockets). The engine treats
+  `.agents/skills` in any ancestor of a workspace as project resources (Trust dialog), so
+  workspaces never sit below the profile; a git-ignored folder would hide workspace files from
+  `git ls-files` (@-mentions).
 - **Fake mode runs the app with a temp `HOME`**, so the user's own `~/.agents/skills` never load
-  (Electron's `app.getPath('home')` still follows USERPROFILE). Real mode keeps the real HOME.
-  `scripts/qa/shell/harness-isolation.qa.mjs` checks both.
+  (on Windows Electron's `app.getPath('home')` still follows USERPROFILE; userData is always the temp
+  profile). Real mode keeps the real HOME. `scripts/qa/shell/harness-isolation.qa.mjs` checks both.
+- `VENGEANCE_TEST=1` also skips the login-shell environment read on macOS and Linux, so the app's
+  children inherit the harness's environment as on Windows. Set the tools a suite needs on the
+  harness's own PATH, or through `launchApp({ env })`.
 - **REAL mode only for tiny prompts** (`"Reply with exactly: ok"`). It runs against the user's real
   engine config with `--no-session` in a temp workspace; `send()` rejects prompts over 80 chars.
   Never copy, read or print `auth.json`: the user's providers are OAuth (anthropic, openai,
   openai-codex) and refresh tokens rotate.
 - **Suites live in `scripts/qa/<domain>/<name>.qa.mjs`**. Shared helpers only in `scripts/qa/lib/`.
 - The user may have their own Vengeance open. The harness never touches processes it did not start.
+- Every harness launch adds the host's Chromium switches from `lib/platform.mjs`: Linux uses
+  `--password-store=basic`, so safeStorage never waits on a desktop keyring, and adds `--no-sandbox`
+  and `--disable-dev-shm-usage` only when `CI` runs as root (a container); macOS uses
+  `--use-mock-keychain`, so safeStorage never prompts. Windows adds none. The shots harness and
+  `scripts/e2e-real.mjs` use the same switches.
+  Without OS encryption Linux keeps launch env values plain at rest, so the sealing assertions in
+  `settings/launch-options.qa.mjs` and `settings/app-prefs-restart.qa.mjs` check that fallback.
+  App shortcuts are pressed as `ControlOrMeta+…` (⌘ on macOS).
+- **Linux needs a display.** On a host without one, run GUI suites and shots under Xvfb, as CI does:
+  `xvfb-run -a -s '-screen 0 2560x1440x24' npm run shots` (the largest responsive shots need that
+  screen). On Ubuntu 24.04 and newer, AppArmor blocks the user namespaces Chromium's sandbox needs;
+  allow them for the session with `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`.
+  The harness keeps the app's sandbox on outside root containers.
 - Run native Rust qualification and package builds serially on memory-constrained machines.
   `QA_NATIVE_JOBS=1` limits the native workspace runner; `VENGEANCE_NATIVE_BUILD_JOBS=1` limits
   Engine 2 and helper package builds. Both accept 1–32 jobs and default to four. For native tests,
@@ -39,7 +57,7 @@ node scripts/qa/settings/thinking.qa.mjs   # one suite directly
   or a targeted `env` run, matching upstream CI. `QA_NATIVE_JOBS` also limits this prerequisite.
   The standalone Env package is outside the bundled SDK's runtime dependency graph.
   On Windows the isolated runner adds Git Bash utilities to its child PATH, including targeted runs
-  launched from PowerShell.
+  launched from PowerShell; on macOS and Linux it runs upstream's `test.sh` with the system `bash`.
 - Native workspace runners default to a 15-minute process deadline. `QA_NATIVE_TIMEOUT_MS` sets
   that deadline in milliseconds for a slower qualification host. Both runners accept integers from 1
   through 2147483647, the Node timer limit. This changes the outer process deadline only; native
@@ -181,7 +199,7 @@ REAL_AGENT_DIR         // ~/.pi/agent
 ### `lib/tmp.mjs`
 
 ```ts
-QA_TMP_ROOT                          // env QA_TMP_ROOT, default <repo>/../.vengeance-qa-tmp
+QA_TMP_ROOT                          // env QA_TMP_ROOT, default per OS (see Rules)
 REAL_HOME                            // os.homedir() of the harness process
 qaTempDir(prefix): Promise<string>   // <QA_TMP_ROOT>/<prefix>XXXXXX
 tempRoot(prefix?): Promise<{ dir, path(...parts), folder(name, files?), cleanup() }>
@@ -202,8 +220,27 @@ recordTrash(app); trashCalls(app)                               // shell.trashIt
 stubMainNetwork(app, [{ prefix, json, status? }])               // main fetch + openExternal
 
 processTable(): Promise<{ pid, ppid, name, commandLine, workingSetBytes, createdMs }[]>
+  // Windows: CIM through PowerShell; Linux: /proc; macOS: ps (C locale). `name` is the executable's
+  // file name: `prime-agent.exe` on Windows, `prime-agent` elsewhere.
 descendants(table, pid)                                         // live descendants (PID-reuse safe)
-isAlive(pid); killTree(pid); pidsOfImage(imageName)
+isAlive(pid); pidsOfImage(imageName)                            // e.g. platform.mjs APP_PROCESS_NAME
+killTree(pid)   // only trees the harness started: taskkill /T /F on Windows; elsewhere SIGTERM to
+                // the whole descendant tree, then SIGKILL after 3 s
+processIdentity(pid): Promise<{ pid, parentPid, executablePath }>   // resolved executable path
+```
+
+### `lib/platform.mjs`
+
+```ts
+ELECTRON_SWITCHES: string[]          // Chromium switches for every launch (see Rules); [] on Windows
+executableName(name): string         // `prime-agent` → `prime-agent.exe` on Windows only
+APP_PROCESS_NAME: string             // Vengeance.exe | Vengeance (macOS) | vengeance (Linux)
+unpackedExecutable(outputDir): string
+  // win-unpacked/Vengeance.exe, mac-arm64|mac/Vengeance.app/Contents/MacOS/Vengeance,
+  // linux-unpacked|linux-arm64-unpacked/vengeance
+resourcesDirOf(executable): string   // process.resourcesPath of a packaged app (macOS: Contents/Resources)
+TRASH_NAME: string                   // 'Recycle Bin' on Windows, 'Trash' elsewhere (the app's wording)
+DOCUMENT_START_KEY, DOCUMENT_END_KEY: string // Control+Home/End, or Meta+ArrowUp/Down on macOS
 ```
 
 `stubMainNetwork` replaces the main process's `fetch` only. The Engine's SDK host (a node child of main) has its own
@@ -216,8 +253,8 @@ through `launchApp({ env })`, since a variable deleted in main later does not re
 
 ```ts
 launchApp({ mode?, agentDir?, exe?, outDir?, env?, allowErrors?, size? }): Promise<QaApp>
-  // built out/ app, or `exe` (e.g. release/win-unpacked/Vengeance.exe)
-  // env: VENGEANCE_TEST=1, VENGEANCE_NO_MICA=1, VENGEANCE_USER_DATA=<temp>, TEMP/TMP=<temp>,
+  // built out/ app, or `exe`, an unpacked app's executable (platform.mjs unpackedExecutable)
+  // env: VENGEANCE_TEST=1, VENGEANCE_NO_MICA=1, VENGEANCE_USER_DATA=<temp>, TEMP/TMP/TMPDIR=<temp>,
   //      VENGEANCE_MOCK and inherited PI_* / AI_AGENT removed; fake mode also removes PRIME_*.
   //      Fake mode adds temp HOME, PI_CODING_AGENT_DIR, PRIME_AGENT_CODING_AGENT_DIR,
   //      PRIME_AGENT_SESSION_DIR, PRIME_AGENT_CODING_AGENT_SESSION_DIR, PRIME_AGENT_KERNEL_VENV,
@@ -250,8 +287,10 @@ reportShotsDir(area): string  // <QA_REPORT_DIR>/<area>-shots, default .shots/qa
 
 `close()` quits the app, kills only its own process tree and engine PIDs if they outlive the quit,
 deletes the temp profile and workspaces, and throws on: renderer `console.error`, `pageerror`,
-uncaught main-process exceptions or rejections (minus `allowErrors`), a Vengeance.exe that was
-running before the launch and is gone now, or (REAL mode) a changed real config file.
+uncaught main-process exceptions or rejections (minus `allowErrors`), a Vengeance process
+(`APP_PROCESS_NAME`) that was running before the launch and is gone now, or (REAL mode) a changed real
+config file. Engine 2 daemon endpoints it cleans up are named pipes on Windows and
+`vengeance-engine2-<id>.sock` Unix sockets elsewhere.
 
 At launch the harness checks that the app's userData is the temp folder and that it does not hold
 the single-instance lock (`VENGEANCE_TEST=1` skips the lock), so it can run next to the user's own
@@ -364,7 +403,7 @@ as `QA_PRIME_BASELINE_SHA256`; the transition suite computes and records its bas
 
 ## Packaged qualification
 
-Build once, then package and test serially from Git Bash:
+Build once, then package and test serially from Git Bash on Windows (any POSIX shell elsewhere):
 
 ```sh
 npm run build
@@ -375,10 +414,23 @@ node scripts/qa/run.mjs --only packaged.qa.mjs --only model-isolation.qa.mjs \
   --only bundled-extensions.qa.mjs
 ```
 
-Adjust the absolute paths to your checkout. The basename filter `packaged.qa.mjs` matches both
-the engine and shell suites, so this command runs four suites. `QA_PI_PACKAGE_ROOT` optionally
-points at an installed pi agent directory to copy compatibility extensions and their dependencies
-into temporary QA storage; it does not authorize copying credentials or modifying that source.
+Adjust the absolute paths to your checkout. `dist-qa.mjs` ends with a `QA executable: <path>` line
+naming the host's `QA_PACKAGED_EXE`, under `release/qa`:
+
+| Host                | `QA_PACKAGED_EXE`                                      |
+| ------------------- | ------------------------------------------------------ |
+| Windows x64         | `win-unpacked/VengeanceQA.exe`                         |
+| macOS Apple silicon | `mac-arm64/VengeanceQA.app/Contents/MacOS/VengeanceQA` |
+| macOS Intel         | `mac/VengeanceQA.app/Contents/MacOS/VengeanceQA`       |
+| Linux x64           | `linux-unpacked/vengeance-qa`                          |
+| Linux arm64         | `linux-arm64-unpacked/vengeance-qa`                    |
+
+The release workflow reads that line and runs only `engines/packaged.qa.mjs` against it, under Xvfb
+on Linux. On a Linux host without a display, prefix the `node scripts/qa/run.mjs` command with
+`xvfb-run -a -s '-screen 0 2560x1440x24'`. The basename filter `packaged.qa.mjs` matches both the
+engine and shell suites, so this command runs four suites. `QA_PI_PACKAGE_ROOT` optionally points
+at an installed pi agent directory to copy compatibility extensions and their dependencies into
+temporary QA storage; it does not authorize copying credentials or modifying that source.
 The shell suite checks the packaged version against `package.json`, including About and Updates.
 The native suite checks both engines, the external bridge and helper loading with a system-only PATH.
 
@@ -393,6 +445,9 @@ The native suite checks both engines, the external bridge and helper loading wit
 - `agentState()` is a JSON copy: `undefined` fields are missing, nothing is live.
 - `send()` drives the active agent's composer; with several agents, activate the right one first.
 - Packaged mode needs a completed package. Prefer the unpacked QA command above; no installer
-  launch is needed. Installer-specific tests use `npm run dist:qa` (appId `com.vengeance.qa`,
-  "Vengeance QA", `VengeanceQA.exe`, no shortcuts, separate userData). Never use the production
-  installer as a development fixture. Screenshots cannot capture Mica.
+  launch is needed. Installer-specific tests use `npm run dist:qa`, which builds the host's packages
+  under the QA identity: appId `com.vengeance.qa`, "Vengeance QA", `VengeanceQA.exe` /
+  `VengeanceQA.app`, `vengeance-qa` as the Linux executable, package name and desktop entry, no
+  shortcuts, separate userData. Never use the production installer or packages as a development
+  fixture. Screenshots capture the page only: not Mica, the macOS traffic lights or Electron's Linux
+  caption buttons.

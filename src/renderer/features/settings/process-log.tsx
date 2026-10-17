@@ -135,8 +135,9 @@ export interface ProcessLogProps {
   className?: string
 }
 
+/** The locale's own short time ("7:36 PM", "19:36"): no zero-padded hour in 12-hour locales. */
 function clock(epochMs: number): string {
-  return new Date(epochMs).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  return new Date(epochMs).toLocaleTimeString(undefined, { timeStyle: 'short' })
 }
 
 /**

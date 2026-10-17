@@ -14,6 +14,7 @@ import { ENGINE_UPDATE_MESSAGE } from '../../engine/bundled'
 import { connectPrimeDaemon } from '../../engine/prime/daemon'
 import { getPrimeAgentDir, locatePrimeEngine } from '../../engine/prime/locate'
 import { env } from '../../env'
+import { childBaseEnv } from '../../shell-env'
 import {
   nextCheckDelay,
   updatesOfflineReason,
@@ -191,7 +192,7 @@ export class PrimeUpdatesService {
         windowsHide: true,
         signal: this.controller.signal,
         env: {
-          ...process.env,
+          ...childBaseEnv(),
           PRIME_AGENT_CODING_AGENT_DIR: getPrimeAgentDir(),
           PI_PACKAGE_DIR: location.packageDir
         },

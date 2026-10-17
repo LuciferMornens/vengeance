@@ -175,7 +175,7 @@ await runSuite(
         const boom = errors.find((e) => /exploded/.test(e.error))
         assert.ok(boom, `extension_error recorded: ${JSON.stringify(errors)}`)
         assert.equal(boom.event, 'tool_result')
-        await page.keyboard.press('Control+i')
+        await page.keyboard.press('ControlOrMeta+i')
         await page.locator('[data-tab="extensions"]').click()
         // The inspector's list (the error's toast quotes it too).
         await page
@@ -200,7 +200,7 @@ await runSuite(
       await page.getByRole('switch', { name: /qa_echo/ }).click()
       const [again] = await run('with echo', turn.text('Echo back.'))
       assert.ok(inspectRequest(again).tools.includes('qa_echo'), 'qa_echo declared again')
-      await page.keyboard.press('Control+i')
+      await page.keyboard.press('ControlOrMeta+i')
     })
 
     await bugStep(

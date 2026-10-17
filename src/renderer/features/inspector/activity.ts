@@ -1,4 +1,5 @@
 import type { ToolCall } from '@shared/engine-types'
+import { isWindowsPath } from '../../lib/path-kind'
 import type { AgentState, ToolExecution, ToolStatus } from '../../store/agent-state'
 
 /** One tool call of the session in transcript order, joined with its execution record. */
@@ -87,11 +88,22 @@ function isAbsolute(path: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith('\\\\') || path.startsWith('/')
 }
 
+/** A Windows workspace joins with `\`; a POSIX one with `/` (a backslash there is part of a name). */
 function joinPath(cwd: string, path: string): string {
+  if (!isWindowsPath(cwd)) return `${cwd.replace(/\/+$/, '')}/${path.replace(/^\.\//, '')}`
   return `${cwd.replace(/[\\/]+$/, '')}\\${path.replace(/^\.[\\/]/, '').replace(/\//g, '\\')}`
 }
 
+/** One entry per file: Windows paths compare case-insensitively with either separator, POSIX paths exactly. */
+function fileKey(cwd: string, path: string): string {
+  return isWindowsPath(cwd) ? path.replace(/\//g, '\\').toLowerCase() : path
+}
+
 export function relativeTo(cwd: string, path: string): string {
+  if (!isWindowsPath(cwd)) {
+    const base = cwd.replace(/\/+$/, '')
+    return path.startsWith(`${base}/`) ? path.slice(base.length + 1) : path
+  }
   const base = cwd.replace(/[\\/]+$/, '').toLowerCase()
   const normalized = path.replace(/\//g, '\\')
   if (normalized.toLowerCase().startsWith(`${base}\\`)) return normalized.slice(base.length + 1).replace(/\\/g, '/')
@@ -132,7 +144,7 @@ export function fileActivity(cwd: string, activities: ToolActivity[]): FileActiv
     const raw = pathArg(activity.args)
     if (!op || !raw) continue
     const path = isAbsolute(raw) ? raw : joinPath(cwd, raw)
-    const key = path.replace(/\//g, '\\').toLowerCase()
+    const key = fileKey(cwd, path)
     const file = files.get(key) ?? { path, display: relativeTo(cwd, path), reads: 0, edits: 0, writes: 0, added: 0, removed: 0, errors: 0, lastAt: 0, lastOp: op, live: false }
     if (op === 'read') file.reads++
     else if (op === 'edit') file.edits++

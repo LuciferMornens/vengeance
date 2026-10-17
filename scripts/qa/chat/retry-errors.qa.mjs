@@ -184,7 +184,7 @@ await runSuite(
     })
 
     await step('Settings → retry off (set_auto_retry): a 503 is not retried', async () => {
-      await app.page.keyboard.press('Control+,')
+      await app.page.keyboard.press('ControlOrMeta+,')
       await app.page.getByText('Agent behavior', { exact: true }).first().click()
       const label = app.page.getByText('Retry transient failures', { exact: true })
       await label.waitFor()

@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { cargoPath, engineLock, prepareSource, root } from '../engines/common.mjs'
+import { cargoPath, engineLock, hostPlatform, prepareSource, root } from '../engines/common.mjs'
 import { tempRoot } from '../qa/lib/tmp.mjs'
 
 const source = await prepareSource('prime', engineLock.prime)
@@ -18,8 +19,9 @@ try {
     USERPROFILE: fixture.path('home'),
     TEMP: await fixture.folder('temp'),
     TMP: fixture.path('temp'),
-    CARGO_HOME: process.env.CARGO_HOME ?? join(process.env.USERPROFILE, '.cargo'),
-    RUSTUP_HOME: process.env.RUSTUP_HOME ?? join(process.env.USERPROFILE, '.rustup'),
+    TMPDIR: fixture.path('temp'),
+    CARGO_HOME: process.env.CARGO_HOME ?? join(homedir(), '.cargo'),
+    RUSTUP_HOME: process.env.RUSTUP_HOME ?? join(homedir(), '.rustup'),
     PRIME_AGENT_CODING_AGENT_DIR: await fixture.folder('account'),
     PRIME_AGENT_SESSION_DIR: await fixture.folder('sessions'),
     PRIME_AGENT_KERNEL_VENV: fixture.path('kernel'),
@@ -29,7 +31,7 @@ try {
   const buildArguments = [
     '--locked',
     '--target',
-    engineLock.prime.target,
+    hostPlatform().rustTarget,
     '--target-dir',
     join(root, '.cache/prime-auth/target'),
     '-j4'

@@ -7,6 +7,7 @@ import { performance } from 'node:perf_hooks'
 import { createEngineFixture } from '../engines/integration-fixture.mjs'
 import { launchApp, reportShotsDir } from '../lib/app.mjs'
 import { turn } from '../lib/fake-llm.mjs'
+import { TRASH_NAME } from '../lib/platform.mjs'
 import { softSteps } from '../lib/steps.mjs'
 import { SessionBuilder, workspaceSessionDir } from '../sessions/lib/session-files.mjs'
 import { assertUniqueVisibleSessions, captureSidebarRows } from './workspace-scale-diagnostics.mjs'
@@ -646,7 +647,7 @@ try {
       const deleted = primary.sessions[4]
       await (await searchSession(application, deleted.name)).press('Delete')
       await application.page
-        .getByRole('button', { name: 'Move to Recycle Bin', exact: true })
+        .getByRole('button', { name: `Move to ${TRASH_NAME}`, exact: true })
         .click()
       await application.page.getByText('No matching sessions', { exact: true }).waitFor()
       await switchWorkspace(application, workspaces.at(-1).cwd)

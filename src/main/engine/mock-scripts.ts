@@ -3,6 +3,7 @@ import type { MockScriptName } from '@shared/api/engine'
 import type { AgentMessage, ExtensionUIDialogRequest, ToolResultMessage, UserMessage } from '@shared/engine-types'
 import { call, displayDiff, ScriptBuilder, text, uid, type MockStep, type ScriptContext } from './mock-builder'
 import { MOCK_FILES } from './mock-data'
+import { forwardSlashes, mockHomePath } from './mock-paths'
 import { subagents } from './mock-subagents'
 import { toolbelt } from './mock-toolbelt'
 
@@ -31,7 +32,7 @@ const NEW_PERSIST = `  private dirty = new Set<string>()
 
 const ESC = '\u001b['
 const VITEST_LINES = [
-  `\n${ESC}1m${ESC}46m RUN ${ESC}49m${ESC}22m ${ESC}36mv3.2.4 ${ESC}39m${ESC}90mC:/Users/dev/projects/aurora${ESC}39m\n\n`,
+  `\n${ESC}1m${ESC}46m RUN ${ESC}49m${ESC}22m ${ESC}36mv3.2.4 ${ESC}39m${ESC}90m${forwardSlashes(mockHomePath('projects', 'aurora'))}${ESC}39m\n\n`,
   ` ${ESC}32m✓${ESC}39m src/session/persist.test.ts ${ESC}2m(${ESC}22m${ESC}2m6 tests${ESC}22m${ESC}2m)${ESC}22m${ESC}32m 11${ESC}2mms${ESC}22m${ESC}39m\n`,
   ` ${ESC}32m✓${ESC}39m src/session/types.test.ts ${ESC}2m(${ESC}22m${ESC}2m3 tests${ESC}22m${ESC}2m)${ESC}22m${ESC}32m 4${ESC}2mms${ESC}22m${ESC}39m\n`,
   ` ${ESC}32m✓${ESC}39m src/session/store.test.ts ${ESC}2m(${ESC}22m${ESC}2m15 tests${ESC}22m${ESC}2m)${ESC}22m${ESC}32m 38${ESC}2mms${ESC}22m${ESC}39m\n`,
@@ -220,10 +221,15 @@ function showcase(ctx: ScriptContext): MockStep[] {
     ]
     const r1 = b.tool(write, text(`Successfully wrote ${Buffer.byteLength(MOCK_FILES.test)} bytes to ${MOCK_FILES.testPath}`), { durationMs: 3 })
     const outputs = VITEST_LINES.map((_, i) => VITEST_LINES.slice(0, i + 1).join(''))
-    b.label('bash-running')
-    const r2 = b.tool(bash, { content: [{ type: 'text', text: outputs[outputs.length - 1]! }], details: {} }, {
+    const r2 = b.tool(bash, text(outputs[outputs.length - 1]!), {
       durationMs: 2140,
-      updates: outputs.slice(0, -1).map((output) => ({ content: [{ type: 'text', text: output }], details: {} }))
+      updates: outputs.slice(0, -2).map((output) => text(output)),
+      // Parks mid-command: the row is running and its live tail shows the first test files.
+      during: (run) =>
+        run.label('bash-running').emit(
+          { type: 'tool_execution_update', toolCallId: bash.id, toolName: bash.name, args: bash.arguments, partialResult: text(outputs[outputs.length - 2]!) },
+          535
+        )
     })
     return { message, results: [...todoResults, r1, r2] }
   })
@@ -540,7 +546,7 @@ function gallery(ctx: ScriptContext): MockStep[] {
 }
 
 const PS_LISTING = `
-    Directory: C:\\Users\\dev\\projects\\aurora\\src\\session
+    Directory: ${mockHomePath('projects', 'aurora', 'src', 'session')}
 
 Mode                 LastWriteTime         Length Name
 ----                 -------------         ------ ----
@@ -548,6 +554,29 @@ Mode                 LastWriteTime         Length Name
 -a---          14.05.2026    14:31           5208 store.test.ts
 -a---          12.05.2026    09:12            986 types.test.ts
 `
+
+/** Links, owner and group columns of `ls -l`: BSD spacing and the `staff` group on macOS, GNU elsewhere. */
+const LS_OWNER = process.platform === 'darwin' ? ' 1 dev  staff ' : '1 dev dev'
+const LS_LISTING = `-rw-r--r-- ${LS_OWNER} 3412 May 14 14:31 src/session/persist.test.ts
+-rw-r--r-- ${LS_OWNER} 5208 May 14 14:31 src/session/store.test.ts
+-rw-r--r-- ${LS_OWNER}  986 May 12 09:12 src/session/types.test.ts
+`
+
+/** The session-test listing with this platform's Engine shell tool (PowerShell exists only on Windows). */
+const SHELL_LISTING =
+  process.platform === 'win32'
+    ? {
+        tool: 'powershell',
+        command: 'Get-ChildItem src\\session -Filter *.test.ts | Format-Table Mode, LastWriteTime, Length, Name',
+        output: PS_LISTING,
+        thinking: 'Windows workspace: list the session tests with PowerShell first, then look for the Linear tools to file the follow-up.'
+      }
+    : {
+        tool: 'bash',
+        command: 'ls -l src/session/*.test.ts',
+        output: LS_LISTING,
+        thinking: 'List the session tests first, then look for the Linear tools to file the follow-up.'
+      }
 
 const PARITY_DIAGRAM = `Writes now flow through one batched flush:
 
@@ -570,22 +599,25 @@ const LINEAR_RESOURCES = JSON.stringify({
   ]
 })
 
-/** pi parity tools: PowerShell, tool_search, MCP resources + an MCP tool, codemode with nested calls, a mermaid answer. */
+/**
+ * pi parity tools: the platform shell (PowerShell on Windows, bash elsewhere), tool_search, MCP resources + an MCP tool,
+ * codemode with nested calls, a mermaid answer.
+ */
 function parity(ctx: ScriptContext): MockStep[] {
   const b = new ScriptBuilder(ctx)
   b.emit({ type: 'agent_start' })
   b.turn(() => {
     b.user(ctx.prompt)
-    const ps = call('powershell', { command: 'Get-ChildItem src\\session -Filter *.test.ts | Format-Table Mode, LastWriteTime, Length, Name' })
+    const shell = call(SHELL_LISTING.tool, { command: SHELL_LISTING.command })
     const message = b.assistant(
       [
-        { thinking: 'Windows workspace: list the session tests with PowerShell first, then look for the Linear tools to file the follow-up.' },
+        { thinking: SHELL_LISTING.thinking },
         { text: 'Listing the session tests first.' },
-        { tool: ps }
+        { tool: shell }
       ],
       'toolUse'
     )
-    return { message, results: [b.tool(ps, text(PS_LISTING), { durationMs: 640 })] }
+    return { message, results: [b.tool(shell, text(SHELL_LISTING.output), { durationMs: 640 })] }
   })
   b.turn(() => {
     const search = call('tool_search', { query: 'linear issues', limit: 5 })

@@ -31,6 +31,7 @@ import type { RpcCommandType, ThinkingLevel } from '@shared/engine-types'
 import type { SettingsSectionId } from '@shared/api/settings-schema'
 import { hasAction, runAction } from '../../lib/actions'
 import { invoke } from '../../lib/ipc'
+import { shortcutText } from '../../lib/keybindings'
 import { useAgents } from '../../store/agents'
 import { toast } from '../../ui'
 import { openSettingsSection, revealSetting } from '../palette/settings-sections'
@@ -127,7 +128,7 @@ export const BUILTIN_COMMANDS: BuiltinCommand[] = [
   },
   {
     name: 'scoped-models',
-    description: 'Choose the models Ctrl+P cycles through',
+    description: `Choose the models ${shortcutText('mod+p')} cycles through`,
     icon: SlidersHorizontal,
     run: settings('models', 'enabledModels')
   },

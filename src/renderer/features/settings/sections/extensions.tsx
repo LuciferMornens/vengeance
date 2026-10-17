@@ -19,6 +19,7 @@ import type { PackageInfo } from '@shared/api/settings'
 import { friendlyExtensionName } from '@shared/display-names'
 import { cn } from '../../../lib/cn'
 import { basename } from '../../../lib/format'
+import { isImeComposing } from '../../../lib/keybindings'
 import { useApp } from '../../../store/app'
 import {
   Avatar,
@@ -275,7 +276,7 @@ export function ExtensionsSection() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') setQuery(input.trim())
+              if (e.key === 'Enter' && !isImeComposing(e)) setQuery(input.trim())
               if (e.key === 'Escape' && input) {
                 e.stopPropagation()
                 setInput('')

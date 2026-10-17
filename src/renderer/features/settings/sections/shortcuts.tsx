@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Keyboard, Search } from 'lucide-react'
+import { shortcutMatches } from '../../../lib/keybindings'
 import { Input, Kbd } from '../../../ui'
 import { useShortcutGroups } from '../../palette/shortcuts'
 import { Group, Note, Row } from '../layout'
@@ -36,7 +37,7 @@ export function ShortcutsSection() {
           (i) =>
             i.label.toLowerCase().includes(needle) ||
             g.title.toLowerCase().includes(needle) ||
-            i.keys.some((k) => k.includes(needle))
+            i.keys.some((k) => shortcutMatches(k, needle))
         )
       }))
       .filter((g) => g.items.length > 0)

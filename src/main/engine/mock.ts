@@ -47,6 +47,8 @@ interface Run {
   aborted: boolean
   resume: (() => void) | null
   dialog: { id: string; resolve: (response: RpcExtensionUIResponse | null) => void } | null
+  /** `play()` calls waiting for the run to park at `pauseAt`, block on a dialog or end. */
+  parkWaiters: (() => void)[]
 }
 
 /**
@@ -143,27 +145,32 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
     this.standaloneDialogs.get(response.id)?.(response)
   }
 
-  /** Drive a scripted run (mock:play IPC). */
+  /**
+   * Drive a scripted run (mock:play IPC). With `pauseAt` it resolves once the run parks at that label,
+   * blocks on a dialog or ends, so callers see the paused frame and not wherever the stream got to.
+   */
   async play(args: MockPlayArgs): Promise<void> {
+    let run = this.run
     if (args.resume) {
-      const run = this.run
-      if (run) {
-        run.pauseAt = args.pauseAt
-        if (args.instant !== undefined) run.instant = args.instant
-        run.resume?.()
-      }
-      return
+      if (!run) return
+      run.pauseAt = args.pauseAt
+      if (args.instant !== undefined) run.instant = args.instant
+      const resume = run.resume
+      run.resume = null
+      resume?.()
+    } else {
+      if (run) throw new Error('A mock run is already active')
+      run = this.startRun(
+        args.script ?? 'showcase',
+        args.prompt ??
+          'Session titles sometimes revert after I rename two sessions quickly. Can you find out why?',
+        {
+          instant: args.instant ?? false,
+          pauseAt: args.pauseAt
+        }
+      )
     }
-    if (this.run) throw new Error('A mock run is already active')
-    this.startRun(
-      args.script ?? 'showcase',
-      args.prompt ??
-        'Session titles sometimes revert after I rename two sessions quickly. Can you find out why?',
-      {
-        instant: args.instant ?? false,
-        pauseAt: args.pauseAt
-      }
-    )
+    if (args.pauseAt) await this.parked(run)
   }
 
   async send(command: RpcCommand): Promise<RpcResponse> {
@@ -548,7 +555,7 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
     script: MockScriptName,
     prompt: string,
     opts: { instant: boolean; pauseAt?: string }
-  ): void {
+  ): Run {
     if (this.runsPlayed === 0 && script === 'showcase') this.seedAbandonedBranch()
     this.runsPlayed += 1
     const steps = buildScript(script, {
@@ -565,10 +572,22 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
       pauseAt: opts.pauseAt,
       aborted: false,
       resume: null,
-      dialog: null
+      dialog: null,
+      parkWaiters: []
     }
     this.run = run
     void this.drive(run)
+    return run
+  }
+
+  /** Resolves once `run` parks at its `pauseAt` label, blocks on a dialog or ends. */
+  private parked(run: Run): Promise<void> {
+    if (run.resume || run.dialog || this.run !== run) return Promise.resolve()
+    return new Promise((resolve) => run.parkWaiters.push(resolve))
+  }
+
+  private wakeParkWaiters(run: Run): void {
+    for (const wake of run.parkWaiters.splice(0)) wake()
   }
 
   private async drive(run: Run): Promise<void> {
@@ -577,6 +596,7 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
       if (run.pauseAt && step.label === run.pauseAt) {
         await new Promise<void>((resolve) => {
           run.resume = resolve
+          this.wakeParkWaiters(run)
         })
         run.resume = null
         if (run.aborted) break
@@ -594,6 +614,7 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
       this.emit(step.request)
       const response = await new Promise<RpcExtensionUIResponse | null>((resolve) => {
         run.dialog = { id: step.request.id, resolve }
+        this.wakeParkWaiters(run)
         if (step.request.method !== 'editor' && step.request.timeout) {
           void sleep(step.request.timeout, this.timers).then(() => resolve(null))
         }
@@ -604,6 +625,7 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
       run.steps.splice(run.index, 0, ...step.then(answer))
     }
     if (this.run === run) this.run = null
+    this.wakeParkWaiters(run)
     if (!run.aborted && this.followUp.length > 0) {
       const next =
         this.followUpMode === 'all' ? this.followUp.splice(0).join('\n\n') : this.followUp.shift()!

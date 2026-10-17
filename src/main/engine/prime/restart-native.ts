@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process'
-import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { app } from 'electron'
+import { childBaseEnv, shellEnvironmentReady } from '../../shell-env'
+import { primeHelperPath } from './helper'
 import { asRecord, stringValue, type PrimeRecord } from './transport'
 
 export interface PrimeRestartCheckpoint {
@@ -20,17 +20,11 @@ const HELPER_PROTOCOL = 1
 const HELPER_REVISION = '763094e1b6a7c17450ee8399b06cda1853847ca5'
 const executeFile = promisify(execFile)
 
-function restartHelperPath(): string {
-  const executable =
-    process.platform === 'win32' ? 'vengeance-prime-auth.exe' : 'vengeance-prime-auth'
-  return app.isPackaged
-    ? join(process.resourcesPath, 'prime-auth', executable)
-    : join(app.getAppPath(), 'resources', 'prime-auth', 'bin', executable)
-}
-
 export async function checkPrimeRestartHelper(): Promise<void> {
-  const result = await executeFile(restartHelperPath(), ['--version'], {
+  await shellEnvironmentReady()
+  const result = await executeFile(primeHelperPath(), ['--version'], {
     windowsHide: true,
+    env: childBaseEnv(),
     timeout: HELPER_TIMEOUT_MS,
     maxBuffer: MAX_HELPER_OUTPUT_BYTES
   })
@@ -45,14 +39,15 @@ export async function checkPrimeRestartHelper(): Promise<void> {
   }
 }
 
-export function nativePrimeRestartCommand(
+export async function nativePrimeRestartCommand(
   operation: 'inspect' | 'workers' | 'capture' | 'patch' | 'rollback',
   checkpoint: PrimeRestartCheckpoint
 ): Promise<PrimeRecord> {
+  await shellEnvironmentReady()
   return new Promise((resolve, reject) => {
-    const child = spawn(restartHelperPath(), ['--restart-config'], {
+    const child = spawn(primeHelperPath(), ['--restart-config'], {
       windowsHide: true,
-      env: { ...process.env, PRIME_AGENT_CODING_AGENT_DIR: checkpoint.agentDir },
+      env: { ...childBaseEnv(), PRIME_AGENT_CODING_AGENT_DIR: checkpoint.agentDir },
       stdio: ['pipe', 'pipe', 'ignore']
     })
     const chunks: Buffer[] = []

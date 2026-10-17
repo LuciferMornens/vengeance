@@ -102,7 +102,7 @@ await runSuite(
       await defaults.waitFor({ state: 'detached' })
       const from = extLogLength(agentDir)
       // Ctrl+N: typing 'New session' in the palette picks the open session titled 'New session'.
-      await page.keyboard.press('Control+n')
+      await page.keyboard.press('ControlOrMeta+n')
       const start = await waitForExtLog(agentDir, 'session_start', { from, timeoutMs: 60_000 })
       assert.equal(start.flags.mode, 'fromdefaults')
     })

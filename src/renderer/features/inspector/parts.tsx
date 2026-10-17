@@ -21,11 +21,32 @@ export function Well({ children, className }: { children: ReactNode; className?:
   return <div className={cn('rounded-card bg-surface-2 shadow-elev-1', className)}>{children}</div>
 }
 
-export function KeyValue({ label, children, mono }: { label: ReactNode; children: ReactNode; mono?: boolean }) {
+/** A label and its one-line value; `note` adds a muted second line under the value. */
+export function KeyValue({
+  label,
+  children,
+  note,
+  mono
+}: {
+  label: ReactNode
+  children: ReactNode
+  note?: ReactNode
+  mono?: boolean
+}) {
   return (
-    <div className="flex min-h-8 items-center gap-3 px-3 text-sm">
+    <div
+      className={cn(
+        'flex min-h-8 items-center gap-3 px-3 text-sm',
+        note && 'items-baseline py-1.5'
+      )}
+    >
       <span className="shrink-0 text-fg-3">{label}</span>
-      <span className={cn('tabular min-w-0 flex-1 truncate text-right text-fg', mono && 'font-mono text-xs')}>{children}</span>
+      <span className="min-w-0 flex-1 text-right">
+        <span className={cn('tabular block truncate text-fg', mono && 'font-mono text-xs')}>
+          {children}
+        </span>
+        {note && <span className="block truncate text-xs text-fg-3">{note}</span>}
+      </span>
     </div>
   )
 }

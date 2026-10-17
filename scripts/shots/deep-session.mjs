@@ -1,6 +1,8 @@
 // A session far deeper than contextBridge's 1000-level object limit (the mock's "Decoder fuzzing
 // marathon", over 3000 entries): its tree in the closed-session dialog and in the inspector's Branches tab.
-const RELAY = 'D:\\work\\relay'
+import { mockVolumePath } from './lib/mock-paths.mjs'
+
+const RELAY = mockVolumePath('work', 'relay')
 const LONG_SESSION = 'Decoder fuzzing marathon'
 
 export async function scenarios(page, { shot, test, wait }) {

@@ -5,6 +5,7 @@ import { normalizeEngineId } from '@shared/api/engine'
 import { useShallow } from 'zustand/react/shallow'
 import { cn } from '../../lib/cn'
 import { basename } from '../../lib/format'
+import { isImeComposing } from '../../lib/keybindings'
 import { normalizePath, samePath } from '../../lib/paths'
 import { useAgents } from '../../store/agents'
 import { selectActiveWorkspace, useApp } from '../../store/app'
@@ -217,7 +218,7 @@ export function WorkspaceSwitcher() {
             if (event.key === 'ArrowDown') {
               event.preventDefault()
               list.current?.querySelector<HTMLButtonElement>('[data-workspace-choice]')?.focus()
-            } else if (event.key === 'Enter' && visible.length === 1) {
+            } else if (event.key === 'Enter' && visible.length === 1 && !isImeComposing(event)) {
               event.preventDefault()
               pickWorkspace(visible[0]!)
             } else if (event.key === 'Escape' && query) {

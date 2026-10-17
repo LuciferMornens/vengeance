@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { mockHomePath } from '../../engine/mock-paths'
 
 /**
  * Seed a realistic, throwaway engine config for mock mode (VENGEANCE_MOCK=1): settings with packages,
@@ -178,9 +179,9 @@ export function seedMockAgentDir(agentDir: string, workspacesDir: string): void 
     'tui.altScreen.pageUp': []
   })
   write(join(agentDir, 'trust.json'), {
-    'C:\\Users\\dev\\projects\\ember-api': true,
-    'C:\\Users\\dev\\Downloads\\untrusted-repo': false,
-    'C:\\Users\\dev\\work': true
+    [mockHomePath('projects', 'ember-api')]: true,
+    [mockHomePath('Downloads', 'untrusted-repo')]: false,
+    [mockHomePath('work')]: true
   })
   write(
     join(agentDir, 'mcp.log'),

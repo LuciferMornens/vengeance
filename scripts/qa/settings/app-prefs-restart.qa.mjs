@@ -428,6 +428,7 @@ try {
 
   await step('quit: app-state.json holds every app preference', async () => {
     await closeSettings(app)
+    const { sealsSecrets } = app
     await app.close()
     app = null
     const prefs = JSON.parse(await readFile(appStatePath, 'utf8')).prefs
@@ -441,9 +442,15 @@ try {
     assert.equal(prefs.features.updates.intervalHours, 12)
     assert.equal(prefs.features.updates.feedUrl, FEED_URL)
     assert.equal(prefs.features.updates.offline, true)
-    const raw = await readFile(appStatePath, 'utf8')
-    assert.ok(!raw.includes(VAULT_SECRET), 'env value in clear text on disk')
-    assert.match(prefs.features.launch.workspaces[cwd].env.QA_VAULT, /^vengeance-sealed:v1:/)
+    const vault = prefs.features.launch.workspaces[cwd].env.QA_VAULT
+    if (sealsSecrets) {
+      const raw = await readFile(appStatePath, 'utf8')
+      assert.ok(!raw.includes(VAULT_SECRET), 'env value in clear text on disk')
+      assert.match(vault, /^vengeance-sealed:v1:/)
+    } else {
+      // Without OS encryption (Linux's basic password store) the value stays plain at rest.
+      assert.equal(vault, VAULT_SECRET)
+    }
   })
 
   app = await launchPersistentApp({ profile, agentDir: agentDir.dir })

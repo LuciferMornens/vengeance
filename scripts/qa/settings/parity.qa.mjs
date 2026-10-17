@@ -4,15 +4,26 @@
 // No app is launched. `--markdown` prints the parity table used in reports/qa/settings.md.
 //
 //   node scripts/qa/settings/parity.qa.mjs [--markdown]
+import { build } from 'esbuild'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { ROOT } from '../lib/app.mjs'
 import { enginePackageDir, importEngine } from './engine-sdk.mjs'
 
+// Bundled with esbuild (like scripts/checks): the schema's extensionless relative imports
+// (`./settings-terminal`) do not resolve under Node's own type stripping.
+const schemaBundle = await build({
+  entryPoints: [join(ROOT, 'src', 'shared', 'api', 'settings-schema.ts')],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node22',
+  write: false,
+  logLevel: 'warning'
+})
 const { SETTINGS } = await import(
-  pathToFileURL(join(ROOT, 'src', 'shared', 'api', 'settings-schema.ts')).href
+  `data:text/javascript;base64,${Buffer.from(schemaBundle.outputFiles[0].contents).toString('base64')}`
 )
 const { SettingsManager } = await importEngine('core/settings-manager.js')
 const engine = SettingsManager.inMemory({})

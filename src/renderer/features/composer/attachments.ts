@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ClipboardEvent } from 'react'
 import { invoke } from '../../lib/ipc'
 import { toast } from '../../ui'
-import type { DraftPatch } from './drafts'
+import type { Draft, DraftPatch, ImageAttachment } from './drafts'
 import { attachmentId, base64ToBlob, isImageFile, prepareImage } from './images'
 import { mentionText } from './suggestions'
 
@@ -9,6 +9,23 @@ interface AttachmentOptions {
   cwd: string
   patchDraft(patch: DraftPatch): void
   insertAtCaret(snippet: string): void
+}
+
+/**
+ * Decoded images join the draft in paste/drop order, not in the order their decodes finish: image `id` (null when
+ * it failed) fills its placeholder, then the leading placeholders that are ready move into the draft. One still
+ * decoding holds back every placeholder after it.
+ */
+function settle(draft: Draft, id: string, image: ImageAttachment | null): Partial<Draft> {
+  const pending = image
+    ? draft.pending.map((slot) => (slot.id === id ? { ...slot, image } : slot))
+    : draft.pending.filter((slot) => slot.id !== id)
+  const ready: ImageAttachment[] = []
+  for (const slot of pending) {
+    if (!slot.image) break
+    ready.push(slot.image)
+  }
+  return { pending: pending.slice(ready.length), images: [...draft.images, ...ready] }
 }
 
 export function useComposerAttachments({ cwd, patchDraft, insertAtCaret }: AttachmentOptions) {
@@ -19,12 +36,9 @@ export function useComposerAttachments({ cwd, patchDraft, insertAtCaret }: Attac
       patchDraft((draft) => ({ pending: [...draft.pending, { id, name }] }))
       try {
         const image = await prepareImage(await load(), name, id)
-        patchDraft((draft) => ({
-          pending: draft.pending.filter((pending) => pending.id !== id),
-          images: [...draft.images, image]
-        }))
+        patchDraft((draft) => settle(draft, id, image))
       } catch (error) {
-        patchDraft((draft) => ({ pending: draft.pending.filter((pending) => pending.id !== id) }))
+        patchDraft((draft) => settle(draft, id, null))
         toast({
           level: 'error',
           title: `Could not attach ${name}`,

@@ -50,7 +50,10 @@ async function loadProcess(agentDirectory) {
   }
   await build({
     stdin: {
-      contents: "export { PrimeEngineProcess } from './src/main/engine/prime/process'",
+      contents: [
+        "export { PrimeEngineProcess } from './src/main/engine/prime/process'",
+        "export { primeDaemonEndpoint } from './src/main/engine/prime/daemon-socket'"
+      ].join('\n'),
       resolveDir: repositoryRoot,
       loader: 'ts'
     },
@@ -135,12 +138,10 @@ function snapshot(state, sequence = 0) {
 async function fixture(name) {
   const agentDirectory = join(temporaryRoot, name)
   await mkdir(agentDirectory)
-  const { PrimeEngineProcess, fakeLocation } = await loadProcess(agentDirectory)
-  const identity = randomBytes(daemonIdentityBytes).toString('hex')
-  const socketPath =
-    process.platform === 'win32'
-      ? `\\\\.\\pipe\\vengeance-engine2-${identity}`
-      : join(tmpdir(), `vengeance-engine2-${identity}.sock`)
+  const { PrimeEngineProcess, primeDaemonEndpoint, fakeLocation } =
+    await loadProcess(agentDirectory)
+  // The fake resident listens where the app puts its own daemons, so the app's registry accepts it.
+  const socketPath = primeDaemonEndpoint(randomBytes(daemonIdentityBytes).toString('hex'))
   const firstWorkerPid = 1010
   const replacementWorkerPid = 2020
   let state = sessionState(`${name}-resident`, firstWorkerPid, 'vision-model')

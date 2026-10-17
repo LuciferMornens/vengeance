@@ -4,6 +4,7 @@ import type { ReducedMotionPref, RestartPolicy } from '@shared/api/settings'
 import { DEFAULT_UPDATE_INTERVAL_HOURS, type AutoUpdateMode } from '@shared/api/updates'
 import { cn } from '../../../lib/cn'
 import { platform } from '../../../lib/ipc'
+import { SYSTEM_NAME, systemSetting } from '../../../lib/platform-copy'
 import { useApp } from '../../../store/app'
 import { Button, SegmentedControl, Select, Slider } from '../../../ui'
 import { openAbout } from '../../about'
@@ -66,7 +67,7 @@ export function GeneralSection() {
         <Row
           settingKey="app.theme"
           label="Theme"
-          description="Obsidian is the hero; Bone is a warm light theme. System follows Windows."
+          description={`Obsidian is the hero; Bone is a warm light theme. System follows ${SYSTEM_NAME}.`}
         >
           {undefined}
         </Row>
@@ -157,7 +158,7 @@ export function GeneralSection() {
         <Row
           settingKey="app.motion"
           label="Motion"
-          description="Reduced turns springs and transitions into simple fades. System follows the Windows animation setting."
+          description={`Reduced turns springs and transitions into simple fades. System follows ${systemSetting('animation')}.`}
         >
           <SegmentedControl<ReducedMotionPref>
             value={settingsPrefs.motion ?? 'system'}

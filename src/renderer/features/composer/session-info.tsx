@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { FolderOpen, Info } from 'lucide-react'
 import { basename, formatCost, formatTokens, pluralize } from '../../lib/format'
 import { invoke } from '../../lib/ipc'
+import { REVEAL_LABEL } from '../../lib/platform-copy'
 import { useAgents } from '../../store/agents'
 import { Button, Dialog } from '../../ui'
 import { CopyButton } from '../../ui/CopyButton'
@@ -65,7 +66,7 @@ export function SessionInfoDialog() {
         <>
           {file && (
             <Button variant="ghost" size="sm" leading={<FolderOpen />} onClick={() => void invoke('sys:reveal', file)}>
-              Show in folder
+              {REVEAL_LABEL}
             </Button>
           )}
           <Button variant="secondary" size="sm" onClick={close}>

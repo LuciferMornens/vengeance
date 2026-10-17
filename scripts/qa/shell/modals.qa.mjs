@@ -63,7 +63,7 @@ await runSuite('shell/modals', async ({ server, app, step }) => {
   const palette = page.getByRole('dialog')
   await step('palette: opens over a backdrop without restyling <body>', async () => {
     await (await app.composer()).click()
-    await page.keyboard.press('Control+k')
+    await page.keyboard.press('ControlOrMeta+k')
     await palette.waitFor()
     assert.equal(await page.locator('body > [data-modal-backdrop]').count(), 1)
     assert.deepEqual(await bodyState(), OPEN_BODY)
@@ -97,7 +97,7 @@ await runSuite('shell/modals', async ({ server, app, step }) => {
 
   const settingsSearch = page.locator('input[aria-label="Search settings"]')
   await step('settings: the titlebar is covered and inert while the sheet is open', async () => {
-    await page.keyboard.press('Control+Comma')
+    await page.keyboard.press('ControlOrMeta+Comma')
     await settingsSearch.waitFor()
     await page.waitForTimeout(SETTLE_MS)
     assert.equal(await backdropUnder(sidebarToggle), true)
@@ -117,11 +117,11 @@ await runSuite('shell/modals', async ({ server, app, step }) => {
 
   // Reopened while it is still sliding out, the sheet keeps its node and its backdrop mounts again after it.
   await step('settings: reopened during its exit, the sheet still takes clicks', async () => {
-    await page.keyboard.press('Control+Comma')
+    await page.keyboard.press('ControlOrMeta+Comma')
     await settingsSearch.waitFor()
     await page.waitForTimeout(SETTLE_MS)
     await page.keyboard.press('Escape')
-    await page.keyboard.press('Control+Comma')
+    await page.keyboard.press('ControlOrMeta+Comma')
     await page.waitForTimeout(SETTLE_MS)
     assert.equal(await backdropUnder(settingsSearch), false)
     await settingsSearch.click({ timeout: 2000 })
@@ -132,7 +132,7 @@ await runSuite('shell/modals', async ({ server, app, step }) => {
   })
 
   await step('dialog: an outside click closes it without reaching the sidebar toggle', async () => {
-    await page.keyboard.press('Control+k')
+    await page.keyboard.press('ControlOrMeta+k')
     await palette.waitFor()
     await page.keyboard.type('Fork from a previous message')
     await page.keyboard.press('Enter')

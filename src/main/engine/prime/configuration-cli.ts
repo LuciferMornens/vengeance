@@ -1,10 +1,10 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
-import { app } from 'electron'
+import { childBaseEnv, shellEnvironmentReady } from '../../shell-env'
 import type { PrimeSettingsContext } from './configuration'
+import { primeHelperPath } from './helper'
 import { getPrimeAgentDir, locatePrimeEngine } from './locate'
-import { killProcessTree } from '../runtime'
+import { killProcessTree, OWN_PROCESS_GROUP } from '../runtime'
 import { jsonObject } from './configuration-store'
 
 const CAPTURE_TIMEOUT_MS = 30_000
@@ -13,24 +13,21 @@ const runs = new Map<string, ChildProcess>()
 
 function primeEnvironment(): NodeJS.ProcessEnv {
   return {
-    ...process.env,
+    ...childBaseEnv(),
     PRIME_AGENT_CODING_AGENT_DIR: getPrimeAgentDir(),
     DO_NOT_TRACK: '1',
     NO_COLOR: '1'
   }
 }
 
-export function capturePrimeResourceCommand(
+export async function capturePrimeResourceCommand(
   command: Record<string, unknown>,
   cwd: string | null
 ): Promise<Record<string, unknown>> {
-  const name = process.platform === 'win32' ? 'vengeance-prime-auth.exe' : 'vengeance-prime-auth'
-  const executable = app.isPackaged
-    ? join(process.resourcesPath, 'prime-auth', name)
-    : join(app.getAppPath(), 'resources', 'prime-auth', 'bin', name)
+  await shellEnvironmentReady()
   return new Promise((resolve, reject) => {
     const child = execFile(
-      executable,
+      primeHelperPath(),
       ['--resources'],
       {
         cwd: cwd ?? undefined,
@@ -77,6 +74,7 @@ export async function startPrimeCommand(
   const child = spawn(location.executablePath, args, {
     cwd: cwd ?? undefined,
     windowsHide: true,
+    detached: OWN_PROCESS_GROUP,
     env: primeEnvironment(),
     stdio: ['ignore', 'pipe', 'pipe']
   })

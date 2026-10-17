@@ -117,7 +117,7 @@ export function bugSteps(step) {
 
 /** Open the command palette (Ctrl+K), type `title` and run the first match with Enter. */
 export async function runPaletteAction(app, title) {
-  await app.page.keyboard.press('Control+k')
+  await app.page.keyboard.press('ControlOrMeta+k')
   const input = app.page.getByRole('combobox').first()
   await input.waitFor()
   await input.fill(title)

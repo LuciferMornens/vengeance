@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import type { ProcessDoneEvent, ProcessLogEvent } from '@shared/api/settings'
 import { locateEngine } from '../../engine/locate'
-import { engineEnv, killProcessTree } from '../../engine/runtime'
+import { engineEnv, killProcessTree, OWN_PROCESS_GROUP } from '../../engine/runtime'
 import { packageLabel } from './package-source'
 
 /**
@@ -89,6 +89,7 @@ export async function streamPiCli(
     cwd: options.cwd,
     env: engineEnv(location, { FORCE_COLOR: '1' }),
     windowsHide: true,
+    detached: OWN_PROCESS_GROUP,
     stdio: ['ignore', 'pipe', 'pipe']
   })
   cancellers.set(runId, () => killProcessTree(child))

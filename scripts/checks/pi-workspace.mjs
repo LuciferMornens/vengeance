@@ -36,11 +36,12 @@ try {
   )
   const home = await fixture.folder('home')
   const temporary = (await fixture.folder('temp')).replaceAll('\\', '/')
-  const gitBash = 'C:/Program Files/Git/bin/bash.exe'
+  // Windows runs test.sh in Git Bash with its POSIX tools first on PATH; elsewhere the system bash.
+  const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash'
   if (process.platform === 'win32') {
     const pathName =
       Object.keys(environment).find((name) => name.toLowerCase() === 'path') ?? 'PATH'
-    environment[pathName] = [join(dirname(dirname(gitBash)), 'usr', 'bin'), environment[pathName]]
+    environment[pathName] = [join(dirname(dirname(bash)), 'usr', 'bin'), environment[pathName]]
       .filter(Boolean)
       .join(delimiter)
   }
@@ -58,8 +59,12 @@ try {
     DO_NOT_TRACK: '1'
   })
   const [workspace, ...tests] = process.argv.slice(2)
-  const npmCli = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
-  const command = workspace ? process.execPath : gitBash
+  // The npm that ships with this Node: beside node.exe on Windows, under <prefix>/lib elsewhere.
+  const npmCli =
+    process.platform === 'win32'
+      ? join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+      : join(dirname(dirname(process.execPath)), 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  const command = workspace ? process.execPath : bash
   const args = !workspace
     ? ['--noprofile', '--norc', './test.sh']
     : workspace === 'check'

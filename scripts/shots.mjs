@@ -16,6 +16,8 @@ import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { ELECTRON_SWITCHES } from './qa/lib/platform.mjs'
+import { MOCK_WORKSPACE } from './shots/lib/mock-paths.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const outDir = join(root, '.shots')
@@ -30,9 +32,6 @@ if (!existsSync(join(root, 'out', 'main', 'index.js'))) {
   console.error('Build output missing — run `npm run build` first.')
   process.exit(1)
 }
-
-/** A plausible fake workspace path used by scenarios (the mock engine never touches it). */
-export const MOCK_WORKSPACE = 'C:\\Users\\dev\\projects\\aurora'
 
 /** Point TEMP/TMP/TMPDIR at `dir` for this process; returns a function that restores the previous values. */
 function redirectTemp(dir) {
@@ -50,7 +49,7 @@ async function launch(tempRoot) {
   const userData = join(tempRoot, 'user-data')
   await mkdir(userData)
   const app = await electron.launch({
-    args: [root, '--force-device-scale-factor=1'],
+    args: [root, '--force-device-scale-factor=1', ...ELECTRON_SWITCHES],
     env: {
       ...process.env,
       VENGEANCE_MOCK: '1',

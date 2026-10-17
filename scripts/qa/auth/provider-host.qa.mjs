@@ -14,6 +14,7 @@ import { execFile } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { isAlive } from '../lib/processes.mjs'
 import { runSuite } from '../lib/suite.mjs'
 import {
   LAUNCH,
@@ -102,6 +103,7 @@ async function extensionLoads(agentDir) {
 }
 
 async function isRunning(pid) {
+  if (process.platform !== 'win32') return isAlive(pid)
   const { stdout } = await execFileAsync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'])
   return stdout.includes(`"${pid}"`)
 }
@@ -239,7 +241,11 @@ await runSuite(
       const running = await runningPids(await hostPidsOf(agentDir))
       assert.equal(running.length, 1, 'one host runs the sign-in')
       // The test's own app started this process (Vengeance → provider host).
-      await execFileAsync('taskkill', ['/PID', String(running[0]), '/T', '/F'])
+      if (process.platform === 'win32') {
+        await execFileAsync('taskkill', ['/PID', String(running[0]), '/T', '/F'])
+      } else {
+        process.kill(running[0], 'SIGKILL')
+      }
       await dialog.getByText('Sign-in failed').waitFor()
       assert.equal(await dialog.getByText(CRASH_MESSAGE, { exact: true }).count(), 1)
       assert.equal(await page.locator('[data-toaster]').getByText(CRASH_MESSAGE).count(), 0)

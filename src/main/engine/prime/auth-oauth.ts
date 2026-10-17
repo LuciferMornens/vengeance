@@ -1,9 +1,9 @@
-import { app, shell } from 'electron'
+import { shell } from 'electron'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import type {
   AuthFlowEvent,
@@ -13,11 +13,12 @@ import type {
   JsonObject,
   StartLoginArgs
 } from '@shared/api/settings'
+import { samePath } from '../../paths'
+import { childBaseEnv, shellEnvironmentReady } from '../../shell-env'
 import { jsonObject, updatePrimeJson } from './configuration-store'
+import { primeHelperPath } from './helper'
 import { getPrimeAgentDir } from './locate'
 
-const HELPER_NAME =
-  process.platform === 'win32' ? 'vengeance-prime-auth.exe' : 'vengeance-prime-auth'
 const HELPER_PROTOCOL = 1
 const HELPER_REVISION = '763094e1b6a7c17450ee8399b06cda1853847ca5'
 const START_TIMEOUT_MS = 15_000
@@ -51,11 +52,6 @@ type EmitAuth = (event: AuthFlowEvent) => void
 
 interface LoginOptions {
   cwd?: string
-}
-
-function helperPath(): string {
-  if (app.isPackaged) return join(process.resourcesPath, 'prime-auth', HELPER_NAME)
-  return join(app.getAppPath(), 'resources', 'prime-auth', 'bin', HELPER_NAME)
 }
 
 function optionalText(value: unknown): string | undefined {
@@ -199,13 +195,16 @@ class PrimeOAuthSession {
     private readonly remove: () => void
   ) {}
 
-  start(): void {
+  async start(): Promise<void> {
+    const mock = process.env.VENGEANCE_MOCK === '1' || process.env.VENGEANCE_MOCK === 'true'
+    if (!mock) await shellEnvironmentReady()
+    // Cancelled before it started.
     if (this.phase === 'done') return
-    if (process.env.VENGEANCE_MOCK === '1' || process.env.VENGEANCE_MOCK === 'true') {
+    if (mock) {
       this.startMock()
       return
     }
-    const executable = helperPath()
+    const executable = primeHelperPath()
     if (!existsSync(executable)) {
       this.finish(false, 'The Engine 2 sign-in component is missing. Reinstall Vengeance.')
       return
@@ -215,7 +214,7 @@ class PrimeOAuthSession {
       cwd: dirname(executable),
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, DO_NOT_TRACK: '1' }
+      env: { ...childBaseEnv(), DO_NOT_TRACK: '1' }
     })
     this.child = child
     child.stdout.on('data', (chunk: Buffer) => this.receiveData(chunk))
@@ -384,10 +383,9 @@ class PrimeOAuthSession {
     this.armTimeout(LOGIN_TIMEOUT_MS, 'Sign-in timed out. Start again when you are ready.')
     const agentDir = getPrimeAgentDir()
     const defaultAgentDir = join(homedir(), '.prime', 'agent')
-    const primeCliConfigPath =
-      resolve(agentDir).toLowerCase() === resolve(defaultAgentDir).toLowerCase()
-        ? join(homedir(), '.prime', 'config.json')
-        : null
+    const primeCliConfigPath = samePath(agentDir, defaultAgentDir)
+      ? join(homedir(), '.prime', 'config.json')
+      : null
     this.send({
       type: 'start',
       providerId: this.providerId,
@@ -495,7 +493,7 @@ export async function startPrimeOAuth(
     () => logins.delete(session.loginId)
   )
   logins.set(session.loginId, session)
-  setImmediate(() => session.start())
+  setImmediate(() => void session.start())
   return session.loginId
 }
 

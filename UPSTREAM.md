@@ -21,8 +21,8 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 
 `engines.lock.json` is the source of truth. Current stable bases are pi `v1.3.0` at
 `71023aec1546d6d677a65669c5665c0927ce0dd0` and Prime `v0.10.0` at
-`763094e1b6a7c17450ee8399b06cda1853847ca5`. The builds identify as `1.3.0+vengeance.1` and
-`0.10.0+vengeance.9`. Never reuse a Vengeance build version for different shipped behavior.
+`763094e1b6a7c17450ee8399b06cda1853847ca5`. The builds identify as `1.3.0+vengeance.2` and
+`0.10.0+vengeance.10`. Never reuse a Vengeance build version for different shipped behavior.
 
 The current Prime source comparison and patch decisions are recorded in
 [PRIME-STABLE-AUDIT-2026-10-16.md](docs/PRIME-STABLE-AUDIT-2026-10-16.md).
@@ -49,37 +49,128 @@ against the packaged app; the source account and package files are never modifie
 
 1. Run `npm run engines:prepare`. It creates ignored checkouts under `.engine-staging/source`, verifies
    the tag's exact commit, then applies the listed patches in order. It never resets an edited checkout.
+   Clones use LF line endings on every host (`core.autocrlf=false`, `core.eol=lf`); an unedited checkout
+   made before that rule is replaced, an edited one is refused.
 2. Change native source or built-in extensions there. Export reviewed edits with `git diff --binary`
    (include new files with `git add -N <paths>`). Keep patches split by purpose and listed in application
    order. Regenerate a full baseline-relative series when rebasing; do not append an already-applied diff.
 3. Update `engines.lock.json`, including the build version. `npm run build:engines` creates the new
-   checkout, builds, and fingerprints every shipped file. A changed checkout must be exported as patches
-   first; an altered payload is rejected instead of silently trusted. `-- --engine=pi` or `prime` builds
-   just one backend. `npm run build` and `npm run dev` prepare both engines and the helper automatically.
-4. Run the qualification matrix, then `npm run dist` (NSIS) or `npm run dist:qa -- --dir`.
-   The packaging hook verifies both payloads and their build inputs before copying anything.
+   checkout, builds for the host platform, and fingerprints every shipped file. A changed checkout must
+   be exported as patches first; an altered payload is rejected instead of silently trusted. A staged
+   payload whose inputs and inventory still match is reused without a checkout or network; one staged
+   for another platform is rebuilt. `-- --engine=pi` or `prime` builds just one backend. `npm run build`
+   and `npm run dev` prepare both engines and the helper automatically.
+4. Run the qualification matrix, then `npm run dist` (the host's packages: NSIS on Windows, dmg and zip
+   on macOS, AppImage, deb, rpm and tar.gz on Linux, plus pacman on Linux x64) or
+   `npm run dist:qa -- --dir`. The packaging hooks verify both payloads, their build inputs and their
+   platform before copying anything, then verify the copy inside the package again.
 
-Build hosts need Node/npm, Git, Python, Rust/Cargo 1.98.1 for `x86_64-pc-windows-gnu`, and GNU `objdump`
-on PATH (`OBJDUMP` can select it). Users need none of these to load the engines: pi uses Electron's Node;
-Prime includes its Python kernel package, skills and catalogs. Native kernel provisioning and tools may
-still acquire their own language environments/dependencies when first used.
-Package installation and developer tools keep their native prerequisites, such as npm, Git or Bash.
+Build hosts need Node 24.19.0 (`.node-version`) with npm 11, Git, Python 3 (`PYTHON` can select it) and
+Rust/Cargo 1.98.1, which `rust-toolchain.toml` selects, with the host's Rust target from the lock:
+
+- **Windows x64:** the `x86_64-pc-windows-gnu` host toolchain (make it rustup's default host before
+  installing 1.98.1, so `rust-toolchain.toml` resolves to it), a MinGW-w64 `gcc` and GNU `objdump` on
+  PATH (`OBJDUMP` can select it), and Git Bash as the development shell.
+- **macOS arm64 and x64:** the Xcode Command Line Tools for clang, `codesign` and `otool`. The builders
+  set `MACOSX_DEPLOYMENT_TARGET=13.0` and sign ad-hoc; no Apple Developer account is needed.
+- **Linux x64 and arm64:** `build-essential`, binutils (`objdump`) and Python 3. Release builds run in
+  an Ubuntu 22.04 container for the glibc 2.35 baseline. On a newer distribution the glibc check fails;
+  build in that container, or set `VENGEANCE_GLIBC_BASELINE=host` for engines used only on that machine.
+  Packaging also needs `rpmbuild` and `bsdtar` (`rpm` and `libarchive-tools` on Debian and Ubuntu).
+
+Users need none of these to load the engines: pi uses Electron's Node; Prime includes its Python kernel
+package, skills and catalogs. Native kernel provisioning and tools may still acquire their own language
+environments/dependencies when first used. Package installation and developer tools keep their native
+prerequisites, such as npm, Git or Bash; on macOS and Linux the app finds them through the login shell's
+environment (SPEC §2.4).
 `VENGEANCE_NATIVE_BUILD_JOBS=1` limits Engine 2 and helper build concurrency on smaller machines;
 the default is four. Run native qualification and package builds serially when memory is limited.
 
 pi uses upstream's locked build and runtime dependencies. Every internal runtime package is packed from
 our checkout and substituted into the runtime lock before `npm ci --ignore-scripts`; none is resolved to
 an upstream runtime binary. Model data comes from the content-addressed catalog pinned by that upstream
-commit, followed by `build:offline`. Prime uses its Cargo lock, pinned catalog commit and complete native
-release packer. The binary is stripped and checked for external GNU runtime DLL imports.
+commit, followed by `build:offline`. The runtime installs with `--no-bin-links`: Vengeance runs the CLI
+with Electron's Node, never through `node_modules/.bin` shims, which are links on POSIX. On macOS the
+builder ad-hoc signs pi-tui's prebuilt darwin addons. Prime uses its Cargo lock, pinned catalog commit
+and complete native release packer. Windows strips debug information after linking; Linux runs
+upstream's split-debug step and gives the decoder to the packer, which never ships it; macOS keeps the
+linked Mach-O and signs it. Every executable then passes its platform's runtime check (below).
 
-The shipped manifest records upstream revisions, patch hashes, build input fingerprints, payload hashes,
-and toolchain/build metadata. Licenses travel with each runtime. Build caches and compiled engines are
-ignored by Git; the lock, source patches, builders, helper source and notices are committed.
+The shipped manifest records the build platform, upstream revisions, patch hashes, build input
+fingerprints, payload hashes, Engine 2's Rust target and entry, and toolchain/build metadata. Licenses
+travel with each runtime. Build caches and compiled engines are ignored by Git; the lock, source patches,
+builders, helper source and notices are committed.
 
 Runtime cache folders are immutable per payload. Keep old Engine 2 caches while resident processes or
 recovery references use them. App installers can replace their own resources without deleting those
 residents' executable files. Validate transitions on isolated session copies before releasing an update.
+
+## Platforms
+
+Every platform builds natively on its own host; nothing is cross-compiled. `engines.lock.json` schema
+version 2 maps each supported platform to its Rust target, and the builders target
+`${process.platform}-${process.arch}`, refusing a host the lock does not list:
+
+| Platform       | Rust target                 | Release runner                             | In `ci.yml` |
+| -------------- | --------------------------- | ------------------------------------------ | ----------- |
+| `win32-x64`    | `x86_64-pc-windows-gnu`     | `windows-2025`                             | Yes         |
+| `darwin-arm64` | `aarch64-apple-darwin`      | `macos-15`                                 | Yes         |
+| `darwin-x64`   | `x86_64-apple-darwin`       | `macos-15-intel`                           | No          |
+| `linux-x64`    | `x86_64-unknown-linux-gnu`  | `ubuntu-24.04`, Ubuntu 22.04 container     | Yes         |
+| `linux-arm64`  | `aarch64-unknown-linux-gnu` | `ubuntu-24.04-arm`, Ubuntu 22.04 container | No          |
+
+Engine 2's lock entry is `prime/prime-agent`; the staged manifest records the build host's `platform`,
+the resolved `target` and the resolved `entry` (`prime/prime-agent.exe` on Windows). The packaging hooks
+refuse a payload staged for another platform or architecture and verify the packaged copy in place
+(`Contents/Resources/engines` on macOS). The helper follows the same rules and records its build in
+`resources/prime-auth/bin/build.json`: fingerprint, executable SHA-256, platform, target, rustc and host.
+
+Every shipped native executable passes `scripts/engines/native.mjs` before its hash is recorded:
+
+| Format         | Runtime check                                                                                                                                                                                                                                                            |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| PE (Windows)   | `objdump -p` imports name no GNU compiler runtime DLL (`libgcc`, `libstdc++`, `libwinpthread`).                                                                                                                                                                          |
+| ELF (Linux)    | `NEEDED` names only the C runtime and loader (`libc`, `libm`, `libgcc_s`, `libpthread`, `libdl`, `librt`); `objdump -T` finds no symbol newer than `GLIBC_2.35`.                                                                                                         |
+| Mach-O (macOS) | `otool -L` lists `/usr/lib/libSystem` and otherwise only `libc++`, `libobjc`, `libresolv`, `libz`, `libiconv` under `/usr/lib` and frameworks under `/System/Library/Frameworks`; every `LC_BUILD_VERSION` `minos` is at most 13.0; `codesign --verify --strict` passes. |
+
+`VENGEANCE_GLIBC_BASELINE=host` skips only the glibc version check, for a local Linux build used on that
+machine. Release builds never set it, and `scripts/ci/glibc-gate.mjs` checks the packaged app's ELF
+files against 2.35 again. macOS signatures are ad-hoc (`codesign --sign -`), which carry no timestamp, so
+signed bytes stay reproducible. Rewriting a signed Mach-O invalidates it, so only Windows strips after
+linking. The engine builds sign Engine 2, the helper and every Mach-O file in pi's payload before
+hashing; `electron-builder.yml` `signIgnore` keeps app signing away from those files, and the app's own
+ad-hoc signature seals them as resources.
+
+Reproducibility: checkouts are LF on every host, inventories sort names in code-unit order, independent
+of the locale, and record the executable bit as `:x` on macOS and Linux, so a lost bit fails verification.
+Payload hashes are per platform. npm keeps executable bits in pi's packed tarballs on POSIX, and the
+shipped runtime lock records their checksums, so pi's payload differs from Windows even with identical
+sources. Compare `inputHash` across platforms and payload hashes only between builds of the same
+platform. A byte-identical native rebuild also needs the same host image, toolchain and absolute checkout
+and Cargo home paths, since compiled-in source paths differ otherwise. Record the payload hashes from the
+run that built the shipped packages.
+
+### Qualifying macOS and Linux
+
+GitHub Actions is the qualification path for macOS and Linux. `.github/workflows/ci.yml` runs on every
+pull request and push to `main`. Its `engines` job builds both engines and the helper for `win32-x64`,
+`darwin-arm64` and `linux-x64` (Linux in the Ubuntu 22.04 container) and caches the staged payloads under
+a key of their inputs. Its `test` job restores exactly that key on the plain runner, verifies it through
+`npm run build`, then runs `npm run checks` and `npm run shots` (Linux under Xvfb) and uploads the
+screenshots. `.github/workflows/release.yml` runs as a dry run on pull requests that touch engines,
+patches, the helper, packaging, toolchain pins or the workflow, and on manual dispatch. Each of the five
+platforms then builds from a clean runner, packages, passes the baked-feed check, the GLIBC gate (Linux)
+and signature, zip and dmg verification (macOS), and runs `scripts/qa/engines/packaged.qa.mjs` against the
+QA app that `node scripts/dist-qa.mjs --dir` prints. The deb is install-tested on both Linux
+architectures and the pacman package in an Arch container.
+
+Treat those runs, their logs and uploaded screenshots as each platform's evidence and record them with
+the platform's payload and package hashes. A Windows run never qualifies another platform. The native
+workspace suites below and the transition and resident-upgrade suites are not part of CI; run them on a
+host of the affected platform when a change touches platform-specific native behavior. Vengeance had no
+macOS or Linux package before 0.3.0, so those platforms have no retained baseline: their
+executable-transition and resident-upgrade qualification starts with the release after it, using the
+retained 0.3.0 packages as the baseline.
 
 ## Adopting an upstream release
 
@@ -253,7 +344,8 @@ Before the full pi suite or a targeted `env` run, its runner builds the locked E
 `QA_NATIVE_JOBS` bounds this Rust prerequisite to 1–32 jobs (default four). Env supports Windows
 file and command operations; its standalone package is outside the coding-agent SDK's runtime
 dependency graph. The test prerequisite does not add a daemon to Vengeance's payload.
-Git Bash utilities and a Python interpreter are native test prerequisites on Windows.
+Git Bash utilities and a Python interpreter are native test prerequisites on Windows; on macOS and
+Linux the pi runner uses the system `bash`.
 `QA_PI_SOURCE` and `QA_PRIME_SOURCE` select an authoring checkout while
 developing a patch; release qualification must also reconstruct and build the exported patch series.
 
@@ -312,6 +404,17 @@ Feature screenshots are `.shots/abliteration-provider.png`, `.shots/abliteration
 waiting for the Engine 2 close-tab tooltip; `npm run shots -- session-close` then passed all five
 screenshots in isolation, without code changes. Other scenario files completed. The transcript-recovery
 scenario's logged null/trim error is its intentional malformed-frame fixture, asserted by that scenario.
+
+For Vengeance 0.3.0 (17 October 2026) the Windows x64 payloads were rebuilt with the cross-platform
+builders. Upstream bases and the native patch series are unchanged apart from pi's test-only patch
+`0008`; both build versions moved because the shipped Windows bytes changed. Engine `1.3.0+vengeance.2`
+drops the 24 `node_modules/.bin` shims (otherwise only its build-version metadata changed). Engine 2
+`0.10.0+vengeance.10` builds from an LF checkout, so its text files and compiled-in prompts no longer
+follow the builder's Git line-ending setting. The staged `win32-x64` payload hashes are pi
+`97f796c58c176d6f78f1bbb45564c26225d53826bcb34b479865900002d18a39` and Prime
+`b743f51df4f9ab40c1b697539d6765cd88a19da1aaf8df3e7ee28b122c321768`; the helper's SHA-256 is
+`b458090ec4220d2ebc99df10bc8700c04a750017aea2d2ab335fb7422ca539d3`. The macOS and Linux payloads are
+built by the release workflow; record their hashes from that run.
 
 If a fix belongs upstream, retain a minimal reproducer and a reviewable patch suitable for contribution.
 Publishing issues or pull requests remains a separate authorized action. Once a supported upstream

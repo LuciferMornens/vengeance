@@ -1,8 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { BackgroundAgentInfo, BackgroundAgentSelector } from '@shared/api/engine'
 import { getPrimeAgentDir, locatePrimeEngine, type PrimeEngineLocation } from './locate'
@@ -10,12 +9,14 @@ import { expandPrimePath } from './configuration-store'
 import { resolvePrimeSessionRoot } from './session-paths'
 import { normalizePrimeLineage } from './normalize'
 import { comparablePath } from '../../paths'
+import { childBaseEnv, shellEnvironmentReady } from '../../shell-env'
 import {
   primeEnvironmentHash,
   restorePrimeDaemonEnvironment,
   validatePrimeDaemonEnvironment
 } from './daemon-environment'
 import { rememberedDaemons, rememberDaemon, rememberRestartFailure } from './daemon-registry'
+import { primeDaemonEndpoint } from './daemon-socket'
 import { PrimeDaemonActivity } from './daemon-activity'
 import {
   asRecords,
@@ -87,17 +88,19 @@ export function primeDaemonSocketPath(
   location: PrimeEngineLocation,
   env: Record<string, string> = {}
 ): string {
+  // Windows keeps the locale order its existing pipe names were derived from; macOS and Linux use code-unit order,
+  // which does not change with the language of the session.
+  const order =
+    process.platform === 'win32'
+      ? (left: string, right: string) => left.localeCompare(right)
+      : (left: string, right: string) => (left < right ? -1 : left > right ? 1 : 0)
   const identity = createHash('sha256')
     .update(resolve(agentDir))
     .update(location.executablePath)
-    .update(
-      JSON.stringify(Object.entries(env).sort(([left], [right]) => left.localeCompare(right)))
-    )
+    .update(JSON.stringify(Object.entries(env).sort(([left], [right]) => order(left, right))))
     .digest('hex')
     .slice(0, 20)
-  return process.platform === 'win32'
-    ? `\\\\.\\pipe\\vengeance-engine2-${identity}`
-    : join(tmpdir(), `vengeance-engine2-${identity}.sock`)
+  return primeDaemonEndpoint(identity)
 }
 
 export function isPrimeServiceSession(nativeAgentId: string): boolean {
@@ -124,13 +127,14 @@ async function startDaemon(
   rosterPath?: string
 ): Promise<void> {
   await mkdir(agentDir, { recursive: true })
+  await shellEnvironmentReady()
   const child = spawn(
     location.executablePath,
     ['--mode', 'daemon', '--daemon-socket', socketPath],
     {
       cwd: location.packageDir,
       env: {
-        ...process.env,
+        ...childBaseEnv(),
         ...env,
         PRIME_AGENT_UPDATE_ROSTER: rosterPath,
         PRIME_AGENT_CODING_AGENT_DIR: agentDir,

@@ -118,7 +118,7 @@ export async function scenarios(page, { app, shot, test, MOCK_WORKSPACE }) {
   await test('closeSettings')
 
   const inspector = page.getByRole('tablist', { name: 'Inspector' })
-  if (!(await inspector.isVisible())) await page.keyboard.press('Control+i')
+  if (!(await inspector.isVisible())) await page.keyboard.press('ControlOrMeta+i')
   await inspector.getByRole('tab', { name: 'Tools', exact: true }).click()
   await page
     .getByRole('tabpanel', { name: 'Tools', exact: true })

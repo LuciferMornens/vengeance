@@ -1,5 +1,6 @@
 import { execFile, type ChildProcess } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
+import { childBaseEnv } from '../shell-env'
 import type { EngineLocation } from './locate'
 
 /**
@@ -30,14 +31,14 @@ export function importPiFile<T>(path: string): Promise<T> {
 }
 
 /**
- * Environment for any pi process (RPC engine or CLI subcommand): the app's env plus `extra`, the managed
+ * Environment for any pi process (RPC engine or CLI subcommand): the children's base env plus `extra`, the managed
  * install root for custom managed installs and Electron-as-Node mode for the bundled runtime.
  */
 export function engineEnv(
   location: EngineLocation,
   extra: Record<string, string> = {}
 ): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, ...extra }
+  const env: NodeJS.ProcessEnv = { ...childBaseEnv(), ...extra }
   if (location.source === 'bundled') {
     delete env.PI_MANAGED_INSTALL_ROOT
     env.PI_PACKAGE_DIR = location.packageDir
@@ -50,8 +51,28 @@ export function engineEnv(
 }
 
 /**
+ * Spawn option (`detached`) for children stopped with killProcessTree. On macOS and Linux each leads its own process
+ * group, so one signal reaches everything it started that stayed in the group; Windows walks the tree by PID.
+ */
+export const OWN_PROCESS_GROUP = process.platform !== 'win32'
+
+/** How long a process group has to handle SIGTERM (pi stops its tool process groups) before SIGKILL. */
+const TERMINATE_GRACE_MS = 1_500
+
+/** Signal the child's process group, or the child alone when it does not lead one. */
+function signalProcessGroup(child: ChildProcess, signal: NodeJS.Signals): void {
+  try {
+    process.kill(-child.pid!, signal)
+  } catch {
+    if (child.exitCode === null && child.signalCode === null) child.kill(signal)
+  }
+}
+
+/**
  * Kill a pi process and everything it spawned (tools, LSP servers). Never once it has exited: Windows reuses PIDs
- * quickly, and `taskkill /T` on a stale one would take down an unrelated process tree.
+ * quickly, and `taskkill /T` on a stale one would take down an unrelated process tree. On macOS and Linux the group
+ * (OWN_PROCESS_GROUP) gets SIGTERM, then SIGKILL after a grace period. A group ID stays reserved while any member
+ * lives, so the late signal reaches only stragglers of this group.
  */
 export function killProcessTree(child: ChildProcess): void {
   if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return
@@ -62,7 +83,8 @@ export function killProcessTree(child: ChildProcess): void {
       { windowsHide: true },
       () => undefined
     )
-  } else {
-    child.kill('SIGKILL')
+    return
   }
+  signalProcessGroup(child, 'SIGTERM')
+  setTimeout(() => signalProcessGroup(child, 'SIGKILL'), TERMINATE_GRACE_MS)
 }

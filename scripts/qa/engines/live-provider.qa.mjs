@@ -5,6 +5,7 @@ import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { launchApp, reportShotsDir, ROOT, shutdownOwnedPrimeDaemons } from '../lib/app.mjs'
+import { executableName } from '../lib/platform.mjs'
 import { processTable } from '../lib/processes.mjs'
 import { assertOutsideRealHome, isInside, tempRoot } from '../lib/tmp.mjs'
 
@@ -76,7 +77,7 @@ async function providerModels(apiKey) {
 async function nativeExecutable() {
   return realpath(
     process.env.VENGEANCE_PRIME_EXECUTABLE ||
-      join(ROOT, '.engine-staging', 'prime', 'release', 'prime-agent.exe')
+      join(ROOT, '.engine-staging', 'prime', 'release', executableName('prime-agent'))
   )
 }
 

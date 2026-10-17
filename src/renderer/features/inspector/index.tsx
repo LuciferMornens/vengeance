@@ -2,11 +2,16 @@
 import {
   memo,
   Suspense,
+  useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
+  useState,
   type ComponentType,
-  type KeyboardEvent
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject
 } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
@@ -99,6 +104,85 @@ const BADGE_WORD = { neutral: 'new', warning: 'needs you', danger: 'failed' } as
 
 const selectTab = (next: TabId) => useApp.getState().setInspectorTab(next)
 
+/** A tab's box; the tabs and their measuring copy share it. */
+const TAB_BOX =
+  'relative flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-sm font-medium [&>svg]:size-3.5'
+
+/**
+ * A tab's icon, then its label (when given) and badge: a count beside the label, else a dot (in the corner while
+ * unlabelled). The measuring `copy` leaves out the dot's test hook.
+ */
+function TabFace({
+  def,
+  badge,
+  label,
+  copy = false
+}: {
+  def: TabDef
+  badge: Badges[TabId]
+  label: ReactNode
+  copy?: boolean
+}) {
+  return (
+    <>
+      <def.icon className="relative" />
+      {label}
+      {badge &&
+        (badge.text === undefined ? (
+          <span
+            aria-hidden
+            data-tab-dot={copy ? undefined : badge.tone}
+            className={cn('relative size-1.5 rounded-full', DOT_TONE[badge.tone])}
+          />
+        ) : label ? (
+          <span
+            className={cn(
+              'tabular relative min-w-[16px] rounded-full px-1 text-center text-2xs leading-4 font-semibold',
+              badge.tone === 'danger' ? 'bg-danger-soft text-danger' : 'bg-hover text-fg-3'
+            )}
+          >
+            {badge.text}
+          </span>
+        ) : (
+          <span
+            aria-hidden
+            className={cn(
+              'absolute top-1 right-1 size-1.5 rounded-full shadow-[0_0_0_2px_var(--surface-1)]',
+              DOT_TONE[badge.tone]
+            )}
+          />
+        ))}
+    </>
+  )
+}
+
+/**
+ * Whether the labelled tabs fit the strip. `probe` lays them out invisibly whether they show or not, so a narrower
+ * panel, another text size or font, a badge or the active tab's label is measured as it changes, in both directions.
+ * Neither width depends on whether the labels show, so dropping or restoring them cannot flip the result back.
+ */
+function useLabelsFit(
+  list: RefObject<HTMLDivElement | null>,
+  probe: RefObject<HTMLDivElement | null>
+): boolean {
+  const [fits, setFits] = useState(true)
+  const measure = useCallback(() => {
+    if (list.current && probe.current)
+      setFits(
+        probe.current.getBoundingClientRect().width <= list.current.getBoundingClientRect().width
+      )
+  }, [list, probe])
+  // After every render, before paint (a tab or badge change); then on any resize of the strip or the copy.
+  useLayoutEffect(measure)
+  useLayoutEffect(() => {
+    const observer = new ResizeObserver(measure)
+    if (list.current) observer.observe(list.current)
+    if (probe.current) observer.observe(probe.current)
+    return () => observer.disconnect()
+  }, [list, probe, measure])
+  return fits
+}
+
 const TabBar = memo(function TabBar({
   tab,
   tabs,
@@ -112,25 +196,38 @@ const TabBar = memo(function TabBar({
   badges: Badges
   wide: boolean
 }) {
+  const list = useRef<HTMLDivElement>(null)
+  const probe = useRef<HTMLDivElement>(null)
   const refs = useRef<Array<HTMLButtonElement | null>>([])
+  const fits = useLabelsFit(list, probe)
+  // A tab mounts anew when its label shows or hides (it leaves or enters its tooltip), so an arrow key focuses the
+  // newly active tab after the render that selects it.
+  const focusActive = useRef(false)
+  useLayoutEffect(() => {
+    if (!focusActive.current) return
+    focusActive.current = false
+    refs.current[tabs.findIndex((t) => t.id === tab)]?.focus()
+  }, [tab, tabs])
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
     event.preventDefault()
     const index = tabs.findIndex((t) => t.id === tab)
     const next = tabs[(index + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]!
+    focusActive.current = true
     onChange(next.id)
-    refs.current[tabs.indexOf(next)]?.focus()
   }
   return (
     <div
+      ref={list}
       role="tablist"
       aria-label="Inspector"
       onKeyDown={onKeyDown}
-      className="flex min-w-0 flex-1 items-center gap-0.5"
+      className="relative flex min-w-0 flex-1 items-center gap-0.5"
     >
       {tabs.map((t, i) => {
         const active = t.id === tab
         const badge = badges[t.id]
+        const labelled = (active || wide) && fits
         const button = (
           <button
             key={t.id}
@@ -141,15 +238,14 @@ const TabBar = memo(function TabBar({
             role="tab"
             aria-selected={active}
             aria-label={
-              badge && !active && !wide
-                ? `${t.label} (${badge.text ?? BADGE_WORD[badge.tone]})`
-                : t.label
+              badge && !labelled ? `${t.label} (${badge.text ?? BADGE_WORD[badge.tone]})` : t.label
             }
             data-tab={t.id}
             tabIndex={active ? 0 : -1}
             onClick={() => onChange(t.id)}
             className={cn(
-              'relative flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-sm font-medium transition-colors duration-[var(--dur-fast)] [&>svg]:size-3.5',
+              TAB_BOX,
+              'transition-colors duration-[var(--dur-fast)]',
               active ? 'text-fg' : 'text-fg-3 hover:bg-hover hover:text-fg-2'
             )}
           >
@@ -160,45 +256,25 @@ const TabBar = memo(function TabBar({
                 className="absolute inset-0 rounded-md bg-surface-3 shadow-elev-1"
               />
             )}
-            <t.icon className="relative" />
-            {(active || wide) && (
-              <motion.span
-                layout="position"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="relative"
-              >
-                {t.label}
-              </motion.span>
-            )}
-            {badge &&
-              (badge.text === undefined ? (
-                <span
-                  aria-hidden
-                  data-tab-dot={badge.tone}
-                  className={cn('relative size-1.5 rounded-full', DOT_TONE[badge.tone])}
-                />
-              ) : active || wide ? (
-                <span
-                  className={cn(
-                    'tabular relative min-w-[16px] rounded-full px-1 text-center text-2xs leading-4 font-semibold',
-                    badge.tone === 'danger' ? 'bg-danger-soft text-danger' : 'bg-hover text-fg-3'
-                  )}
-                >
-                  {badge.text}
-                </span>
-              ) : (
-                <span
-                  aria-hidden
-                  className={cn(
-                    'absolute top-1 right-1 size-1.5 rounded-full shadow-[0_0_0_2px_var(--surface-1)]',
-                    DOT_TONE[badge.tone]
-                  )}
-                />
-              ))}
+            <TabFace
+              def={t}
+              badge={badge}
+              label={
+                labelled && (
+                  <motion.span
+                    layout="position"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="relative"
+                  >
+                    {t.label}
+                  </motion.span>
+                )
+              }
+            />
           </button>
         )
-        return active || wide ? (
+        return labelled ? (
           button
         ) : (
           <Tooltip key={t.id} content={t.label}>
@@ -206,6 +282,21 @@ const TabBar = memo(function TabBar({
           </Tooltip>
         )
       })}
+      {/* The labelled tabs, laid out invisibly: the labels show while this copy fits the strip. */}
+      <div aria-hidden className="invisible absolute inset-0 overflow-clip">
+        <div ref={probe} className="flex w-max gap-0.5">
+          {tabs.map((t) => (
+            <span key={t.id} className={TAB_BOX}>
+              <TabFace
+                def={t}
+                badge={badges[t.id]}
+                label={(t.id === tab || wide) && <span className="relative">{t.label}</span>}
+                copy
+              />
+            </span>
+          ))}
+        </div>
+      </div>
     </div>
   )
 })

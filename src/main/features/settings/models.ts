@@ -22,6 +22,7 @@ import { locateEngine, type EngineLocation } from '../../engine/locate'
 import { sdkHostCall } from '../../engine/sdk-host/client'
 import type { LevelModel, RuntimeCatalog } from '../../engine/sdk-host/protocol'
 import { env } from '../../env'
+import { childBaseEnv } from '../../shell-env'
 import { hideUnofferedModels } from './account-models'
 import { agentDir } from './agent-dir'
 import { readStoredCatalog, storeCatalog } from './catalog-cache'
@@ -127,7 +128,7 @@ function catalogInputs(location: EngineLocation, extraProviderIds: string[]): st
     credentialsRevision(),
     fileRevision(modelsPath()),
     fileRevision(modelsStorePath()),
-    JSON.stringify(Object.keys(process.env).sort()),
+    JSON.stringify(Object.keys(childBaseEnv()).sort()),
     JSON.stringify(extraProviderIds)
   ]
 }
@@ -568,11 +569,16 @@ export function validateModelsJson(data: JsonObject): ValidationIssue[] {
 export async function writeModelsJson(override: string | null, data: JsonObject): Promise<ModelsJsonState> {
   const errors = validateModelsJson(data).filter((i) => i.severity === 'error')
   if (errors.length > 0) throw new Error(errors.map((e) => e.message).join('\n'))
-  await updateJsonFile(modelsPath(), override, (current) => {
-    const restored = restoreModelsSecrets(data, current)
-    const unresolved = unresolvedSecretProviders(restored)
-    if (unresolved.length > 0) throw new Error(`Re-enter the API key for ${unresolved.join(', ')}.`)
-    return restored
-  })
+  await updateJsonFile(
+    modelsPath(),
+    override,
+    (current) => {
+      const restored = restoreModelsSecrets(data, current)
+      const unresolved = unresolvedSecretProviders(restored)
+      if (unresolved.length > 0) throw new Error(`Re-enter the API key for ${unresolved.join(', ')}.`)
+      return restored
+    },
+    { private: true }
+  )
   return readModelsJson()
 }

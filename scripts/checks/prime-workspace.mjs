@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { cargoPath, engineLock, prepareSource, root } from '../engines/common.mjs'
+import { executableName } from '../qa/lib/platform.mjs'
 import { killTree } from '../qa/lib/processes.mjs'
 import { snapshotRealConfig } from '../qa/lib/real-guard.mjs'
 import { tempRoot } from '../qa/lib/tmp.mjs'
@@ -113,7 +114,7 @@ try {
       'prime-auth',
       'target',
       'debug',
-      'prime-agent.exe'
+      executableName('prime-agent')
     )
     await runCargo(['--test-binary', nativeExecutable, '--prime-agent-bootstrap'], {
       ...environment,

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from
 import { AnimatePresence, motion } from 'motion/react'
 import { CornerDownLeft } from 'lucide-react'
 import type { SubagentSupervisorRequest } from '@shared/subagents'
+import { isImeComposing } from '../../lib/keybindings'
 import { spring } from '../../lib/motion'
 import { Button, SegmentedControl, Textarea, toast } from '../../ui'
 import { subagentActions } from './actions'
@@ -15,9 +16,14 @@ const MAX_HEIGHT = 4 * 20 + 12
 
 type SteerMode = 'steer' | 'follow_up'
 
-export type SteerBoxMode = { kind: 'steer' } | { kind: 'resume' } | { kind: 'reply'; request: SubagentSupervisorRequest }
+export type SteerBoxMode =
+  { kind: 'steer' } | { kind: 'resume' } | { kind: 'reply'; request: SubagentSupervisorRequest }
 
-const ACTION: Record<SteerBoxMode['kind'], string> = { steer: 'Send', resume: 'Resume', reply: 'Answer' }
+const ACTION: Record<SteerBoxMode['kind'], string> = {
+  steer: 'Send',
+  resume: 'Resume',
+  reply: 'Answer'
+}
 
 /**
  * Message box in the run detail. `steer` talks to a running agent (now, or after its current turn); `resume`
@@ -79,7 +85,11 @@ export function SteerBox({
       setText('')
       setReceipt(result.delivery === 'delivered' ? 'Delivered' : 'Queued')
     } catch (error) {
-      toast({ level: 'error', title: `Couldn't reach ${label}`, description: (error as Error).message })
+      toast({
+        level: 'error',
+        title: `Couldn't reach ${label}`,
+        description: (error as Error).message
+      })
     } finally {
       setSending(false)
     }
@@ -89,14 +99,18 @@ export function SteerBox({
     if (event.key === 'Escape') {
       event.preventDefault()
       onClose()
-    } else if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+    } else if (event.key === 'Enter' && !event.shiftKey && !isImeComposing(event)) {
       event.preventDefault()
       void send()
     }
   }
 
   const action = ACTION[mode.kind]
-  const placeholder = { steer: `Guide ${label}…`, resume: `Tell ${label} how to continue…`, reply: `Your answer to ${label}…` }[mode.kind]
+  const placeholder = {
+    steer: `Guide ${label}…`,
+    resume: `Tell ${label} how to continue…`,
+    reply: `Your answer to ${label}…`
+  }[mode.kind]
   return (
     <motion.div
       initial={{ opacity: 0, height: 0 }}
@@ -113,11 +127,18 @@ export function SteerBox({
           rows={1}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={onKeyDown}
-          aria-label={mode.kind === 'steer' ? `Message to ${label}` : mode.kind === 'resume' ? `Message to resume ${label}` : `Answer to ${label}`}
+          aria-label={
+            mode.kind === 'steer'
+              ? `Message to ${label}`
+              : mode.kind === 'resume'
+                ? `Message to resume ${label}`
+                : `Answer to ${label}`
+          }
           placeholder={placeholder}
           className="min-h-0 py-1.5 text-sm leading-5"
         />
-        <div className="flex items-center gap-2">
+        {/* In a narrow inspector the buttons wrap below the timing control, still right-aligned. */}
+        <div className="flex flex-wrap items-center gap-2">
           {mode.kind === 'steer' && (
             <SegmentedControl
               size="sm"
@@ -130,17 +151,31 @@ export function SteerBox({
               ]}
             />
           )}
-          <span className="flex-1" />
-          <Button size="xs" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button size="xs" variant="primary" loading={sending} disabled={!text.trim() && !receipt} onClick={() => void send()} trailing={receipt ? undefined : <CornerDownLeft />}>
-            <AnimatePresence mode="popLayout" initial={false}>
-              <motion.span key={receipt ?? action} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={spring.snappy}>
-                {receipt ?? action}
-              </motion.span>
-            </AnimatePresence>
-          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            <Button size="xs" variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              size="xs"
+              variant="primary"
+              loading={sending}
+              disabled={!text.trim() && !receipt}
+              onClick={() => void send()}
+              trailing={receipt ? undefined : <CornerDownLeft />}
+            >
+              <AnimatePresence mode="popLayout" initial={false}>
+                <motion.span
+                  key={receipt ?? action}
+                  initial={{ opacity: 0, y: 3 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -3 }}
+                  transition={spring.snappy}
+                >
+                  {receipt ?? action}
+                </motion.span>
+              </AnimatePresence>
+            </Button>
+          </div>
         </div>
       </div>
     </motion.div>

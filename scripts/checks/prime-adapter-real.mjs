@@ -8,6 +8,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import { startFakeLlm, turn } from '../qa/lib/fake-llm.mjs'
+import { executableName } from '../qa/lib/platform.mjs'
+import { QA_TMP_ROOT } from '../qa/lib/tmp.mjs'
 import { childRecoverEnvironment, runPrimeRestartIsolationQa } from './prime-restart-isolation.mjs'
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
@@ -17,7 +19,7 @@ const childMode = ['--reattach-child', '--env-child'].includes(process.argv[2])
 const restartMode = process.argv.includes('--restart-qa')
 const executablePath = path.resolve(
   (childMode ? process.argv[3] : restartMode ? undefined : process.argv[2]) ??
-    path.join(stagedRelease, 'prime-agent.exe')
+    path.join(stagedRelease, executableName('prime-agent'))
 )
 const require = createRequire(import.meta.url)
 const timeoutMilliseconds = 30_000
@@ -207,7 +209,8 @@ async function runRestartQa(
   fakeLlm,
   bundlePath
 ) {
-  const restartBase = path.resolve('D:\\Coding', '.vengeance-qa-tmp-engine-performance')
+  // Beside the QA temp root: outside the profile and outside any git repository (qa/lib/tmp.mjs).
+  const restartBase = `${QA_TMP_ROOT}-engine-performance`
   await mkdir(restartBase, { recursive: true })
   const restartRoot = await mkdtemp(path.join(restartBase, 'vengeance-prime-restart-'))
   const agentDirectory = path.join(restartRoot, 'agent')

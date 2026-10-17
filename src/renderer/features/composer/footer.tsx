@@ -16,9 +16,11 @@ import { TokenSpeed } from './token-speed'
  * The footer stays one row at every composer width (the composer is `@container/composer`). The
  * steps are in em of the UI text size, so larger text compacts sooner:
  *   below 52em  Engine, Steer and Follow-up drop their labels and the send hint hides;
+ *               a running Engine 2 session drops its Engine and Controls labels sooner, below
+ *               62em (engines/SessionEngineMenu.tsx, engines/prime-controls.tsx);
  *   below 40em  thinking and speed keep only their glyphs and the context
  *               meter keeps only its ring.
- * Between steps the model name truncates to absorb what is left.
+ * Between steps the mode hint, then the model name, truncates to absorb what is left.
  */
 const compactLabel = '@max-[52em]/composer:hidden'
 const compactIconButton = '@max-[52em]/composer:w-8 @max-[52em]/composer:px-0'

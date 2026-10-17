@@ -411,37 +411,39 @@ export function AgentDetail({
           <div className="flex items-start gap-2.5">
             <Avatar name={label} size={28} />
             <div className="min-w-0 flex-1">
-              <div className="flex min-h-7 items-center gap-2">
-                <span className="min-w-0 truncate text-ui font-semibold text-fg">
-                  {child ? (
-                    <>
-                      <span className="font-normal text-fg-3">{view.label} › </span>
-                      {child.label}
-                    </>
-                  ) : (
-                    view.label
-                  )}
-                </span>
-                <span className="flex-1" />
-                <StatePill
-                  view={
-                    child
-                      ? {
-                          ...view,
-                          state: child.state,
-                          startedAt: child.startedAt,
-                          endedAt: child.endedAt,
-                          needsDecision: false
-                        }
-                      : view
-                  }
-                  now={now}
-                />
+              <div className="flex items-start gap-2">
+                {/* The pill wraps under the name when both don't fit, so the name is never squeezed. */}
+                <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+                  <span className="max-w-full shrink-0 truncate text-ui leading-7 font-semibold text-fg">
+                    {child ? (
+                      <>
+                        <span className="font-normal text-fg-3">{view.label} › </span>
+                        {child.label}
+                      </>
+                    ) : (
+                      view.label
+                    )}
+                  </span>
+                  <StatePill
+                    view={
+                      child
+                        ? {
+                            ...view,
+                            state: child.state,
+                            startedAt: child.startedAt,
+                            endedAt: child.endedAt,
+                            needsDecision: false
+                          }
+                        : view
+                    }
+                    now={now}
+                  />
+                </div>
                 <DropdownMenu
                   align="end"
                   items={menu}
                   trigger={
-                    <IconButton label="More" size="xs" className="-mr-1">
+                    <IconButton label="More" size="xs" className="mt-0.5 -mr-1">
                       <MoreHorizontal />
                     </IconButton>
                   }

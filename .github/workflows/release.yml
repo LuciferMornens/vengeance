@@ -1,0 +1,433 @@
+# Release builds. A version tag (vX.Y.Z, or vX.Y.Z-rc.N for a prerelease) builds, packages and
+# smoke-tests all five platforms on their own runners, install-tests the Linux packages, and then
+# one publish job creates a DRAFT GitHub release with every package, the update files, SHA256SUMS
+# and a build provenance attestation. A maintainer reviews the draft and publishes it.
+#
+# Pull requests that touch the build and manual runs are dry runs: everything but publishing.
+# Build jobs only read the repository and never see a token that could publish; no job restores a
+# cache, so every release is built from clean runners.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .node-version
+      - build/**
+      - electron-builder.yml
+      - engines.lock.json
+      - package.json
+      - package-lock.json
+      - patches/**
+      - resources/prime-auth/**
+      - rust-toolchain.toml
+      - scripts/build-prime-auth.mjs
+      - scripts/ci/**
+      - scripts/dist.mjs
+      - scripts/dist-qa.mjs
+      - scripts/engines/**
+      - scripts/qa/engines/integration-fixture.mjs
+      - scripts/qa/engines/packaged.qa.mjs
+      - scripts/qa/lib/**
+
+permissions: {}
+
+# Tag runs are never cancelled; a newer push to the same pull request replaces its dry run.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read the version and match it to the tag
+        id: version
+        run: |
+          version=$(jq -r .version package.json)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Vengeance $version"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json (expected v$version)"
+            exit 1
+          fi
+
+  build:
+    name: Build (${{ matrix.id }})
+    needs: version
+    runs-on: ${{ matrix.os }}
+    # Linux builds in Ubuntu 22.04 (pinned by digest, multi-arch): its glibc 2.35 is the oldest the
+    # packages support, and the GLIBC gate below proves nothing needs a newer one.
+    container: ${{ matrix.container }}
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: win-x64
+            os: windows-2025
+            container: ''
+            rust-target: x86_64-pc-windows-gnu
+            native-build-jobs: 4
+            unpacked: release/win-unpacked
+          - id: mac-arm64
+            os: macos-15
+            container: ''
+            rust-target: aarch64-apple-darwin
+            native-build-jobs: 3
+            unpacked: release/mac-arm64/Vengeance.app
+            mac-arch: arm64
+          - id: mac-x64
+            os: macos-15-intel
+            container: ''
+            rust-target: x86_64-apple-darwin
+            native-build-jobs: 3
+            unpacked: release/mac/Vengeance.app
+            mac-arch: x64
+          - id: linux-x64
+            os: ubuntu-24.04
+            container: mirror.gcr.io/library/ubuntu@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
+            rust-target: x86_64-unknown-linux-gnu
+            native-build-jobs: 4
+            unpacked: release/linux-unpacked
+          - id: linux-arm64
+            os: ubuntu-24.04-arm
+            container: mirror.gcr.io/library/ubuntu@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
+            rust-target: aarch64-unknown-linux-gnu
+            native-build-jobs: 4
+            unpacked: release/linux-arm64-unpacked
+    env:
+      VENGEANCE_NATIVE_BUILD_JOBS: ${{ matrix.native-build-jobs }}
+      # Ad-hoc signing (electron-builder.yml mac.identity "-"): never pick up a keychain identity.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # electron-builder skips all signing on pull requests unless told otherwise; an ad-hoc
+      # signature needs no secret, and the dry run must check the same signed app a release ships.
+      CSC_FOR_PULL_REQUEST: 'true'
+      VERSION: ${{ needs.version.outputs.version }}
+      UPDATE_FEED: https://github.com/LuciferMornens/vengeance/releases/latest/download
+      UNPACKED: ${{ matrix.unpacked }}
+      MAC_ARCH: ${{ matrix.mac-arch }}
+    steps:
+      # Build tools, the package tools electron-builder calls (rpmbuild, bsdtar for pacman) and the
+      # libraries and X server the packaged smoke test needs. git must exist before checkout.
+      - name: Install prerequisites (Ubuntu 22.04 container)
+        if: runner.os == 'Linux'
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential binutils ca-certificates curl git python3 xz-utils zstd \
+            rpm libarchive-tools fakeroot file procps \
+            libgtk-3-0 libnss3 libxss1 libxtst6 libatk-bridge2.0-0 libatk1.0-0 libcups2 libdrm2 \
+            libgbm1 libasound2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libxfixes3 \
+            libpango-1.0-0 libcairo2 libnotify4 libsecret-1-0 \
+            xvfb xauth fonts-dejavu-core
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Trust the mounted checkout (container)
+        if: runner.os == 'Linux'
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - if: runner.os != 'Linux'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      # The GNU host toolchain, as on a developer machine (see ci.yml).
+      - name: Use the GNU Rust host and MinGW (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          rustup set default-host x86_64-pc-windows-gnu
+          printf '%s\n' 'C:\mingw64\bin' >> "$GITHUB_PATH"
+          /c/mingw64/bin/gcc --version
+          /c/mingw64/bin/objdump --version
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: 1.98.1
+          targets: ${{ matrix.rust-target }}
+          components: clippy, rustfmt
+      - run: npm ci
+      - name: Build the engines
+        run: npm run build:engines
+      - name: Build the Engine 2 helper
+        run: npm run build:auth
+      - name: Build the app (electron-vite)
+        run: npx electron-vite build
+      - name: Package
+        env:
+          VENGEANCE_UPDATE_FEED: ${{ env.UPDATE_FEED }}
+        run: |
+          node scripts/dist.mjs
+          ls -l release
+      # releases/latest/download serves the newest stable release, whose update files are
+      # latest*.yml. electron-builder names the update files and the installed app's update channel
+      # after a prerelease version ("rc" for 0.3.0-rc.1) unless the feed pins channel latest, as
+      # scripts/dist.mjs does; an app on any other channel would never find its update file there.
+      - name: Check the baked update feed
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            config="$UNPACKED/Contents/Resources/app-update.yml"
+          else
+            config="$UNPACKED/resources/app-update.yml"
+          fi
+          if [ ! -f "$config" ]; then
+            echo "::error::$config is missing; the package has no update feed"
+            exit 1
+          fi
+          cat "$config"
+          for line in 'provider: generic' "url: $UPDATE_FEED"; do
+            if ! grep -qxF "$line" "$config"; then
+              echo "::error::$config does not contain '$line'"
+              exit 1
+            fi
+          done
+          channel=$(sed -n 's/^channel: //p' "$config")
+          if [ -n "$channel" ] && [ "$channel" != latest ]; then
+            echo "::error::$config uses update channel $channel; the release feed only serves latest*.yml"
+            exit 1
+          fi
+      - name: GLIBC gate (Linux)
+        if: runner.os == 'Linux'
+        run: node scripts/ci/glibc-gate.mjs --max 2.35 "$UNPACKED"
+      # Both Mac builds write release/latest-mac.yml; the publish job merges the per-arch copies.
+      - name: Verify the signatures, the zip and the dmg (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          codesign --verify --deep --strict --verbose=2 "$UNPACKED"
+          signature=$(codesign -dv --verbose=4 "$UNPACKED" 2>&1)
+          printf '%s\n' "$signature"
+          grep -qx 'Signature=adhoc' <<<"$signature"
+          for native in engines/prime/prime-agent prime-auth/vengeance-prime-auth; do
+            test -x "$UNPACKED/Contents/Resources/$native"
+            codesign --verify --strict --verbose=2 "$UNPACKED/Contents/Resources/$native"
+          done
+          unpacked_zip="$RUNNER_TEMP/zip-check"
+          ditto -x -k "release/Vengeance-$VERSION-mac-$MAC_ARCH.zip" "$unpacked_zip"
+          codesign --verify --deep --strict --verbose=2 "$unpacked_zip/Vengeance.app"
+          dmg="release/Vengeance-$VERSION-mac-$MAC_ARCH.dmg"
+          hdiutil verify "$dmg"
+          mounted_dmg="$RUNNER_TEMP/dmg-check"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mounted_dmg" "$dmg"
+          codesign --verify --deep --strict --verbose=2 "$mounted_dmg/Vengeance.app"
+          hdiutil detach "$mounted_dmg"
+          mv release/latest-mac.yml "release/latest-mac-$MAC_ARCH.yml"
+      - name: Upload the packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist-${{ matrix.id }}
+          path: |
+            release/Vengeance-*
+            release/latest*.yml
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+      # The smoke test runs the same app under the QA identity (scripts/dist-qa.mjs), with only the
+      # system PATH and local fake providers. Its temp root defaults outside HOME on every runner.
+      - name: Build the QA app
+        run: |
+          node scripts/dist-qa.mjs --dir | tee "$RUNNER_TEMP/dist-qa.log"
+          executable=$(sed -n 's/^QA executable: //p' "$RUNNER_TEMP/dist-qa.log")
+          test -x "$executable"
+          echo "QA_PACKAGED_EXE=$executable" >> "$GITHUB_ENV"
+      - name: Smoke test the packaged app
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a -s '-screen 0 2560x1440x24' node scripts/qa/engines/packaged.qa.mjs
+          else
+            node scripts/qa/engines/packaged.qa.mjs
+          fi
+      - name: Upload the smoke test screenshots
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-${{ matrix.id }}
+          path: .shots/**/*.png
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+  install-deb:
+    name: Install the deb (${{ matrix.id }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: linux-x64
+            os: ubuntu-24.04
+          - id: linux-arm64
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist-${{ matrix.id }}
+          path: dist
+      - name: Install with apt (resolves the package's dependencies)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ./dist/*.deb
+      - name: Check the installed app
+        run: |
+          for file in /opt/Vengeance/vengeance \
+            /opt/Vengeance/resources/engines/prime/prime-agent \
+            /opt/Vengeance/resources/prime-auth/vengeance-prime-auth; do
+            test -x "$file"
+            if ldd "$file" | grep 'not found'; then
+              echo "::error::$file has unresolved libraries"
+              exit 1
+            fi
+          done
+          test -f /usr/share/applications/vengeance.desktop
+          command -v vengeance
+
+  install-pacman:
+    name: Install the pacman package (linux-x64)
+    needs: build
+    runs-on: ubuntu-24.04
+    container: mirror.gcr.io/library/archlinux@sha256:3c64b538588416593f69a1aebd2f2ec0f2541b29159f32556fa7def2167147a0
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist-linux-x64
+          path: dist
+      # The image is pinned, so refresh the keyring before the system upgrade that installs need.
+      - name: Install with pacman (resolves the package's dependencies)
+        run: |
+          pacman -Sy --noconfirm --needed archlinux-keyring
+          pacman -Su --noconfirm
+          pacman -U --noconfirm dist/*.pacman
+      - name: Check the installed app
+        run: |
+          for file in /opt/Vengeance/vengeance \
+            /opt/Vengeance/resources/engines/prime/prime-agent \
+            /opt/Vengeance/resources/prime-auth/vengeance-prime-auth; do
+            test -x "$file"
+            if ldd "$file" | grep 'not found'; then
+              echo "::error::$file has unresolved libraries"
+              exit 1
+            fi
+          done
+          test -f /usr/share/applications/vengeance.desktop
+
+  publish:
+    name: Draft the GitHub release
+    needs: [version, build, install-deb, install-pacman]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: dist-*
+          path: artifacts
+      - name: Collect the packages
+        run: |
+          mkdir dist
+          for file in artifacts/*/*; do
+            name=${file##*/}
+            if [ -e "dist/$name" ]; then
+              echo "::error::$name is in more than one build"
+              exit 1
+            fi
+            mv "$file" dist/
+          done
+          node scripts/ci/merge-latest-mac.mjs dist
+      # Windows nsis; dmg and zip per Mac arch; AppImage, deb, rpm and tar.gz per Linux arch, pacman
+      # on x64; one update file per updater (latest.yml, latest-mac.yml, latest-linux[-arm64].yml).
+      - name: Check that every package is present
+        run: |
+          expect() {
+            local found
+            found=$(find dist -maxdepth 1 -type f -name "$1" | wc -l)
+            if [ "$found" -ne "$2" ]; then
+              echo "::error::Expected $2 files named $1, found $found"
+              exit 1
+            fi
+          }
+          expect "Vengeance-Setup-$VERSION.exe" 1
+          expect "Vengeance-$VERSION-mac-*.dmg" 2
+          expect "Vengeance-$VERSION-mac-*.zip" 2
+          expect "Vengeance-$VERSION-linux-*.AppImage" 2
+          expect "Vengeance-$VERSION-linux-*.deb" 2
+          expect "Vengeance-$VERSION-linux-*.rpm" 2
+          expect "Vengeance-$VERSION-linux-*.tar.gz" 2
+          expect "Vengeance-$VERSION-linux-*.pacman" 1
+          for update in latest.yml latest-mac.yml latest-linux.yml latest-linux-arm64.yml; do
+            expect "$update" 1
+          done
+          ls -l dist
+      - name: Write SHA256SUMS
+        working-directory: dist
+        run: |
+          sha256sum -- * > "$RUNNER_TEMP/SHA256SUMS"
+          mv "$RUNNER_TEMP/SHA256SUMS" SHA256SUMS
+          cat SHA256SUMS
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::A release for $TAG already exists; delete the draft to rebuild it"
+            exit 1
+          fi
+          args=(--draft --verify-tag --repo "$GITHUB_REPOSITORY" --title "Vengeance $VERSION")
+          notes="docs/RELEASE-$VERSION.md"
+          if [ -f "$notes" ]; then
+            args+=(--notes-file "$notes")
+          else
+            args+=(--generate-notes)
+          fi
+          case "$TAG" in
+            *-*) args+=(--prerelease) ;;
+          esac
+          gh release create "$TAG" "${args[@]}" dist/*

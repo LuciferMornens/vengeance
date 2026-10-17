@@ -29,6 +29,7 @@ import {
   safePrimeFileState,
   updatePrimeJson
 } from './configuration-store'
+import { childEnvVariable } from '../../shell-env'
 import { getPrimeAgentDir } from './locate'
 import { runPrimeTraces } from './traces'
 
@@ -149,7 +150,7 @@ function providerInfo(
 ): ProviderInfo {
   const stored = jsonObject(auth[identifier])
   const envVars = PROVIDER_ENVIRONMENT[identifier] ?? []
-  const environment = envVars.find((variable) => !!process.env[variable])
+  const environment = envVars.find((variable) => !!childEnvVariable(variable))
   const customKey = jsonObject(custom[identifier])?.apiKey
   const usingOAuth = stored?.type === 'oauth'
   const hasStored = stored?.type === 'api_key' || usingOAuth

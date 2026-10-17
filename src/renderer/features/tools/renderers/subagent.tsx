@@ -25,9 +25,23 @@ function subagentRunId(execution: ToolExecution | undefined): string | undefined
   return str(details?.runId) ?? str(details?.asyncId) ?? str(records(details?.results)[0]?.runId)
 }
 
-/** "running · 3m · 41 tools" / "finished · 25m" / "needs you" for a run, tone included. */
+/** A run fact after the first ("· 3m"), kept whole: a narrow launch row drops trailing facts, never half of one. */
+function Fact({ children }: { children: ReactNode }) {
+  return (
+    <>
+      {' '}
+      <span className="whitespace-nowrap">
+        {'\u00b7 '}
+        {children}
+      </span>
+    </>
+  )
+}
+
+/** "running · 3m · 41 tools" / "finished · 25m" / "needs you" for a run, tone included; facts by priority. */
 function RunState({ view, resumed }: { view: SubagentRunView; resumed?: boolean }) {
-  if (view.needsDecision) return <span className="font-medium text-warning">needs you</span>
+  if (view.needsDecision)
+    return <span className="font-medium whitespace-nowrap text-warning">needs you</span>
   const elapsed = view.startedAt && view.endedAt ? formatSubagentDuration(view.endedAt - view.startedAt) : undefined
   switch (view.state) {
     case 'running':
@@ -35,12 +49,11 @@ function RunState({ view, resumed }: { view: SubagentRunView; resumed?: boolean 
         <span>
           running
           {view.startedAt ? (
-            <>
-              {' \u00b7 '}
+            <Fact>
               <Elapsed since={view.startedAt} />
-            </>
+            </Fact>
           ) : null}
-          {view.tools ? ` \u00b7 ${plural(view.tools, 'tool')}` : ''}
+          {view.tools ? <Fact>{plural(view.tools, 'tool')}</Fact> : null}
         </span>
       )
     case 'queued':
@@ -48,13 +61,19 @@ function RunState({ view, resumed }: { view: SubagentRunView; resumed?: boolean 
     case 'paused':
       return <span>paused</span>
     case 'complete':
-      return <span>finished{elapsed ? ` \u00b7 ${elapsed}` : ''}</span>
+      return <span>finished{elapsed ? <Fact>{elapsed}</Fact> : null}</span>
     case 'partial':
-      return <span>partly finished</span>
+      return <span className="whitespace-nowrap">partly finished</span>
     case 'failed':
     case 'rejected':
       // A failure a later run revived is handled: it stays in the history without the danger tone.
-      if (resumed) return <span>{`${view.state} \u00b7 resumed`}</span>
+      if (resumed)
+        return (
+          <span>
+            {view.state}
+            <Fact>resumed</Fact>
+          </span>
+        )
       return <span className="text-danger">{view.state}</span>
     case 'stopped':
       return <span>stopped</span>
@@ -154,16 +173,37 @@ function LaunchRow({ agentId, call, execution }: ToolRendererProps) {
   const runningChildren = view?.children.filter((child) => child.state === 'running').length ?? 0
   const resumed = useResumedRunIds(agentId).has(runId ?? '')
 
-  const subject = workflow ? (
-    <WorkflowSubject agents={agents} />
-  ) : (
+  let meta: ReactNode = null
+  if (view && !live && !failed)
+    meta =
+      workflow && runningChildren > 0 ? (
+        <span className="whitespace-nowrap">{runningChildren} running</span>
+      ) : (
+        <RunState view={view} resumed={resumed} />
+      )
+  // The run facts ride in the subject rather than ToolRow's fixed meta slot, so a narrow row gives them up first:
+  // trailing facts wrap whole onto a clipped second line, and the task title truncates only once the state is alone.
+  const subject = (
     <>
-      <span className="min-w-0 truncate">{title}</span>
-      {output && <span className="shrink-0 font-mono text-[11.5px] text-fg-3">{'\u2192'} {output.split(/[\\/]/).pop()}</span>}
+      {workflow ? (
+        <WorkflowSubject agents={agents} />
+      ) : (
+        <>
+          <span className="min-w-0 truncate">{title}</span>
+          {output && (
+            <span className="max-w-[40%] shrink-0 truncate font-mono text-[11.5px] text-fg-3">
+              {'\u2192'} {output.split(/[\\/]/).pop()}
+            </span>
+          )}
+        </>
+      )}
+      {meta && (
+        <span className="ml-auto h-lh shrink-[100] overflow-clip text-right text-xs text-fg-3 tabular">
+          {meta}
+        </span>
+      )}
     </>
   )
-  let meta: ReactNode = null
-  if (view && !live && !failed) meta = workflow && runningChildren > 0 ? <span>{runningChildren} running</span> : <RunState view={view} resumed={resumed} />
   const resumedFailure = resumed && !failed && (settledState === 'failed' || settledState === 'rejected')
   const glyph = resumedFailure ? <RotateCw className="text-fg-3" /> : <RunGlyph state={failed ? 'failed' : settledState} needsDecision={view?.needsDecision} />
 
@@ -172,7 +212,6 @@ function LaunchRow({ agentId, call, execution }: ToolRendererProps) {
       icon={glyph}
       verb={label}
       subject={subject}
-      meta={meta}
       phase={phase}
       startedAt={execution?.startedAt}
       durationMs={foreground ? execution?.durationMs : undefined}

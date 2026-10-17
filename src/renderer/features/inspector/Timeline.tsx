@@ -72,8 +72,9 @@ function primaryArg(activity: ToolActivity, cwd: string): string {
   return typeof first === 'string' ? first : ''
 }
 
+/** The locale's short time: "7:36 PM" in 12-hour locales, "07:36" or "7:36" as each 24-hour locale writes it. */
 function clock(epochMs: number): string {
-  return new Date(epochMs).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return new Date(epochMs).toLocaleTimeString(undefined, { timeStyle: 'short' })
 }
 
 function TimelineRow({ activity, cwd, maxDuration, last }: { activity: ToolActivity; cwd: string; maxDuration: number; last: boolean }) {
@@ -83,14 +84,19 @@ function TimelineRow({ activity, cwd, maxDuration, last }: { activity: ToolActiv
   const errorText = activity.isError ? resultText(activity.execution).trim() : ''
   const share = activity.durationMs && maxDuration > 0 ? Math.max(0.04, activity.durationMs / maxDuration) : 0
   return (
-    <div className="relative pl-[52px]">
-      <span className="tabular absolute top-[9px] left-0 w-[44px] text-right text-2xs text-fg-3">{clock(activity.at).slice(0, 5)}</span>
-      {!last && <span className="absolute top-[22px] bottom-0 left-[61px] w-px bg-hairline" />}
+    <div className="relative col-span-2 grid grid-cols-subgrid">
+      <span className="tabular pt-[9px] text-right text-2xs whitespace-nowrap text-fg-3">
+        {clock(activity.at)}
+      </span>
+      {/* Placed in the second column's area, so it hangs from the icon whatever width the times take. */}
+      {!last && (
+        <span className="absolute top-[22px] bottom-0 left-[9px] col-start-2 w-px bg-hairline" />
+      )}
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="group flex w-full items-start gap-2.5 rounded-md py-1.5 pr-2 text-left focus-visible:outline-none"
+        className="group col-start-2 flex w-full items-start gap-2.5 rounded-md py-1.5 pr-2 text-left focus-visible:outline-none"
       >
         <span
           className={cn(
@@ -129,7 +135,13 @@ function TimelineRow({ activity, cwd, maxDuration, last }: { activity: ToolActiv
       </button>
       <AnimatePresence initial={false}>
         {open && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={spring.smooth} className="overflow-hidden">
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={spring.smooth}
+            className="col-start-2 overflow-hidden"
+          >
             <pre className="selectable mt-0.5 mb-2 ml-[29px] max-h-48 overflow-auto rounded-md bg-surface-2 px-2.5 py-2 font-mono text-xs leading-relaxed whitespace-pre-wrap text-fg-3 shadow-[inset_0_0_0_1px_var(--hairline)]">
               {resultText(activity.execution).trim() || JSON.stringify(activity.args, null, 2)}
             </pre>
@@ -175,11 +187,16 @@ export function Timeline({ agent }: { agent: AgentState }) {
           ]}
         />
       </div>
-      <div>
+      {/* Times in their own column, as wide as the longest one ("12:05 PM" or "12:05"). */}
+      <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2">
         {shown.map((activity, i) => (
           <TimelineRow key={activity.id} activity={activity} cwd={agent.info.cwd} maxDuration={maxDuration} last={i === shown.length - 1} />
         ))}
-        {shown.length === 0 && <div className="px-2 py-6 text-center text-sm text-fg-3">No failed tool calls in this session.</div>}
+        {shown.length === 0 && (
+          <div className="col-span-2 px-2 py-6 text-center text-sm text-fg-3">
+            No failed tool calls in this session.
+          </div>
+        )}
       </div>
     </div>
   )

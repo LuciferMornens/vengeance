@@ -331,14 +331,16 @@ function useStickToBottom(agentId: string) {
     noteWrite(el)
   }, [noteWrite])
 
-  // The content node mounts/unmounts with the empty state, so observe it through a callback ref.
+  // The content node mounts/unmounts with the empty state, so observe it through a callback ref. Its border box
+  // counts the bottom padding, which follows the composer dock (`--composer-h`): a taller dock keeps a pinned
+  // view on the bottom too.
   const contentRef = useCallback(
     (node: HTMLDivElement | null) => {
       observer.current?.disconnect()
       observer.current = null
       if (!node) return
       observer.current = new ResizeObserver(follow)
-      observer.current.observe(node)
+      observer.current.observe(node, { box: 'border-box' })
       follow()
     },
     [follow]
@@ -730,6 +732,7 @@ function AgentTranscript({ agentId }: { agentId: string }) {
             {detached && !empty && (
               <motion.button
                 type="button"
+                data-jump-latest
                 initial={{ opacity: 0, y: 10, scale: 0.94 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 8, scale: 0.96 }}

@@ -27,7 +27,7 @@ async function queueWhileRunning(app, text, { followUp = false } = {}) {
 }
 
 async function setQueueMode(app, label, option) {
-  await app.page.keyboard.press('Control+,')
+  await app.page.keyboard.press('ControlOrMeta+,')
   await app.page.getByText('Agent behavior', { exact: true }).first().click()
   const title = app.page.getByText(label, { exact: true })
   await title.waitFor()

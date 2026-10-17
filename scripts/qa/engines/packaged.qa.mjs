@@ -1,19 +1,24 @@
+// Packaged native engines: both Engines stream from local fake providers and the Engine 2 helper
+// loads with only the OS's own PATH. QA_PACKAGED_EXE is the unpacked app executable (macOS: the
+// .app's Contents/MacOS/<name>); QA_PACKAGED_NAME its expected Electron app name.
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import { systemPath } from '../../engines/common.mjs'
 import { FAKE_MODELS, FAKE_PROVIDER } from '../lib/agent-dir.mjs'
 import { launchApp, reportShotsDir, ROOT } from '../lib/app.mjs'
 import { turn } from '../lib/fake-llm.mjs'
+import { executableName } from '../lib/platform.mjs'
 import { createEngineFixture, PRIME_MODELS, PRIME_PROVIDER } from './integration-fixture.mjs'
 
 const executable = process.env.QA_PACKAGED_EXE
 const expectedProductName = process.env.QA_PACKAGED_NAME ?? 'Vengeance QA'
 const executeFile = promisify(execFile)
 const HELPER_REVISION = '763094e1b6a7c17450ee8399b06cda1853847ca5'
-const HELPER_NAME = 'vengeance-prime-auth.exe'
+const HELPER_NAME = executableName('vengeance-prime-auth')
 const HELPER_PROTOCOL = 1
 const HELPER_TIMEOUT_MS = 15_000
 const PI_REPLY = 'Packaged Engine works.'
@@ -84,8 +89,7 @@ async function checkEngine(application, server, engine, provider, model, reply) 
 
 async function runPackagedChecks() {
   const fixture = await createEngineFixture()
-  assert.ok(process.env.SystemRoot, 'Windows must provide its system directory')
-  const systemPath = join(process.env.SystemRoot, 'System32')
+  const systemOnlyPath = systemPath()
   let application
   try {
     application = await launchApp({
@@ -93,8 +97,7 @@ async function runPackagedChecks() {
       agentDir: fixture.piDirectory.dir,
       env: {
         ...fixture.environment,
-        PATH: systemPath,
-        Path: systemPath,
+        ...systemOnlyPath,
         VENGEANCE_PRIME_EXECUTABLE: undefined,
         VENGEANCE_BUNDLED_ENGINES: undefined
       },
@@ -134,7 +137,7 @@ async function runPackagedChecks() {
     const result = await executeFile(helper, ['--version'], {
       windowsHide: true,
       timeout: HELPER_TIMEOUT_MS,
-      env: { ...process.env, PATH: systemPath, Path: systemPath }
+      env: { ...process.env, ...systemOnlyPath }
     })
     const metadata = JSON.parse(result.stdout)
     assert.equal(metadata.protocol, HELPER_PROTOCOL)
@@ -153,7 +156,8 @@ async function runPackagedChecks() {
     }
     const notices = await readFile(join(about.resources, 'prime-auth', 'THIRD-PARTY-NOTICES.txt'))
     assert.ok(notices.length > 0)
-    console.log('  ✓ packaged native helper loads with only the Windows system PATH')
+    const system = process.platform === 'win32' ? 'Windows' : 'OS'
+    console.log(`  ✓ packaged native helper loads with only the ${system} system PATH`)
     console.log(`    SHA-256 ${helperHash}`)
 
     await checkEngine(

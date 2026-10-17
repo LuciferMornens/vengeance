@@ -14,6 +14,7 @@ import { bridge } from '../../lib/bridge'
 import { rpc } from '../../lib/engine'
 import { invoke } from '../../lib/ipc'
 import { normalizePath, samePath } from '../../lib/paths'
+import { REVEAL_LABEL, TRASH_NAME } from '../../lib/platform-copy'
 import { useAgents } from '../../store/agents'
 import { useApp, workspaceEngine } from '../../store/app'
 import { toast } from '../../ui'
@@ -466,7 +467,7 @@ export async function exportSession(
         level: 'success',
         title: written.format === 'html' ? 'Exported as a web page' : 'Exported as a session file',
         description: written.path,
-        action: { label: 'Show in folder', onClick: () => void invoke('sys:reveal', written.path) }
+        action: { label: REVEAL_LABEL, onClick: () => void invoke('sys:reveal', written.path) }
       })
     }
   } catch (error) {
@@ -543,7 +544,7 @@ export async function deleteSession(target: SessionTarget & { path: string }): P
     // Native deletion stops the resident. Keep its tab available if that operation fails.
     if (open && engine === 'prime') await useAgents.getState().disposeAgent(open)
     dismissDormant(target.path)
-    toast({ level: 'success', title: 'Moved to the Recycle Bin', description: target.title })
+    toast({ level: 'success', title: `Moved to the ${TRASH_NAME}`, description: target.title })
     useSessions.getState().reloadLoaded()
   } finally {
     if (engine === 'prime') void useSessions.getState().loadBackground()

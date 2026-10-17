@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process'
-import { join } from 'node:path'
-import { app } from 'electron'
 import type { SessionLineage } from '@shared/api/sessions'
+import { rootedPaths } from '../../paths'
+import { childBaseEnv, shellEnvironmentReady } from '../../shell-env'
+import { primeHelperPath } from './helper'
 import { getPrimeAgentDir } from './locate'
 import { asRecord, stringValue } from './transport'
 
@@ -20,21 +21,18 @@ type SessionCommand =
   | { operation: 'branch'; path: string; entryId: string; sessionDir: string }
   | { operation: 'handoff'; inputPath: string; sessionDir: string }
 
-function sessionHelper(
+async function sessionHelper(
   mode: '--session' | '--session-lineage' | '--session-delete',
   command: object,
   environment: Record<string, string>,
   maximumBytes: number
 ): Promise<Record<string, unknown>> {
-  const name = process.platform === 'win32' ? 'vengeance-prime-auth.exe' : 'vengeance-prime-auth'
-  const executable = app.isPackaged
-    ? join(process.resourcesPath, 'prime-auth', name)
-    : join(app.getAppPath(), 'resources', 'prime-auth', 'bin', name)
+  await shellEnvironmentReady()
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, [mode], {
+    const child = spawn(primeHelperPath(), [mode], {
       windowsHide: true,
       env: {
-        ...process.env,
+        ...childBaseEnv(),
         ...environment,
         PRIME_AGENT_CODING_AGENT_DIR: environment.PRIME_AGENT_CODING_AGENT_DIR ?? getPrimeAgentDir()
       },
@@ -103,6 +101,8 @@ export async function nativePrimeSessionLineage(
     MAX_LINEAGE_OUTPUT_BYTES
   )
   const result = asRecord(response.result)
+  // The helper answers with canonical paths; they are listed under the folders the app asked about.
+  const rooted = await rootedPaths([...sessionDirs, agentDir])
   if (
     !Array.isArray(result.sessions) ||
     !Array.isArray(result.excludedPaths) ||
@@ -124,11 +124,12 @@ export async function nativePrimeSessionLineage(
     ) {
       throw new Error('Engine 2 returned invalid child-session lineage')
     }
+    const parentSessionPath = stringValue(lineage.parentSessionPath)
     return {
-      path: row.path,
+      path: rooted(row.path),
       name: stringValue(row.name),
       lineage: {
-        parentSessionPath: stringValue(lineage.parentSessionPath),
+        parentSessionPath: parentSessionPath && rooted(parentSessionPath),
         parentSessionId: stringValue(lineage.parentSessionId),
         depth: lineage.depth,
         childId: lineage.childId,
@@ -138,7 +139,7 @@ export async function nativePrimeSessionLineage(
   })
   return {
     sessions,
-    excludedPaths: result.excludedPaths,
+    excludedPaths: result.excludedPaths.map(rooted),
     warning: stringValue(result.warning)
   }
 }

@@ -1,7 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
-import { app } from 'electron'
 import type {
   PrimeTracePreview,
   PrimeTracesArgs,
@@ -10,6 +9,8 @@ import type {
   PrimeTracesStatus
 } from '@shared/api/traces'
 import { env } from '../../env'
+import { childBaseEnv, shellEnvironmentReady } from '../../shell-env'
+import { primeHelperPath } from './helper'
 import { getPrimeAgentDir } from './locate'
 import { asRecord } from './transport'
 
@@ -298,6 +299,7 @@ export async function runPrimeTraces(
   onProgress?: (progress: PrimeTracesProgress) => void
 ): Promise<PrimeTracesResult> {
   if (env.mock) return mockResult(args, sessionFile)
+  await shellEnvironmentReady()
   const cwd = resolve(args.cwd)
   const upload =
     args.action === 'on' ||
@@ -306,15 +308,11 @@ export async function runPrimeTraces(
     args.action === 'upload-all'
   if (upload && uploads.has(cwd))
     throw new Error('A trace upload is already running in this workspace.')
-  const name = process.platform === 'win32' ? 'vengeance-prime-auth.exe' : 'vengeance-prime-auth'
-  const executable = app.isPackaged
-    ? join(process.resourcesPath, 'prime-auth', name)
-    : join(app.getAppPath(), 'resources', 'prime-auth', 'bin', name)
   return new Promise((resolveResult, reject) => {
-    const child = spawn(executable, ['--traces'], {
+    const child = spawn(primeHelperPath(), ['--traces'], {
       cwd,
       windowsHide: true,
-      env: { ...process.env, PRIME_AGENT_CODING_AGENT_DIR: getPrimeAgentDir() },
+      env: { ...childBaseEnv(), PRIME_AGENT_CODING_AGENT_DIR: getPrimeAgentDir() },
       stdio: ['pipe', 'pipe', 'ignore']
     })
     const operation = { child, cancelled: false }

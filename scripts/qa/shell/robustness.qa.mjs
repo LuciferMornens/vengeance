@@ -3,10 +3,11 @@
 // error), closing the window while a dialog is open, and single-instance with test mode OFF.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { join } from 'node:path'
+import electron from 'electron'
 import { createAgentDir } from '../lib/agent-dir.mjs'
 import { inspectRequest, startFakeLlm, turn } from '../lib/fake-llm.mjs'
 import { ROOT } from '../lib/app.mjs'
+import { ELECTRON_SWITCHES } from '../lib/platform.mjs'
 import {
   descendants,
   isAlive,
@@ -236,7 +237,7 @@ try {
     const plain = await root.folder('ws-dialog2', { 'README.md': '# d\n' })
     await run.test('openWorkspace', plain)
     await run.test('openSettings', 'general')
-    await run.page.keyboard.press('Control+k')
+    await run.page.keyboard.press('ControlOrMeta+k')
     const before = descendants(await processTable(), run.pid)
     await run.win((win) => win.close())
     await waitUntil(() => !isAlive(run.pid), { timeoutMs: 15_000, label: 'app exit' })
@@ -307,7 +308,6 @@ try {
       const holds = await run.app.evaluate(({ app }) => app.hasSingleInstanceLock())
       assert.equal(holds, true, 'first instance holds the lock on its temp profile')
       const folder = await root.folder('ws-second-instance', { 'README.md': '# hand-off\n' })
-      const electronExe = join(ROOT, 'node_modules', 'electron', 'dist', 'electron.exe')
       const env = {
         ...process.env,
         VENGEANCE_USER_DATA: userData,
@@ -315,7 +315,7 @@ try {
         PI_OFFLINE: '1'
       }
       delete env.VENGEANCE_TEST
-      const second = spawn(electronExe, [ROOT, folder], { env, stdio: 'ignore' })
+      const second = spawn(electron, [ROOT, ...ELECTRON_SWITCHES, folder], { env, stdio: 'ignore' })
       const exitCode = await new Promise((resolveExit) => {
         const timer = setTimeout(() => resolveExit('still running after 20 s'), 20_000)
         second.on('exit', (code) => {

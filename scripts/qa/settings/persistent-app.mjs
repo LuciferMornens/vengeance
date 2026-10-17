@@ -4,34 +4,19 @@
 // Same isolation as launchApp(): temp userData and TEMP, temp PI_CODING_AGENT_DIR, offline engine,
 // no single-instance lock shared with the user's Vengeance.
 import { _electron as electron } from 'playwright'
-import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { promisify } from 'node:util'
 import { ROOT } from '../lib/app.mjs'
+import { ELECTRON_SWITCHES } from '../lib/platform.mjs'
+import { isAlive, killTree } from '../lib/processes.mjs'
 import { SHOTS_DIR } from './settings-ui.mjs'
 
-const execFileAsync = promisify(execFile)
 const SIZE = { width: 1440, height: 900 }
 const LAUNCH_TIMEOUT_MS = 60_000
 const READY_TIMEOUT_MS = 30_000
 const CLOSE_TIMEOUT_MS = 15_000
 const INHERITED_ENGINE_VARS = /^(PI_|AI_AGENT$)/
-
-function isAlive(pid) {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    return error.code === 'EPERM'
-  }
-}
-
-/** Kill a process tree this launcher started. */
-async function killTree(pid) {
-  await execFileAsync('taskkill', ['/PID', String(pid), '/T', '/F']).catch(() => undefined)
-}
 
 /** A temp folder holding the userData and TEMP of every run of one suite; `dispose()` removes it. */
 export async function createPersistentProfile() {
@@ -50,7 +35,8 @@ export async function createPersistentProfile() {
 /**
  * Launch the built app on `profile` with the fake engine config in `agentDir`. Returns the small
  * subset of the harness app API the settings helpers use (page, test, invoke, rpc, screenshot,
- * send, close) plus `errors()`.
+ * send, close) plus `errors()` and `sealsSecrets`: whether safeStorage encrypts on this host (not
+ * on Linux's basic password store, where launch env values stay plain at rest).
  */
 export async function launchPersistentApp({ profile, agentDir }) {
   const env = Object.fromEntries(
@@ -70,7 +56,7 @@ export async function launchPersistentApp({ profile, agentDir }) {
     PI_TELEMETRY: '0'
   })
   const electronApp = await electron.launch({
-    args: [ROOT, '--force-device-scale-factor=1'],
+    args: [ROOT, '--force-device-scale-factor=1', ...ELECTRON_SWITCHES],
     env,
     timeout: LAUNCH_TIMEOUT_MS
   })
@@ -99,6 +85,9 @@ export async function launchPersistentApp({ profile, agentDir }) {
     await killTree(appPid)
     throw new Error(`QA app is not isolated: ${JSON.stringify(isolation)}`)
   }
+  const sealsSecrets = await electronApp.evaluate(({ safeStorage }) =>
+    safeStorage.isEncryptionAvailable()
+  )
 
   const test = (method, ...args) =>
     page.evaluate(([name, values]) => window.__vengeanceTest[name](...values), [method, args])
@@ -112,6 +101,7 @@ export async function launchPersistentApp({ profile, agentDir }) {
     invoke,
     agentState: (agentId) => test('agentState', agentId),
     errors: () => [...errors],
+    sealsSecrets,
     async rpc(command, agentId) {
       const response = await invoke(
         'engine:command',

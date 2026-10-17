@@ -7,6 +7,7 @@ import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { appendFile, rm, utimes } from 'node:fs/promises'
 import { turn } from '../lib/fake-llm.mjs'
+import { TRASH_NAME } from '../lib/platform.mjs'
 import { runSuite } from '../lib/suite.mjs'
 import { createChecks, sendWhenSettled, SHOTS_DIR, waitUntil } from './lib/checks.mjs'
 import { recordTrash, trashCalls } from './lib/main-stubs.mjs'
@@ -295,12 +296,12 @@ await runSuite(
         await page.getByRole('menuitem', { name: /Delete/ }).click()
         await page.getByRole('dialog').getByText('Delete this session?').waitFor()
         await app.screenshot('lifecycle-delete-confirm', { settleMs: 200 })
-        await page.getByRole('button', { name: 'Move to Recycle Bin' }).click()
+        await page.getByRole('button', { name: `Move to ${TRASH_NAME}` }).click()
         await waitUntil(() => !existsSync(dated.older), { label: 'file gone' })
         const trashed = await trashCalls(app)
         assert.equal(trashed.length, 1)
         assert.equal(trashed[0].toLowerCase(), dated.older.toLowerCase())
-        await page.getByText('Moved to the Recycle Bin').waitFor()
+        await page.getByText(`Moved to the ${TRASH_NAME}`).waitFor()
         await waitUntil(async () => (await sidebarRow('fixture older papaya').count()) === 0, {
           label: 'row removed'
         })
