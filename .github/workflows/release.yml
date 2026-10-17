@@ -308,6 +308,45 @@ jobs:
           test -f /usr/share/applications/vengeance.desktop
           command -v vengeance
 
+  install-rpm:
+    name: Install the rpm (${{ matrix.id }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    # Fedora 44.
+    container: mirror.gcr.io/library/fedora@sha256:43b29f65a41eb9c35e1cd5323e3bdf3b655c2357a9f4f1ff2f9c2798e5045d80
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: linux-x64
+            os: ubuntu-24.04
+          - id: linux-arm64
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist-${{ matrix.id }}
+          path: dist
+      # The image may leave ldd out, so the check below names it too.
+      - name: Install with dnf (resolves the package's dependencies)
+        run: dnf install -y ./dist/*.rpm /usr/bin/ldd
+      - name: Check the installed app
+        run: |
+          for file in /opt/Vengeance/vengeance \
+            /opt/Vengeance/resources/engines/prime/prime-agent \
+            /opt/Vengeance/resources/prime-auth/vengeance-prime-auth; do
+            test -x "$file"
+            if ldd "$file" | grep 'not found'; then
+              echo "::error::$file has unresolved libraries"
+              exit 1
+            fi
+          done
+          test -f /usr/share/applications/vengeance.desktop
+          command -v vengeance
+
   install-pacman:
     name: Install the pacman package (linux-x64)
     needs: build
@@ -342,7 +381,7 @@ jobs:
 
   publish:
     name: Draft the GitHub release
-    needs: [version, build, install-deb, install-pacman]
+    needs: [version, build, install-deb, install-rpm, install-pacman]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     environment: release

@@ -159,7 +159,7 @@ Releases are for maintainers.
    matching tag `v<version>-rc.N`. Its builds check the same update feed as stable ones (the newest
    stable release), so they are offered the next stable release, never a newer prerelease.
 3. The release workflow builds and smoke-tests all five platforms (the macOS apps are ad-hoc
-   signed) and install-tests the deb and pacman packages. It then creates a **draft** release with
-   every package, `SHA256SUMS` and a provenance attestation.
+   signed) and install-tests the deb, rpm and pacman packages. It then creates a **draft** release
+   with every package, `SHA256SUMS` and a provenance attestation.
 4. Check the draft, then publish it. Anyone can verify a download with
    `gh attestation verify <file> --repo LuciferMornens/vengeance`.

@@ -258,9 +258,9 @@ release also lists `SHA256SUMS` and the `latest*.yml` files the in-app updater r
 
 **Windows.** Run the installer. It is not code-signed, so Microsoft Defender SmartScreen may stop it
 with "Windows protected your PC". Check the file's SHA-256 first (see
-[Verify a download](#verify-a-download)), then choose **More info → Run anyway**. The installer is
-per-user, lets you choose the install directory, creates desktop and Start Menu shortcuts, and keeps
-your app data when you uninstall.
+[Verify a download](#verify-a-download)), then choose **More info → Run anyway**. The installer
+installs for your user unless you choose all users, lets you choose the install directory, creates
+desktop and Start Menu shortcuts, and keeps your app data when you uninstall.
 
 **macOS 13 or later.** Open the dmg and drag **Vengeance** to **Applications**, or unzip the zip and
 move the app there. The app is ad-hoc signed but not notarized by Apple, so macOS blocks the first
@@ -349,15 +349,16 @@ To run Vengeance:
   version is not declared.
 - **macOS** 13 or later, on Apple silicon or Intel.
 - **Linux** x64 or arm64 with glibc 2.35 or newer, on Wayland or X11.
-- Access to a model provider: an API key or a subscription sign-in. Vengeance does not supply models.
+- Access to a model provider: an API key, a subscription sign-in, or a local model server added
+  under **Settings → Custom models**. Vengeance does not supply models.
 - No Node, Rust or Python install is needed to load the engines. Package installation and developer
   tools keep their own prerequisites, such as npm, Git or Bash. On macOS and Linux the engines get
   your login shell's environment, so tools your shell profile adds to `PATH` are found even when
   Vengeance starts from the Dock or a launcher.
 - [uv](https://docs.astral.sh/uv/) for Engine 2's Python kernel. Engine 2 sets the kernel up with uv
   the first time it needs it, and Vengeance does not install uv for you: put it on `PATH` or in
-  `~/.local/bin`. That first setup downloads Python and the kernel's packages, so it needs a network
-  connection once.
+  `~/.local/bin`. That setup downloads Python and the kernel's packages, so it needs a network
+  connection.
 
 To build from source:
 
@@ -370,8 +371,8 @@ To build from source:
   (`OBJDUMP` can point at it).
 - **macOS:** the Xcode Command Line Tools (`xcode-select --install`).
 - **Linux:** a compiler and binutils (`build-essential` and `binutils` on Debian and Ubuntu,
-  `base-devel` on Arch). `npm run dist` also needs `rpmbuild` and `bsdtar` (the `rpm` and
-  `libarchive-tools` packages on Debian and Ubuntu).
+  `base-devel` on Arch). `npm run dist` also needs `rpmbuild` for the rpm and, on x64,
+  `bsdtar` for the pacman package (the `rpm` and `libarchive-tools` packages on Debian and Ubuntu).
 
 [CONTRIBUTING.md](CONTRIBUTING.md#prerequisites) has the step-by-step setup for each platform, and
 [UPSTREAM.md](UPSTREAM.md) the native toolchain details.
@@ -414,8 +415,8 @@ zip on macOS, and the AppImage, deb, rpm and tar.gz on Linux, plus pacman on x64
 packages on its own machine; nothing is cross-built. To build only some formats, name them, for
 example `npm run dist -- AppImage deb`.
 
-Build scripts never publish a release. A local build has no update feed unless
-`VENGEANCE_UPDATE_FEED` is set; release builds use
+Build scripts never publish a release. A local build has no update feed built in unless
+`VENGEANCE_UPDATE_FEED` is set for `npm run dist`; release builds use
 `https://github.com/LuciferMornens/vengeance/releases/latest/download`. For isolated packaged QA,
 run `npm run dist:qa -- --dir`, which packages the app under a separate identity without an
 installer.
@@ -475,8 +476,8 @@ workflow artifacts. Pull requests also get a dependency review.
 
 The [release workflow](.github/workflows/release.yml) runs when a `v<version>` tag is pushed. It
 builds and packages all five platforms on their own runners, checks the baked update feed, the glibc
-baseline and the macOS signatures, smoke-tests each packaged app and install-tests the deb and
-pacman packages. Then it creates a draft GitHub release with every package, `SHA256SUMS` and a
+baseline and the macOS signatures, smoke-tests a packaged build on each platform and install-tests
+the deb, rpm and pacman packages. Then it creates a draft GitHub release with every package, `SHA256SUMS` and a
 provenance attestation, which the maintainer reviews and publishes. Pull requests that change
 packaging, the engines or the workflow run it as a dry run that never publishes. The maintainer
 steps are in [CONTRIBUTING.md](CONTRIBUTING.md#releases).
@@ -499,7 +500,7 @@ steps are in [CONTRIBUTING.md](CONTRIBUTING.md#releases).
 | `npm run qa`, `npm run qa:smoke`            | Run application QA suites. `qa:smoke` uses the real Engine with a scripted provider.                    |
 | `npm run e2e:real`                          | Tiny live-provider smoke test in a temporary workspace. Needs provider access.                          |
 | `npm run e2e:packaged`                      | The same smoke test against the unpacked packaged app. Needs `npm run dist` first.                      |
-| `npm run e2e:bridge`, `e2e:mcp`, `e2e:tree` | Real-engine checks for the bridge, MCP reconnects and session-tree navigation.                          |
+| `npm run e2e:bridge`, `e2e:mcp`, `e2e:tree` | Real-engine checks for the bridge, MCP reconnects and very long session trees.                          |
 | `npm run icons`                             | Regenerate committed icons from `build/icon.svg`.                                                       |
 | `npm run perf`                              | Measure the performance footprint (Windows only). Needs the QA package from `npm run dist:qa -- --dir`. |
 
