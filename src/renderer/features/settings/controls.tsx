@@ -69,10 +69,14 @@ export function NumberField({
 }: NumberFieldProps) {
   const [draft, setDraft] = useState(value === undefined ? '' : String(value))
   const [invalid, setInvalid] = useState(false)
-  useEffect(() => {
+  // A new value replaces the draft in the same render: synced in an effect, a field enabled by the render that
+  // brings its value would show empty for a frame, and digits typed then would join the value.
+  const [shownValue, setShownValue] = useState(value)
+  if (value !== shownValue) {
+    setShownValue(value)
     setDraft(value === undefined ? '' : String(value))
     setInvalid(false)
-  }, [value])
+  }
 
   const commit = () => {
     const text = draft.trim().replace(/[_,\s]/g, '')
@@ -162,7 +166,12 @@ export function TextField({
   keepEmpty
 }: TextFieldProps) {
   const [draft, setDraft] = useState(value ?? '')
-  useEffect(() => setDraft(value ?? ''), [value])
+  // A new value replaces the draft in the same render, as in NumberField.
+  const [shownValue, setShownValue] = useState(value)
+  if (value !== shownValue) {
+    setShownValue(value)
+    setDraft(value ?? '')
+  }
   const commit = (next = draft) => {
     const normalized = next === '' && !keepEmpty ? undefined : next
     if (normalized !== value) onCommit(normalized)
