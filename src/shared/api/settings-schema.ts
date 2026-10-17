@@ -11,6 +11,7 @@ export type SettingsSectionId =
   | 'providers'
   | 'custom-models'
   | 'agent'
+  | 'extensions'
   | 'packages'
   | 'resources'
   | 'mcp'
@@ -126,6 +127,8 @@ export const SETTINGS: SettingDef[] = [
     control: { kind: 'custom', editor: 'default-model' },
     defaultLabel: 'Automatic',
     writtenBySessions: true,
+    // Open sessions keep their own model; restarting resumes it.
+    effect: 'none',
     keywords: ['provider', 'startup']
   },
   {
@@ -137,6 +140,7 @@ export const SETTINGS: SettingDef[] = [
     control: { kind: 'choice', options: THINKING },
     default: 'medium',
     writtenBySessions: true,
+    effect: 'none',
     keywords: ['reasoning', 'effort']
   },
   {

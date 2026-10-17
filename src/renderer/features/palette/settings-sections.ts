@@ -11,6 +11,7 @@ import {
   Palette,
   Plug,
   Server,
+  Sparkles,
   SquareTerminal,
   UserRound,
   type LucideIcon
@@ -52,6 +53,11 @@ const SECTIONS: Record<SettingsSectionId, { title: string; icon: LucideIcon; key
       title: 'Agent behavior',
       icon: Bot,
       keywords: ['steering', 'follow-up', 'retry', 'compaction', 'tools', 'shell']
+    },
+    extensions: {
+      title: 'Extensions',
+      icon: Sparkles,
+      keywords: ['discover', 'browse', 'gallery', 'community', 'add extension', 'marketplace']
     },
     packages: {
       title: 'Packages',
@@ -102,6 +108,8 @@ export function settingsSectionAvailable(
       return capabilities.providers
     case 'custom-models':
       return capabilities.customModels
+    case 'extensions':
+      return capabilities.packages && capabilities.extensionUi
     case 'packages':
       return capabilities.packages
     case 'resources':

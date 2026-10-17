@@ -10,6 +10,7 @@ import {
   MoreHorizontal,
   Package,
   ShieldQuestion,
+  Sparkles,
   Trash2
 } from 'lucide-react'
 import type { PackageAction, PackageInfo } from '@shared/api/settings'
@@ -17,6 +18,8 @@ import { friendlyExtensionName } from '@shared/display-names'
 import { isTarballSource, TARBALL_HINT } from '@shared/package-sources'
 import { runAction } from '../../../lib/actions'
 import { cn } from '../../../lib/cn'
+import { useApp } from '../../../store/app'
+import { useEngineCapabilities } from '../../engines/registry'
 import { invoke, on } from '../ipc'
 import {
   Badge,
@@ -64,6 +67,10 @@ function packageUrl(pkg: PackageInfo): string | undefined {
 export function PackagesSection() {
   const scope = useSettings((s) => s.scope)
   const hasProject = useSettings((s) => !!s.snapshot?.project)
+  const engine = useSettings((s) => s.engine)
+  const capabilities = useEngineCapabilities(engine)
+  const canDiscover = !!capabilities?.packages && capabilities.extensionUi
+  const discover = () => useApp.getState().openSettings('extensions', engine)
   const [packages, setPackages] = useState<PackageInfo[] | null>(null)
   const [source, setSource] = useState('')
   const [installScope, setInstallScope] = useState<'user' | 'project'>(
@@ -333,22 +340,38 @@ export function PackagesSection() {
             title="Global"
             description="Installed for every project."
             actions={
-              user.some((p) => p.kind !== 'local') && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  leading={<ArrowUpCircle />}
-                  disabled={busy}
-                  onClick={() => void start('update-all', 'Updating all packages')}
-                >
-                  Update all
-                </Button>
-              )
+              <>
+                {canDiscover && user.length > 0 && (
+                  <Button size="sm" variant="ghost" leading={<Sparkles />} onClick={discover}>
+                    Discover
+                  </Button>
+                )}
+                {user.some((p) => p.kind !== 'local') && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    leading={<ArrowUpCircle />}
+                    disabled={busy}
+                    onClick={() => void start('update-all', 'Updating all packages')}
+                  >
+                    Update all
+                  </Button>
+                )}
+              </>
             }
           >
             {user.length === 0 && (
               <Note icon={<Package />}>
-                No packages yet. Install one above from npm, git or a local folder.
+                No packages yet. Install one above from npm, git or a local folder.{' '}
+                {canDiscover && (
+                  <button
+                    type="button"
+                    onClick={discover}
+                    className="font-medium text-fg-2 underline decoration-hairline-strong underline-offset-2 hover:text-fg"
+                  >
+                    Browse community extensions
+                  </button>
+                )}
               </Note>
             )}
             {user.map(renderPackage)}

@@ -5,7 +5,7 @@ import { appState } from '../../app-state'
 import { agentDir, projectRoot } from './agent-dir'
 import { agentDirArea, areaOf, authSignature, INSTRUCTION_FILE } from './config-areas'
 import { lastWrittenText } from './json-file'
-import { hasActiveRuns } from './pi-cli'
+import { hadRecentRun, hasActiveRuns } from './pi-cli'
 
 /**
  * Watches the engine's config on disk (agent dir + the active project's `.pi/` and context files) and
@@ -40,8 +40,14 @@ export class ConfigWatcher {
   private agentWatcher: FSWatcher | null = null
   private projectWatchers: FSWatcher[] = []
   private project: string | null = null
-  /** Areas waiting for the debounce, and whether a file's content proved the change came from outside. */
-  private pending = new Map<SettingsChangeArea, boolean>()
+  /**
+   * Changes waiting for the debounce, per area and folder (null = the agent dir), whether a file's content proved the
+   * change came from outside, and whether a CLI run Vengeance started made it.
+   */
+  private pending = new Map<
+    string,
+    { area: SettingsChangeArea; cwd: string | null; outside: boolean; fromRun: boolean }
+  >()
   private flushTimer: NodeJS.Timeout | null = null
   private stopWorkspaceListener: (() => void) | null = null
   private readonly muted = new Map<SettingsChangeArea, number>()
@@ -53,15 +59,21 @@ export class ConfigWatcher {
   /**
    * @param enginesStarting true while an engine process is starting: it may install missing packages
    *   (`npm/`, `git/`), which is not an outside change.
+   * @param onChange `fromRun`: settings.json was rewritten by an install or update Vengeance ran (its package list);
+   *   that run announces its own change.
    */
   constructor(
-    private readonly onChange: (area: SettingsChangeArea) => void,
+    private readonly onChange: (
+      area: SettingsChangeArea,
+      projectCwd: string | null,
+      fromRun: boolean
+    ) => void,
     private readonly enginesStarting: () => boolean
   ) {}
 
   start(): void {
     this.authState = this.readAuthSignature()
-    this.agentWatcher = this.watchDir(agentDir(), true, (segments) => {
+    this.agentWatcher = this.watchDir(agentDir(), true, null, (segments) => {
       const area = agentDirArea(segments)
       return area === 'auth' ? this.authArea() : area
     })
@@ -105,7 +117,12 @@ export class ConfigWatcher {
     return 'auth'
   }
 
-  private watchDir(dir: string, recursive: boolean, classify: (segments: string[]) => SettingsChangeArea | null): FSWatcher | null {
+  private watchDir(
+    dir: string,
+    recursive: boolean,
+    cwd: string | null,
+    classify: (segments: string[]) => SettingsChangeArea | null
+  ): FSWatcher | null {
     if (!existsSync(dir)) return null
     try {
       const watcher = watch(dir, { recursive, persistent: false }, (_event, filename) => {
@@ -113,7 +130,7 @@ export class ConfigWatcher {
         const area = classify(filename.split(/[\\/]+/).filter(Boolean))
         // Resolving packages creates empty folders (npm/, git/, extensions/); only files change resources.
         if ((area === 'packages' || area === 'resources') && isDirectory(join(dir, filename))) return
-        if (area) this.queue(area, join(dir, filename))
+        if (area) this.queue(area, cwd, join(dir, filename))
       })
       watcher.on('error', () => watcher.close())
       return watcher
@@ -135,8 +152,8 @@ export class ConfigWatcher {
     if (!force && root === this.project) return
     this.closeProject()
     this.project = root
-    if (!root) return
-    const rootWatcher = this.watchDir(root, false, (segments) => {
+    if (!root || !cwd) return
+    const rootWatcher = this.watchDir(root, false, cwd, (segments) => {
       const [name] = segments
       if (name === '.pi') {
         // Created or removed: re-arm the recursive watcher on next tick.
@@ -145,7 +162,7 @@ export class ConfigWatcher {
       }
       return segments.length === 1 && INSTRUCTION_FILE.test(name!) ? 'instructions' : null
     })
-    const configWatcher = this.watchDir(join(root, '.pi'), true, areaOf)
+    const configWatcher = this.watchDir(join(root, '.pi'), true, cwd, areaOf)
     this.projectWatchers = [rootWatcher, configWatcher].filter((w): w is FSWatcher => w !== null)
   }
 
@@ -153,20 +170,25 @@ export class ConfigWatcher {
     return (this.muted.get(area) ?? 0) > Date.now()
   }
 
-  private queue(area: SettingsChangeArea, path: string): void {
+  private queue(area: SettingsChangeArea, cwd: string | null, path: string): void {
     if (this.stopped) return
     const written = lastWrittenText(path)
     const outsideEdit = written !== undefined && readText(path) !== written
     if (!outsideEdit && this.isMuted(area)) return
     if ((area === 'packages' || area === 'resources') && hasActiveRuns()) return
     if (area === 'packages' && this.enginesStarting()) return
-    this.pending.set(area, outsideEdit || this.pending.get(area) === true)
+    const key = `${area}|${cwd ?? ''}`
+    const queued = this.pending.get(key)
+    const fromRun = area === 'settings' && hadRecentRun(SELF_MUTE_MS) && (queued?.fromRun ?? true)
+    this.pending.set(key, { area, cwd, outside: outsideEdit || queued?.outside === true, fromRun })
     if (this.flushTimer) clearTimeout(this.flushTimer)
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null
-      const areas = [...this.pending]
+      const changes = [...this.pending.values()]
       this.pending.clear()
-      for (const [changed, provenOutside] of areas) if (provenOutside || !this.isMuted(changed)) this.onChange(changed)
+      for (const change of changes)
+        if (change.outside || !this.isMuted(change.area))
+          this.onChange(change.area, change.cwd, change.fromRun)
     }, DEBOUNCE_MS)
   }
 }

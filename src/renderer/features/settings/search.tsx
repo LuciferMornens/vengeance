@@ -120,6 +120,13 @@ const JUMPS: JumpEntry[] = [
     keywords: ['ollama', 'lm studio', 'local', 'base url']
   },
   {
+    key: 'extensions',
+    section: 'extensions',
+    label: 'Discover extensions',
+    description: 'Browse community extensions, or add one from a file or folder.',
+    keywords: ['gallery', 'browse', 'marketplace', 'community', 'add extension', 'plugin']
+  },
+  {
     key: 'packages',
     section: 'packages',
     label: 'Install packages',

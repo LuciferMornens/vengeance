@@ -1,12 +1,14 @@
 import { useState } from 'react'
-import { Braces, ChevronRight, CircleAlert, Puzzle } from 'lucide-react'
+import { Braces, ChevronRight, CircleAlert, Puzzle, Sparkles } from 'lucide-react'
 import { friendlyExtensionName } from '@shared/display-names'
 import type { RpcSlashCommand } from '@shared/engine-types'
 import { stripAnsi } from '../../lib/ansi'
 import { cn } from '../../lib/cn'
 import { basename } from '../../lib/format'
 import type { AgentState, MachinePayload } from '../../store/agent-state'
-import { AnsiText } from '../../ui'
+import { useApp } from '../../store/app'
+import { AnsiText, Button } from '../../ui'
+import { useEngineCapabilities } from '../engines/registry'
 import { ChecklistCard, formatLspStatus, LSP_STATUS_KEY, parseChecklist } from '../extension-ui'
 import { Section, TabEmpty, Well } from './parts'
 
@@ -67,6 +69,17 @@ export function Extensions({ agent }: { agent: AgentState }) {
   const machine = Object.entries(agent.ext.machine)
   const errors = agent.extensionErrors
   const commands = agent.commands.filter((c) => c.source === 'extension')
+  const capabilities = useEngineCapabilities(agent.info.engine)
+  const discover = capabilities?.packages && capabilities.extensionUi && (
+    <Button
+      size="sm"
+      variant="ghost"
+      leading={<Sparkles />}
+      onClick={() => useApp.getState().openSettings('extensions', agent.info.engine)}
+    >
+      Discover extensions
+    </Button>
+  )
   const bySource = new Map<string, RpcSlashCommand[]>()
   for (const command of commands) bySource.set(sourceName(command), [...(bySource.get(sourceName(command)) ?? []), command])
 
@@ -74,6 +87,7 @@ export function Extensions({ agent }: { agent: AgentState }) {
     return (
       <TabEmpty icon={<Puzzle />} title="No extension activity">
         Status lines, widgets and commands from your installed extensions appear here.
+        {discover && <div className="mt-4">{discover}</div>}
       </TabEmpty>
     )
   }
@@ -172,6 +186,8 @@ export function Extensions({ agent }: { agent: AgentState }) {
           </Well>
         </Section>
       )}
+
+      {discover && <div className="-ml-2">{discover}</div>}
     </div>
   )
 }

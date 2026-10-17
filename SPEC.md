@@ -240,13 +240,19 @@ thinking level, per-model thinking levels, enabled models for cycling, `--models
 Accounts** (sign in with OAuth providers, add/remove API keys — masked, test connection, readiness via
 `pi auth`), **Custom models** (models.json providers/models editor), **Agent behavior** (steering/follow-up
 mode, auto-retry, compaction + branch summary settings and per-model overrides, tools defaults
-(`defaultTools`), shell settings, network/retry), **Packages** (installed list, install from npm/git with live
-log, update, remove, global vs project scope), **Resources** (extensions/skills/prompt templates/themes —
+(`defaultTools`), shell settings, network/retry), **Extensions** (community gallery from the public npm index of
+`pi-package` packages: search, topics, details with what a package adds, one-click install for every project or
+this project, add your own extension file or package folder; read-only network, respects offline mode),
+**Packages** (installed list, install from npm/git with live log, update, remove, global vs project scope),
+**Resources** (extensions/skills/prompt templates/themes —
 enable/disable like `pi config`, show source package), **MCP** (servers list, status, sign-in), **Sessions &
 Context** (context files, session dir, trust), **Keyboard shortcuts** (app-level), **Engine** (detected
 version/path, development override, app-owned update policy, diagnostics/stderr log, open config folder), **Raw JSON** (global and
 project settings.json with validation). Global vs Project scope switch where pi supports project settings.
 Read the selected pi package's `docs/settings.md` and implement _every_ key it lists.
+A restart offer ("Restart to apply") names what changed (packages, sign-ins, or the settings edited outside
+Vengeance). Writes an engine makes while applying a live change (runtime toggles it saves itself, models chosen in a
+session) never offer a restart, and a project's config changes only concern that folder's sessions.
 
 ### 3.7 Updates — qualified engines with app releases
 

@@ -12,6 +12,7 @@ import {
   Palette,
   Plug,
   Server,
+  Sparkles,
   SquareTerminal,
   UserRound
 } from 'lucide-react'
@@ -22,6 +23,7 @@ import { PrimeMcpSection } from '../../engines/prime-mcp'
 import { SchemaGroups } from '../fields'
 import { CustomModelsSection } from './custom-models'
 import { EngineSection } from './engine'
+import { ExtensionsSection } from './extensions'
 import { GeneralSection } from './general'
 import { KeybindingsSection } from './keybindings'
 import { McpSection } from './mcp'
@@ -99,6 +101,13 @@ export const SECTIONS: SectionDef[] = [
     render: () => <SchemaGroups section="agent" extras={{ Compaction: <NativeCompactionRow /> }} />
   },
   {
+    id: 'extensions',
+    label: 'Extensions',
+    icon: <Sparkles />,
+    description: 'Find community extensions, or add your own from a file or folder.',
+    render: () => <ExtensionsSection />
+  },
+  {
     id: 'packages',
     label: 'Packages',
     icon: <Blocks />,
@@ -170,6 +179,8 @@ function availableSection(section: SectionDef, capabilities?: EngineCapabilities
       return capabilities.providers
     case 'custom-models':
       return capabilities.customModels
+    case 'extensions':
+      return capabilities.packages && capabilities.extensionUi
     case 'packages':
       return capabilities.packages
     case 'resources':

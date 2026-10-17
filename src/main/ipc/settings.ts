@@ -119,11 +119,22 @@ export function registerSettingsIpc(context: IpcContext): void {
     if (area === 'models' || area === 'auth') refillModelCatalog(override())
   }
   const watcher = new ConfigWatcher(
-    (area) => {
+    (area, projectCwd, fromRun) => {
       noteChange(area)
       // Engines rewrite auth.json when they refresh a token: a cheap local check, no fetch unless the list is stale.
       if (area === 'auth') checkAccountModels(false)
-      broadcast('settings:changed', { area, external: true, engine: 'pi' })
+      const event = { area, external: true, engine: 'pi' as const, ...(fromRun ? { fromRun } : {}) }
+      if (!projectCwd) {
+        broadcast('settings:changed', event)
+        return
+      }
+      // A project's config only concerns that folder's sessions, and only once the folder is trusted.
+      void trustPreflight(override(), projectCwd)
+        .then((trust) => trust.engineDefault)
+        .catch(() => false)
+        .then((trusted) =>
+          broadcast('settings:changed', { ...event, project: { cwd: projectCwd, trusted } })
+        )
     },
     () => context.manager.list().some((agent) => agent.status === 'starting')
   )

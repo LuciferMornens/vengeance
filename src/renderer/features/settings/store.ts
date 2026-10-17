@@ -22,7 +22,7 @@ import {
   refreshAgents
 } from './engines'
 import { settingsInvoke, settingsInvokeForFolder } from './ipc'
-import { findEngineSetting, getAt, settingEffect, splitKey } from './values'
+import { findEngineSetting, getAt, liveSetting, settingEffect, splitKey } from './values'
 
 /** Engine settings state for the settings sheet: both files, active scope, catalog, search. */
 
@@ -327,7 +327,8 @@ export const useSettings = create<SettingsStore>()((set, get) => ({
       rememberSnapshot(engine, next, scope)
       if (get().engine === engine && activeCwd() === cwd) set({ snapshot: next })
       const def = findEngineSetting(path.join('.'), engine)
-      if (def?.live) await applyLiveSetting(def.live, next, engine, scope)
+      const live = def && liveSetting(def, engine, scope)
+      if (live) await applyLiveSetting(live, next, engine, scope)
       else {
         const affected =
           scope === 'project' ? { agentIds: agentsForEngine(engine, cwd), patch: {} } : undefined
@@ -350,17 +351,25 @@ export const useSettings = create<SettingsStore>()((set, get) => ({
   }
 }))
 
-const ENGINE_STARTUP_AREAS = new Set<SettingsChangeArea>([
-  'auth',
-  'models',
-  'packages',
-  'resources',
-  'mcp',
-  'instructions'
+/** Areas engines read only at startup, and how the restart offer names a change to them. */
+const ENGINE_STARTUP_AREAS = new Map<SettingsChangeArea, string>([
+  ['auth', 'Sign-ins changed.'],
+  ['models', 'Custom models changed.'],
+  ['packages', 'Packages changed.'],
+  ['resources', 'Extensions, skills or prompts changed.'],
+  ['mcp', 'MCP servers changed.'],
+  ['instructions', 'Context files changed.']
 ])
 
-/** settings.json changed outside Vengeance: reload, then bring open engines in line with what changed. */
-async function followOutsideSettingsEdit(engine: EngineId, projectCwd?: string): Promise<void> {
+/**
+ * settings.json changed outside Vengeance: reload, then bring open engines in line with what changed. `adopt`: a run
+ * Vengeance started rewrote it and announces its own change, so the new file only becomes the baseline.
+ */
+async function followOutsideSettingsEdit(
+  engine: EngineId,
+  projectCwd?: string,
+  adopt = false
+): Promise<void> {
   const cwd = projectCwd ?? activeCwd()
   const scope = projectCwd ? 'project' : 'global'
   const key = baselineKey(engine, projectCwd ?? null)
@@ -381,7 +390,7 @@ async function followOutsideSettingsEdit(engine: EngineId, projectCwd?: string):
         if (scope === 'global' ? next.global.error : next.project?.error) return
         rememberSnapshot(engine, next, scope)
         // A newly observed folder has no evidence of a startup change yet.
-        if (previous) await applyOutsideSettingsEdit(previous, next, engine, scope)
+        if (previous && !adopt) await applyOutsideSettingsEdit(previous, next, engine, scope)
       })
     } while (outsideReads.get(key))
   } catch {
@@ -396,23 +405,25 @@ on('settings:account-models', ({ engine = 'pi' }) => {
 })
 
 // Keep the sheet and open engines in sync with changes made elsewhere: other Vengeance views, the terminal, other programs.
-on('settings:changed', ({ engine = 'pi', area, external, project }) => {
+on('settings:changed', ({ engine = 'pi', area, external, project, fromRun }) => {
   const store = useSettings.getState()
   if (store.engine === engine && (area === 'auth' || area === 'models'))
     void store.loadCatalog(true)
   // Engines read credentials, custom models, packages, resources, MCP config and instructions only at startup. A
   // change to an untrusted project loads nowhere until the folder is trusted, and trusting it restarts its sessions.
-  if (ENGINE_STARTUP_AREAS.has(area)) {
-    if (!project) afterEngineConfigChange('restart', undefined, engine)
+  const reason = ENGINE_STARTUP_AREAS.get(area)
+  if (reason) {
+    if (!project) afterEngineConfigChange('restart', undefined, engine, reason)
     else if (project.trusted)
       afterEngineConfigChange(
         'restart',
         { agentIds: agentsForEngine(engine, project.cwd), patch: {} },
-        engine
+        engine,
+        reason
       )
   }
   if (external && area === 'settings' && (!project || project.trusted)) {
-    void followOutsideSettingsEdit(engine, project?.cwd)
+    void followOutsideSettingsEdit(engine, project?.cwd, fromRun)
     return
   }
   if (store.engine !== engine) return

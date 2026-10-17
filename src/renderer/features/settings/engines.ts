@@ -8,7 +8,13 @@ import { useApp } from '../../store/app'
 import { toast } from '../../ui'
 import { agentSessionFile } from '../sessions/model'
 import { settingsInvokeForFolder } from './ipc'
-import { changedSettings, restartsAfterOutsideEdit } from './values'
+import {
+  changedSettings,
+  getAt,
+  liveSetting,
+  restartsAfterOutsideEdit,
+  type SettingChange
+} from './values'
 
 /**
  * Applying engine config changes to open agents. Running pi processes read settings, resources and
@@ -124,12 +130,14 @@ export function agentsForEngine(engine?: EngineId, cwd?: string | null): string[
 
 /**
  * After a config write: honor the restart policy (ask → toast, always → restart, never → nothing) for every open
- * agent, or only those in `scope`. `none` = the change only affects the terminal UI.
+ * agent, or only those in `scope`. `none` = the change only affects the terminal UI. `reason` names what changed, so
+ * an offer that follows a change made elsewhere (a terminal install, an edited file) says where it came from.
  */
 export function afterEngineConfigChange(
   effect: 'restart' | 'none',
   scope?: RestartScope,
-  engine: EngineId = 'pi'
+  engine: EngineId = 'pi',
+  reason?: string
 ): void {
   if (effect === 'none') return
   refreshAgents(engine)
@@ -148,9 +156,14 @@ export function afterEngineConfigChange(
     id: `settings-restart-${engine}${scope ? `-${[...agentIds].sort().join(',')}` : ''}`,
     level: 'info',
     title: 'Restart to apply',
-    description: scope
-      ? 'Open sessions in this folder update after a restart.'
-      : 'Open sessions update after a restart.',
+    description: [
+      reason,
+      scope
+        ? 'Open sessions in this folder update after a restart.'
+        : 'Open sessions update after a restart.'
+    ]
+      .filter(Boolean)
+      .join(' '),
     duration: 9000,
     action: { label: 'Restart engines', onClick: restart }
   })
@@ -176,15 +189,32 @@ export async function applyOutsideSettingsEdit(
     : previous
   const changed = changedSettings(comparablePrevious, next, engine, scope)
   if (changed.length === 0) return
-  const live = new Set(changed.flatMap((def) => (def.live ? [def.live] : [])))
+  const live = new Set(changed.flatMap((def) => liveSetting(def, engine, scope) ?? []))
   for (const setting of live) await applyLiveSetting(setting, next, engine, scope)
-  if (changed.some(restartsAfterOutsideEdit)) {
+  const restarts = changed.filter((def) => restartsAfterOutsideEdit(def, engine, scope))
+  if (restarts.length > 0) {
     const affected =
       scope === 'project'
         ? { agentIds: agentsForEngine(engine, next.project?.cwd), patch: {} }
         : undefined
-    afterEngineConfigChange('restart', affected, engine)
+    afterEngineConfigChange('restart', affected, engine, outsideEditReason(restarts))
   } else refreshAgents(engine)
+}
+
+/** "Theme, Quiet startup and 2 more changed outside Vengeance." */
+function outsideEditReason(changed: SettingChange[]): string {
+  const labels = changed.map((def) => def.label)
+  const named = labels.length > 3 ? [...labels.slice(0, 2), `${labels.length - 2} more`] : labels
+  const list =
+    named.length > 1 ? `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}` : named[0]
+  return `${list} changed outside Vengeance.`
+}
+
+const LIVE_PATHS: Record<NonNullable<SettingDef['live']>, string[]> = {
+  steeringMode: ['steeringMode'],
+  followUpMode: ['followUpMode'],
+  autoCompaction: ['compaction', 'enabled'],
+  autoRetry: ['retry', 'enabled']
 }
 
 /** Settings with an RPC equivalent apply to running agents instantly. */
@@ -194,21 +224,12 @@ export async function applyLiveSetting(
   engine: EngineId = 'pi',
   scope: SettingsScope = 'global'
 ): Promise<void> {
-  if (engine !== 'pi') return
-  const read = (current: SettingsSnapshot, path: string[], fallback: unknown) => {
-    let project: unknown = current.project?.data
-    let global: unknown = current.global.data
-    for (const part of path) {
-      project =
-        project && typeof project === 'object'
-          ? (project as Record<string, unknown>)[part]
-          : undefined
-      global =
-        global && typeof global === 'object' ? (global as Record<string, unknown>)[part] : undefined
-    }
-    // Engines load project settings only for trusted folders.
-    return (current.project?.trust.effective ? (project ?? global) : global) ?? fallback
-  }
+  const path = LIVE_PATHS[live]
+  // Engines load project settings only for trusted folders; Engine 2 saves an inherited value as null.
+  const projectValue = (current: SettingsSnapshot) =>
+    (current.project?.trust.effective ? getAt(current.project.data, path) : undefined) ?? undefined
+  const read = (current: SettingsSnapshot, fallback: unknown) =>
+    projectValue(current) ?? getAt(current.global.data, path) ?? fallback
   const store = useAgents.getState()
   const ready = agentsForEngine(engine, scope === 'project' ? snapshot.project?.cwd : null).filter(
     (id) => store.agents[id]?.status === 'ready'
@@ -224,33 +245,27 @@ export async function applyLiveSetting(
         snapshots.set(cwd, request)
       }
       const current = await request
+      // Engine 2 saves what it applies as the global value: a folder with its own value keeps it.
+      if (engine === 'prime' && projectValue(current) !== undefined) return false
       switch (live) {
         case 'steeringMode':
           return rpc(id, {
             type: 'set_steering_mode',
-            mode:
-              read(current, ['steeringMode'], 'one-at-a-time') === 'all' ? 'all' : 'one-at-a-time'
+            mode: read(current, 'one-at-a-time') === 'all' ? 'all' : 'one-at-a-time'
           })
         case 'followUpMode':
           return rpc(id, {
             type: 'set_follow_up_mode',
-            mode:
-              read(current, ['followUpMode'], 'one-at-a-time') === 'all' ? 'all' : 'one-at-a-time'
+            mode: read(current, 'one-at-a-time') === 'all' ? 'all' : 'one-at-a-time'
           })
         case 'autoCompaction':
-          return rpc(id, {
-            type: 'set_auto_compaction',
-            enabled: read(current, ['compaction', 'enabled'], true) !== false
-          })
+          return rpc(id, { type: 'set_auto_compaction', enabled: read(current, true) !== false })
         case 'autoRetry':
-          return rpc(id, {
-            type: 'set_auto_retry',
-            enabled: read(current, ['retry', 'enabled'], true) !== false
-          })
+          return rpc(id, { type: 'set_auto_retry', enabled: read(current, true) !== false })
       }
     })
   )
-  if (applied.some((result) => result.status === 'fulfilled'))
+  if (applied.some((result) => result.status === 'fulfilled' && result.value !== false))
     toast({
       id: 'settings-live',
       level: 'success',
