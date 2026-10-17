@@ -55,7 +55,7 @@ const SUITE = 'engines-speed-mode'
 const SHOTS = reportShotsDir('speed-mode')
 const SESSION_NAME = 'Speed persistence session'
 
-const isNativeCompaction = (request) => Array.isArray(request.body?.context_management)
+const isNativeCompaction = (request) => request.body?.input?.at(-1)?.type === 'compaction_trigger'
 
 async function step(label, action) {
   const started = performance.now()
@@ -542,6 +542,7 @@ try {
 
   await checks.check('Fast applies to the native compaction request', async () => {
     const native = compaction.find(isNativeCompaction)
+    assert.equal(native?.body.context_management, undefined)
     assert.equal(native?.body.service_tier, 'priority')
   })
 
