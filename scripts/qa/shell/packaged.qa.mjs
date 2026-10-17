@@ -1,9 +1,10 @@
 // Packaged app identity, native engine and bridge loading, local transport and version UI.
 // QA_PACKAGED_EXE selects an unpacked build (macOS: the .app's Contents/MacOS/<name>; default: this
-// platform's release/ build); QA_PACKAGED_NAME sets its expected Electron app name.
+// platform's release/ build); QA_PACKAGED_NAME sets its expected Electron app name (default:
+// "Vengeance QA" for the dist:qa executables, "Vengeance" for any other).
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { FAKE_MODELS, FAKE_PROVIDER } from '../lib/agent-dir.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
 import { reportShotsDir, ROOT } from '../lib/app.mjs'
@@ -12,7 +13,11 @@ import { runSuite } from '../lib/suite.mjs'
 import { PACKAGED_EXE as DEFAULT_PACKAGED_EXE, processTable, shot, softSteps } from './lib/kit.mjs'
 
 const PACKAGED_EXE = resolve(process.env.QA_PACKAGED_EXE || DEFAULT_PACKAGED_EXE)
-const EXPECTED_PRODUCT_NAME = process.env.QA_PACKAGED_NAME ?? 'Vengeance'
+/** scripts/dist-qa.mjs executables: VengeanceQA(.exe) on Windows and macOS, vengeance-qa on Linux. */
+const QA_BUILD_EXECUTABLE = /^(VengeanceQA(\.exe)?|vengeance-qa)$/i
+const EXPECTED_PRODUCT_NAME =
+  process.env.QA_PACKAGED_NAME ??
+  (QA_BUILD_EXECUTABLE.test(basename(PACKAGED_EXE)) ? 'Vengeance QA' : 'Vengeance')
 const EXPECTED_VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version
 const resourcesDir = resourcesDirOf(PACKAGED_EXE)
 const engineManifest = JSON.parse(

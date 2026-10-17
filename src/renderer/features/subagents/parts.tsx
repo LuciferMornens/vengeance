@@ -29,9 +29,24 @@ function LiveDot({ className }: { className?: string }) {
 }
 
 /** 14px state glyph shared by the fleet popover, the Agents tab and its children list. */
-export function RunGlyph({ state, needsDecision, unseen }: { state: GlyphState; needsDecision?: boolean; unseen?: boolean }) {
+export function RunGlyph({
+  state,
+  needsDecision,
+  unseen
+}: {
+  state: GlyphState
+  needsDecision?: boolean
+  unseen?: boolean
+}) {
   const box = 'flex size-3.5 shrink-0 items-center justify-center'
-  if (needsDecision) return <Flag className={cn(box, 'size-3.5 text-warning')} strokeWidth={2.25} aria-label="Needs you" />
+  if (needsDecision)
+    return (
+      <Flag
+        className={cn(box, 'size-3.5 text-warning')}
+        strokeWidth={2.25}
+        aria-label="Needs you"
+      />
+    )
   switch (state) {
     case 'running':
       return (
@@ -50,16 +65,33 @@ export function RunGlyph({ state, needsDecision, unseen }: { state: GlyphState; 
     case 'failed':
     case 'rejected':
       return (
-        <span className={cn(box, 'rounded-xs bg-danger-soft text-danger', unseen && 'shadow-[inset_0_0_0_1px_var(--danger-border)]')} aria-label="Failed">
+        <span
+          className={cn(
+            box,
+            'rounded-xs bg-danger-soft text-danger',
+            unseen && 'shadow-[inset_0_0_0_1px_var(--danger-border)]'
+          )}
+          aria-label="Failed"
+        >
           <X className="size-2.5" strokeWidth={3} />
         </span>
       )
     case 'stopped':
-      return <Square className={cn(box, 'size-3 text-fg-3')} strokeWidth={2.25} aria-label="Stopped" />
+      return (
+        <Square className={cn(box, 'size-3 text-fg-3')} strokeWidth={2.25} aria-label="Stopped" />
+      )
     case 'paused':
-      return <Pause className={cn(box, 'size-3 text-fg-3')} strokeWidth={2.25} aria-label="Paused" />
+      return (
+        <Pause className={cn(box, 'size-3 text-fg-3')} strokeWidth={2.25} aria-label="Paused" />
+      )
     case 'partial':
-      return <CircleSlash className={cn(box, 'size-3 text-fg-3')} strokeWidth={2.25} aria-label="Partly done" />
+      return (
+        <CircleSlash
+          className={cn(box, 'size-3 text-fg-3')}
+          strokeWidth={2.25}
+          aria-label="Partly done"
+        />
+      )
     default:
       return (
         <span className={box} aria-label="No live status">
@@ -89,7 +121,10 @@ export function stateLabel(view: Pick<SubagentRunView, 'state' | 'needsDecision'
 }
 
 /** What the run is doing right now, in a few words; nothing once done (the glyph says so). */
-export function activityLabel(view: SubagentRunView | SubagentChildView, now: number): { text: string; tone: 'neutral' | 'warning' | 'danger' } {
+export function activityLabel(
+  view: SubagentRunView | SubagentChildView,
+  now: number
+): { text: string; tone: 'neutral' | 'warning' | 'danger' } {
   if ('needsDecision' in view && view.needsDecision) return { text: 'needs you', tone: 'warning' }
   const attention = 'attention' in view && view.attention !== undefined
   if (view.state === 'running') {
@@ -98,24 +133,37 @@ export function activityLabel(view: SubagentRunView | SubagentChildView, now: nu
       return { text: `${done} of ${view.children.length}`, tone: 'neutral' }
     }
     if (view.currentTool) {
-      const open = view.currentToolStartedAt !== undefined ? ` · ${formatSubagentDuration(now - view.currentToolStartedAt)}` : ''
+      const open =
+        view.currentToolStartedAt !== undefined
+          ? ` · ${formatSubagentDuration(now - view.currentToolStartedAt)}`
+          : ''
       return { text: `${view.currentTool}${open}`, tone: attention ? 'warning' : 'neutral' }
     }
     return { text: 'working', tone: 'neutral' }
   }
   if (view.state === 'complete') return { text: '', tone: 'neutral' }
-  return { text: STATE_WORD[view.state], tone: view.state === 'failed' || view.state === 'rejected' ? 'danger' : 'neutral' }
+  return {
+    text: STATE_WORD[view.state],
+    tone: view.state === 'failed' || view.state === 'rejected' ? 'danger' : 'neutral'
+  }
 }
 
 /** Live clock while active; total time once settled. */
-export function elapsedLabel(view: Pick<SubagentRunView, 'startedAt' | 'endedAt' | 'state'>, now: number): string | undefined {
+export function elapsedLabel(
+  view: Pick<SubagentRunView, 'startedAt' | 'endedAt' | 'state'>,
+  now: number
+): string | undefined {
   if (view.startedAt === undefined) return undefined
   if (view.state === 'running' || view.state === 'paused') return formatClock(now - view.startedAt)
   if (view.endedAt === undefined) return undefined
   return formatSubagentDuration(view.endedAt - view.startedAt)
 }
 
-const ACTIVITY_TONE = { neutral: 'text-fg-3', warning: 'text-warning', danger: 'text-danger' } as const
+const ACTIVITY_TONE = {
+  neutral: 'text-fg-3',
+  warning: 'text-warning',
+  danger: 'text-danger'
+} as const
 
 /** Title of a workflow launched without a name or task: `2-step workflow`. */
 function workflowTitle(steps: number): string {
@@ -138,9 +186,13 @@ export function AgentRow({
 }) {
   const activity = activityLabel(view, now)
   const elapsed = elapsedLabel(view, now)
-  const title = view.title ?? (view.kind === 'workflow' ? workflowTitle(view.children.length) : undefined)
+  const title =
+    view.title ?? (view.kind === 'workflow' ? workflowTitle(view.children.length) : undefined)
   return (
-    <div className={cn(listRowClass({ density: 'list' }), 'cursor-default pr-1')} data-subagent-row={view.state}>
+    <div
+      className={cn(listRowClass({ density: 'list' }), 'cursor-default pr-1')}
+      data-subagent-row={view.state}
+    >
       <button
         type="button"
         onClick={onOpen}
@@ -152,8 +204,19 @@ export function AgentRow({
         <span className="shrink-0 text-sm font-medium text-fg">{view.label}</span>
         {title && <span className="min-w-0 truncate text-sm text-fg-3">{title}</span>}
       </span>
-      {activity.text && <span className={cn('pointer-events-none w-[72px] shrink-0 truncate text-right text-xs', ACTIVITY_TONE[activity.tone])}>{activity.text}</span>}
-      <span className="tabular pointer-events-none w-11 shrink-0 text-right text-xs text-fg-3">{elapsed}</span>
+      {activity.text && (
+        <span
+          className={cn(
+            'pointer-events-none max-w-[72px] shrink-0 truncate text-right text-xs',
+            ACTIVITY_TONE[activity.tone]
+          )}
+        >
+          {activity.text}
+        </span>
+      )}
+      <span className="tabular pointer-events-none w-11 shrink-0 text-right text-xs text-fg-3">
+        {elapsed}
+      </span>
       {menu ? (
         <span className="relative opacity-0 transition-opacity duration-[var(--dur-instant)] group-hover/row:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100">
           <DropdownMenu
@@ -174,7 +237,15 @@ export function AgentRow({
 }
 
 /** Child rows of a workflow (one level; deeper levels collapse into "+N more"). */
-export function ChildRows({ items, now, onOpen }: { items: SubagentChildView[]; now: number; onOpen: (child: SubagentChildView) => void }) {
+export function ChildRows({
+  items,
+  now,
+  onOpen
+}: {
+  items: SubagentChildView[]
+  now: number
+  onOpen: (child: SubagentChildView) => void
+}) {
   return (
     <div className="flex flex-col">
       {items.map((child) => {
@@ -191,8 +262,19 @@ export function ChildRows({ items, now, onOpen }: { items: SubagentChildView[]; 
             <RunGlyph state={child.state} />
             <span className="min-w-0 flex-1 truncate text-sm text-fg-2">{child.label}</span>
             {nested > 0 && <span className="text-xs text-fg-3">+{nested} more</span>}
-            {activity.text && <span className={cn('w-[72px] shrink-0 truncate text-right text-xs', ACTIVITY_TONE[activity.tone])}>{activity.text}</span>}
-            <span className="tabular w-11 shrink-0 text-right text-xs text-fg-3">{elapsedLabel(child, now)}</span>
+            {activity.text && (
+              <span
+                className={cn(
+                  'max-w-[72px] shrink-0 truncate text-right text-xs',
+                  ACTIVITY_TONE[activity.tone]
+                )}
+              >
+                {activity.text}
+              </span>
+            )}
+            <span className="tabular w-11 shrink-0 text-right text-xs text-fg-3">
+              {elapsedLabel(child, now)}
+            </span>
             <span className="w-6 shrink-0" />
           </button>
         )
@@ -202,7 +284,11 @@ export function ChildRows({ items, now, onOpen }: { items: SubagentChildView[]; 
 }
 
 /** Overflow menu shared by fleet rows and the detail header. */
-export function runMenu(agentId: string, view: SubagentRunView, open: (intent?: 'steer') => void): MenuItem[] {
+export function runMenu(
+  agentId: string,
+  view: SubagentRunView,
+  open: (intent?: 'steer') => void
+): MenuItem[] {
   const live = view.state === 'running' || view.state === 'queued' || view.state === 'paused'
   const items: MenuItem[] = [{ label: 'Open', onSelect: () => open() }]
   if (live) {
@@ -211,10 +297,19 @@ export function runMenu(agentId: string, view: SubagentRunView, open: (intent?: 
       label: 'Stop',
       danger: true,
       onSelect: () => {
-        subagentActions.stop(agentId, { runId: view.runId }).catch((error: Error) => toast({ level: 'error', title: `Couldn't stop ${view.label}`, description: error.message }))
+        subagentActions.stop(agentId, { runId: view.runId }).catch((error: Error) =>
+          toast({
+            level: 'error',
+            title: `Couldn't stop ${view.label}`,
+            description: error.message
+          })
+        )
       }
     })
   }
-  items.push({ kind: 'separator' }, { label: 'Copy run ID', onSelect: () => void navigator.clipboard.writeText(view.runId) })
+  items.push(
+    { kind: 'separator' },
+    { label: 'Copy run ID', onSelect: () => void navigator.clipboard.writeText(view.runId) }
+  )
   return items
 }

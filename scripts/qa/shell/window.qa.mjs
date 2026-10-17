@@ -218,9 +218,16 @@ try {
   )
 
   await step(
-    'inspector: Ctrl+I and the header button toggle it; resize 280..560 and persist',
+    'inspector: Ctrl+I and the header button toggle it; resize 304..560 and persist',
     async () => {
       const prefs = async () => (await run.test('appState')).prefs.inspector
+      // The inspector docks at 304..560px while the center pane keeps 480px (panel-layout.ts): widen
+      // the window so the 560px maximum fits beside the 268px sidebar.
+      await run.win((win, b) => win.setBounds(b), { ...NORMAL, width: 1320 })
+      await waitUntil(
+        async () => (await run.page.evaluate(() => window.innerWidth)) >= 480 + 268 + 560,
+        { label: 'window wide enough to dock 560px' }
+      )
       await run.page.getByRole('textbox', { name: 'Message' }).first().click()
       await run.page.keyboard.press('ControlOrMeta+i')
       await waitUntil(async () => (await prefs()).open === true, { label: 'inspector open' })
@@ -231,9 +238,9 @@ try {
       const handle = run.page.getByRole('separator', { name: 'Resize inspector' })
       await handle.focus()
       await run.page.keyboard.press('Home')
-      await waitUntil(async () => (await prefs()).width === 280, { label: 'min 280' })
+      await waitUntil(async () => (await prefs()).width === 304, { label: 'min 304' })
       await run.page.keyboard.press('ArrowLeft')
-      await waitUntil(async () => (await prefs()).width === 296, {
+      await waitUntil(async () => (await prefs()).width === 320, {
         label: 'ArrowLeft grows the right panel'
       })
       await run.page.keyboard.press('End')
@@ -246,6 +253,7 @@ try {
       await run.page.mouse.up()
       await waitUntil(async () => (await prefs()).width === 400, { label: 'dragged to 400' })
       await shot(run.page, 'window-2-inspector-open')
+      await run.win((win, b) => win.setBounds(b), NORMAL)
       await sleep(500)
       await run.close()
       const saved = (await savedState()).prefs
@@ -263,14 +271,18 @@ try {
     async () => {
       for (const name of ['Resize sidebar', 'Resize inspector']) {
         const box = await run.page.getByRole('separator', { name }).boundingBox()
-        const hittable = await run.page.evaluate((b) => {
-          let count = 0
-          for (let dx = 0; dx < b.width; dx++) {
-            const el = document.elementFromPoint(b.x + dx + 0.5, b.y + 300)
-            if (el?.getAttribute('role') === 'separator') count++
-          }
-          return count
-        }, box)
+        // The grip's own line (wider while hovered or focused) counts: its presses reach the grip.
+        const hittable = await run.page.evaluate(
+          ([b, label]) => {
+            let count = 0
+            for (let dx = 0; dx < b.width; dx++) {
+              const el = document.elementFromPoint(b.x + dx + 0.5, b.y + 300)
+              if (el?.closest('[role="separator"]')?.getAttribute('aria-label') === label) count++
+            }
+            return count
+          },
+          [box, name]
+        )
         assert.ok(hittable >= 6, `${name}: only ${hittable}px of ${box.width}px can be grabbed`)
       }
     }

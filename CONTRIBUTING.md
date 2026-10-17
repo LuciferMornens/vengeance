@@ -140,6 +140,9 @@ Your own agent accounts and sessions are never test fixtures.
    checks and screenshots on Windows, macOS and Linux. Pull requests that touch packaging, engines
    or the release workflow also run a full release dry run on all five platforms.
 5. The maintainer reviews every change. Screenshots of UI changes speed this up.
+6. Pull requests land as one squash commit. `main` accepts no direct or force pushes: a change
+   needs a pull request with every review thread resolved, a passing typecheck job and passing
+   checks-and-shots jobs on all three platforms.
 
 Vengeance has no open-source license yet (see the [README](README.md#license)). If that matters for
 your contribution, ask in an issue before you start.
@@ -150,11 +153,11 @@ Releases are for maintainers.
 
 1. Set the new version in `package.json` and `package-lock.json`, and write
    `docs/RELEASE-<version>.md`.
-2. Merge that change to `main`, then push the tag `v<version>`. The workflow rejects a tag that
-   does not match `package.json`, so a prerelease sets `package.json` and `package-lock.json` to
-   `<version>-rc.N` and pushes the matching tag `v<version>-rc.N`. Its builds check the same
-   update feed as stable ones (the newest stable release), so they are offered the next stable
-   release, never a newer prerelease.
+2. Merge that change to `main`, then push the tag `v<version>`. Only maintainers can create,
+   move or delete `v*` tags. The workflow rejects a tag that does not match `package.json`, so a
+   prerelease sets `package.json` and `package-lock.json` to `<version>-rc.N` and pushes the
+   matching tag `v<version>-rc.N`. Its builds check the same update feed as stable ones (the newest
+   stable release), so they are offered the next stable release, never a newer prerelease.
 3. The release workflow builds and smoke-tests all five platforms (the macOS apps are ad-hoc
    signed) and install-tests the deb and pacman packages. It then creates a **draft** release with
    every package, `SHA256SUMS` and a provenance attestation.

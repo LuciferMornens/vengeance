@@ -57,9 +57,12 @@ export function matchesCombo(event: KeyboardEvent, combo: string, os: Os = hostO
   const wantCtrl = parts.includes('ctrl') || (wantMod && !mac)
   const wantMeta = parts.includes('super') || (wantMod && mac)
   if (event.ctrlKey !== wantCtrl || event.metaKey !== wantMeta) return false
-  if (parts.includes('shift') !== event.shiftKey || parts.includes('alt') !== event.altKey) return false
+  if (parts.includes('shift') !== event.shiftKey || parts.includes('alt') !== event.altKey)
+    return false
   const pressed = ((composedKey(event.key) && keyFromCode(event.code)) || event.key).toLowerCase()
-  return pressed === key || (key === 'comma' && pressed === ',') || (key === 'space' && pressed === ' ')
+  return (
+    pressed === key || (key === 'comma' && pressed === ',') || (key === 'space' && pressed === ' ')
+  )
 }
 
 /** `mod+enter` in a field's own keydown handler (submit a multi-line form), whatever else is held. */
@@ -68,14 +71,34 @@ export function isModEnter(event: KeyboardEvent | ReactKeyboardEvent, os: Os = h
 }
 
 /** Deletes the focused item (a session row): Delete, and ⌘⌫ on macOS, where most keyboards have no forward delete. */
-export function isDeleteItemKey(event: KeyboardEvent | ReactKeyboardEvent, os: Os = hostOs()): boolean {
+export function isDeleteItemKey(
+  event: KeyboardEvent | ReactKeyboardEvent,
+  os: Os = hostOs()
+): boolean {
   if (event.key === 'Delete') return true
-  return os === 'darwin' && event.key === 'Backspace' && event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey
+  return (
+    os === 'darwin' &&
+    event.key === 'Backspace' &&
+    event.metaKey &&
+    !event.ctrlKey &&
+    !event.altKey &&
+    !event.shiftKey
+  )
 }
 
 /** The combo menus show for isDeleteItemKey. */
 export function deleteItemCombo(os: Os = hostOs()): string {
   return os === 'darwin' ? 'mod+backspace' : 'delete'
+}
+
+/** Renames the focused item (a session row): F2. Return opens rows, on macOS too (no Finder-style Return rename). */
+export function isRenameItemKey(event: KeyboardEvent | ReactKeyboardEvent): boolean {
+  return event.key === 'F2'
+}
+
+/** The combo menus show for isRenameItemKey: none on macOS, where F2 is a brightness key unless fn is held. */
+export function renameItemCombo(os: Os = hostOs()): string | undefined {
+  return os === 'darwin' ? undefined : 'f2'
 }
 
 /**
@@ -98,7 +121,11 @@ export function isKeyCaptureTarget(target: EventTarget | null): boolean {
  * Global (window-level, capture phase) hotkey, silent while a key capture has focus. Return false from the handler
  * to let the event through.
  */
-export function useHotkey(combo: string, handler: (event: KeyboardEvent) => boolean | void, enabled = true): void {
+export function useHotkey(
+  combo: string,
+  handler: (event: KeyboardEvent) => boolean | void,
+  enabled = true
+): void {
   const ref = useRef(handler)
   ref.current = handler
   useEffect(() => {
@@ -135,7 +162,13 @@ const MAC_CAPS: Record<string, string> = {
   right: '→'
 }
 /** macOS key names in running text, where Apple spells keys out: "⇧Return", "⌘Delete". */
-const MAC_WORDS: Record<string, string> = { enter: 'Return', return: 'Return', backspace: 'Delete', delete: 'Forward Delete', tab: 'Tab' }
+const MAC_WORDS: Record<string, string> = {
+  enter: 'Return',
+  return: 'Return',
+  backspace: 'Delete',
+  delete: 'Forward Delete',
+  tab: 'Tab'
+}
 const PC_CAPS: Record<string, string> = { mod: 'Ctrl', ctrl: 'Ctrl', enter: 'Enter' }
 const SHARED_CAPS: Record<string, string> = { escape: 'Esc', esc: 'Esc', comma: ',' }
 
@@ -175,7 +208,14 @@ export function shortcutText(combo: string, os: Os = hostOs()): string {
 
 /** Words people type when looking for a key, besides its caps and text: "cmd", "option", "control", "return". */
 const SEARCH_ALIASES: Record<Os, Record<string, string>> = {
-  darwin: { mod: 'cmd command', super: 'cmd command', alt: 'option opt alt', ctrl: 'control ctrl', enter: 'return enter', backspace: 'delete backspace' },
+  darwin: {
+    mod: 'cmd command',
+    super: 'cmd command',
+    alt: 'option opt alt',
+    ctrl: 'control ctrl',
+    enter: 'return enter',
+    backspace: 'delete backspace'
+  },
   win32: { mod: 'control', ctrl: 'control', super: 'win windows' },
   linux: { mod: 'control', ctrl: 'control', super: 'meta' }
 }

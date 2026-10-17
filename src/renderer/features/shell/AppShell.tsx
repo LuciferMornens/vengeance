@@ -231,7 +231,7 @@ const SessionPane = memo(function SessionPane({
 })
 
 const SIDEBAR_LIMITS = { minWidth: 208, maxWidth: 420, defaultWidth: 268 }
-// 304px: the tab bar's seven tabs fit with the active one labelled.
+// 304px: the tab bar's seven tabs fit, the active one labelled when there is room.
 const INSPECTOR_LIMITS = { minWidth: 304, maxWidth: 560, defaultWidth: 340 }
 
 /** The full app frame. Feature components are mounted into their slots here. */

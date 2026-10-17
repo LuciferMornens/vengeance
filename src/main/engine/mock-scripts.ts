@@ -221,10 +221,15 @@ function showcase(ctx: ScriptContext): MockStep[] {
     ]
     const r1 = b.tool(write, text(`Successfully wrote ${Buffer.byteLength(MOCK_FILES.test)} bytes to ${MOCK_FILES.testPath}`), { durationMs: 3 })
     const outputs = VITEST_LINES.map((_, i) => VITEST_LINES.slice(0, i + 1).join(''))
-    b.label('bash-running')
-    const r2 = b.tool(bash, { content: [{ type: 'text', text: outputs[outputs.length - 1]! }], details: {} }, {
+    const r2 = b.tool(bash, text(outputs[outputs.length - 1]!), {
       durationMs: 2140,
-      updates: outputs.slice(0, -1).map((output) => ({ content: [{ type: 'text', text: output }], details: {} }))
+      updates: outputs.slice(0, -2).map((output) => text(output)),
+      // Parks mid-command: the row is running and its live tail shows the first test files.
+      during: (run) =>
+        run.label('bash-running').emit(
+          { type: 'tool_execution_update', toolCallId: bash.id, toolName: bash.name, args: bash.arguments, partialResult: text(outputs[outputs.length - 2]!) },
+          535
+        )
     })
     return { message, results: [...todoResults, r1, r2] }
   })
@@ -550,6 +555,29 @@ Mode                 LastWriteTime         Length Name
 -a---          12.05.2026    09:12            986 types.test.ts
 `
 
+/** Links, owner and group columns of `ls -l`: BSD spacing and the `staff` group on macOS, GNU elsewhere. */
+const LS_OWNER = process.platform === 'darwin' ? ' 1 dev  staff ' : '1 dev dev'
+const LS_LISTING = `-rw-r--r-- ${LS_OWNER} 3412 May 14 14:31 src/session/persist.test.ts
+-rw-r--r-- ${LS_OWNER} 5208 May 14 14:31 src/session/store.test.ts
+-rw-r--r-- ${LS_OWNER}  986 May 12 09:12 src/session/types.test.ts
+`
+
+/** The session-test listing with this platform's Engine shell tool (PowerShell exists only on Windows). */
+const SHELL_LISTING =
+  process.platform === 'win32'
+    ? {
+        tool: 'powershell',
+        command: 'Get-ChildItem src\\session -Filter *.test.ts | Format-Table Mode, LastWriteTime, Length, Name',
+        output: PS_LISTING,
+        thinking: 'Windows workspace: list the session tests with PowerShell first, then look for the Linear tools to file the follow-up.'
+      }
+    : {
+        tool: 'bash',
+        command: 'ls -l src/session/*.test.ts',
+        output: LS_LISTING,
+        thinking: 'List the session tests first, then look for the Linear tools to file the follow-up.'
+      }
+
 const PARITY_DIAGRAM = `Writes now flow through one batched flush:
 
 \`\`\`mermaid
@@ -571,22 +599,25 @@ const LINEAR_RESOURCES = JSON.stringify({
   ]
 })
 
-/** pi parity tools: PowerShell, tool_search, MCP resources + an MCP tool, codemode with nested calls, a mermaid answer. */
+/**
+ * pi parity tools: the platform shell (PowerShell on Windows, bash elsewhere), tool_search, MCP resources + an MCP tool,
+ * codemode with nested calls, a mermaid answer.
+ */
 function parity(ctx: ScriptContext): MockStep[] {
   const b = new ScriptBuilder(ctx)
   b.emit({ type: 'agent_start' })
   b.turn(() => {
     b.user(ctx.prompt)
-    const ps = call('powershell', { command: 'Get-ChildItem src\\session -Filter *.test.ts | Format-Table Mode, LastWriteTime, Length, Name' })
+    const shell = call(SHELL_LISTING.tool, { command: SHELL_LISTING.command })
     const message = b.assistant(
       [
-        { thinking: 'Windows workspace: list the session tests with PowerShell first, then look for the Linear tools to file the follow-up.' },
+        { thinking: SHELL_LISTING.thinking },
         { text: 'Listing the session tests first.' },
-        { tool: ps }
+        { tool: shell }
       ],
       'toolUse'
     )
-    return { message, results: [b.tool(ps, text(PS_LISTING), { durationMs: 640 })] }
+    return { message, results: [b.tool(shell, text(SHELL_LISTING.output), { durationMs: 640 })] }
   })
   b.turn(() => {
     const search = call('tool_search', { query: 'linear issues', limit: 5 })

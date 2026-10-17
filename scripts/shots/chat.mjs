@@ -1,7 +1,7 @@
 // Chat + tools scenarios: empty hero, thinking stream, live bash, retry countdown, mid-answer streaming,
 // settled transcript (collapsed + expanded, several scroll positions), session header (rename, context
 // breakdown), hidden thinking (Ctrl+T), light theme, a gallery session covering every remaining card/entry
-// type, a parity session (PowerShell, tool_search, MCP, codemode nested calls, mermaid, Ctrl+O) and a
+// type, a parity session (platform shell, tool_search, MCP, codemode nested calls, mermaid, Ctrl+O) and a
 // 220-turn session (virtualized transcript, jump to latest, context over the limit), JSON result trees, the
 // captioned lightbox, and the tool rows / subagent rows of the `toolbelt` script (with the §6.6 assertions).
 
@@ -168,7 +168,7 @@ async function scrollToLocator(page, locator) {
 async function toolbeltScenarios(page, { shot, test, wait }) {
   await newSession(page, wait)
   await test('mockPlay', { script: 'toolbelt', prompt: 'The session tree jumps to the top on fork. Fix it and check everything.', pauseAt: 'bash-live' })
-  // The pause detection can fire in a streaming gap; the run is parked once the shots command's tail shows.
+  // The run parks mid-command: the shots command's row shows its live tail.
   await page.locator('[data-transcript-scroll] [data-tool-row]', { hasText: 'npm run shots' }).locator('[data-live-tail]').waitFor({ timeout: 30_000 })
   await wait(400)
   const live = await page.evaluate(() => {
@@ -273,6 +273,8 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   await shot('chat-thinking-streaming', { settleMs: 1200 })
 
   await test('mockPlay', { resume: true, pauseAt: 'bash-running' })
+  // The run parks mid-command: the test run's row is live and shows its output tail.
+  await page.locator('[data-transcript-scroll] [data-tool-row][data-tool-phase="running"]', { hasText: 'npx vitest run' }).locator('[data-live-tail]').waitFor({ timeout: 10_000 })
   await shot('chat-bash-running', { settleMs: 700 })
 
   await test('mockPlay', { resume: true, instant: true, pauseAt: 'select' })
@@ -384,7 +386,8 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   await shot('chat-json-result-tree-light', { settleMs: 500 })
   await test('setPrefs', { theme: 'dark' })
 
-  // Parity session: PowerShell, tool_search, MCP resources + MCP tool, codemode nested calls, mermaid.
+  // Parity session: the platform shell (PowerShell on Windows, bash elsewhere), tool_search, MCP resources +
+  // MCP tool, codemode nested calls, mermaid.
   await newSession(page, wait)
   await test('mockPlay', { script: 'parity', instant: true, prompt: 'Which stores still use the old debounce? File it in Linear if needed.' })
   await test('waitForIdle')

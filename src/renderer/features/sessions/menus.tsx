@@ -15,7 +15,7 @@ import {
   X
 } from 'lucide-react'
 import type { SessionListItem } from '@shared/api/sessions'
-import { deleteItemCombo } from '../../lib/keybindings'
+import { deleteItemCombo, renameItemCombo } from '../../lib/keybindings'
 import { REVEAL_LABEL } from '../../lib/platform-copy'
 import { useAgents } from '../../store/agents'
 import type { MenuItem } from '../../ui'
@@ -106,7 +106,7 @@ export function historyMenu(item: SessionListItem, pinned: boolean): MenuItem[] 
     {
       label: 'Rename',
       icon: <Pencil />,
-      hotkey: 'f2',
+      hotkey: renameItemCombo(),
       onSelect: () => useSessions.getState().setRenaming(item.path)
     },
     {
@@ -137,7 +137,7 @@ export function openAgentMenu(target: SessionTarget, pinned: boolean): MenuItem[
     {
       label: 'Rename',
       icon: <Pencil />,
-      hotkey: 'f2',
+      hotkey: renameItemCombo(),
       onSelect: () => useSessions.getState().setRenaming(`agent:${agentId}`)
     },
     pinItem(path, pinned),

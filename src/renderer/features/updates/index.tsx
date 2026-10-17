@@ -307,7 +307,7 @@ export function UpdatesSheet() {
   return (
     <div
       onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}
-      className="relative min-h-0 flex-1 overflow-y-auto bg-[color-mix(in_srgb,var(--surface-2)_40%,var(--surface-1))] [scrollbar-gutter:stable]"
+      className="relative min-h-0 flex-1 scroll-pt-14 overflow-y-auto bg-[color-mix(in_srgb,var(--surface-2)_40%,var(--surface-1))] [scrollbar-gutter:stable]"
     >
       <SheetHeader scrolled={scrolled}>
         <Button

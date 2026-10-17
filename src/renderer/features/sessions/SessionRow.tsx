@@ -8,7 +8,7 @@ import {
   type ReactNode
 } from 'react'
 import { cn } from '../../lib/cn'
-import { isDeleteItemKey, isImeComposing } from '../../lib/keybindings'
+import { isDeleteItemKey, isImeComposing, isRenameItemKey } from '../../lib/keybindings'
 import { ContextMenu, listRowClass, Tooltip, type MenuItem } from '../../ui'
 import { useSessions } from './store'
 
@@ -159,7 +159,7 @@ export function SessionRow({
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (event.key === 'F2') {
+    if (isRenameItemKey(event)) {
       event.preventDefault()
       setRenaming(rowKey)
     } else if (onDelete && isDeleteItemKey(event)) {

@@ -171,6 +171,12 @@ export async function shutdownOwnedPrimeDaemons(agentDir, foreignPids) {
     if (owned.length === 0) continue
     try {
       await stopDaemonEndpoint(record.socketPath)
+      // The daemon answers before it stops its workers. Killing it mid-stop leaves workers without
+      // their stop record, and the next daemon on this agent dir revives those with unfinished work.
+      const deadline = Date.now() + DAEMON_SHUTDOWN_TIMEOUT_MS
+      while (owned.some((entry) => isAlive(entry.pid)) && Date.now() < deadline) {
+        await sleep(POLL_MS)
+      }
     } finally {
       for (const entry of owned) if (isAlive(entry.pid)) await killTree(entry.pid)
     }

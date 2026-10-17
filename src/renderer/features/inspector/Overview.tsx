@@ -38,6 +38,13 @@ function sessionDuration(agent: AgentState): number | null {
   return end - Math.min(...times)
 }
 
+/** Session length on one tile line: whole minutes from a minute, hours and minutes from an hour. */
+function tileDuration(ms: number): string {
+  if (ms < 60_000) return formatDuration(ms)
+  const minutes = Math.floor(ms / 60_000)
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`
+}
+
 /** Thinking level as the composer names it. */
 function thinkingLabel(level: ThinkingLevel): string {
   return level === 'xhigh' ? 'Extra high' : level.charAt(0).toUpperCase() + level.slice(1)
@@ -127,9 +134,13 @@ export function Overview({ agent }: { agent: AgentState }) {
             <div className="tabular heading text-xl leading-none font-semibold text-fg">
               {percent === null ? '—' : `${Math.min(100, Math.round(percent))}%`}
             </div>
-            <div className="tabular mt-1.5 truncate text-xs text-fg-3">
-              of context · {formatTokens(usage?.tokens)} /{' '}
-              {formatTokens(usage?.contextWindow ?? model?.contextWindow)}
+            {/* The numbers always show; the words drop where they would not fit beside them. */}
+            <div className="tabular @container mt-1.5 flex gap-1 text-xs text-fg-3">
+              <span className="truncate @max-[11em]:hidden">of context ·</span>
+              <span className="shrink-0">
+                {formatTokens(usage?.tokens)} /{' '}
+                {formatTokens(usage?.contextWindow ?? model?.contextWindow)}
+              </span>
             </div>
           </div>
           <div className="shrink-0 text-right">
@@ -204,13 +215,13 @@ export function Overview({ agent }: { agent: AgentState }) {
             },
             {
               label: 'Duration',
-              value: duration === null ? '—' : formatDuration(duration),
+              value: duration === null ? '—' : tileDuration(duration),
               hint: agent.phase === 'running' ? 'running' : 'active time'
             }
           ].map((tile) => (
-            <div key={tile.label} className="flex flex-col gap-0.5 px-3 py-2.5">
+            <div key={tile.label} className="flex min-w-0 flex-col gap-0.5 px-3 py-2.5">
               <span className="text-2xs text-fg-3">{tile.label}</span>
-              <span className="tabular heading text-lg leading-tight font-semibold text-fg">
+              <span className="tabular heading truncate text-lg leading-tight font-semibold text-fg">
                 {tile.value}
               </span>
               <span

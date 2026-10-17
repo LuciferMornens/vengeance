@@ -621,10 +621,17 @@ export function Composer({ agentId }: { agentId: string }) {
       ref={rootRef}
       className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-6 pb-4 @max-[640px]/pane:px-3 @max-[640px]/pane:pb-3"
     >
-      {/* Transcript text dissolves under the composer: a near-opaque scrim plus a blur that fades in from the top. */}
+      {/*
+        Transcript text dissolves under the composer: a near-opaque scrim plus a blur that fades in from the top.
+        macOS can draw the blur without its mask, which cuts a hard edge through the text: there the blur starts
+        where the scrim is already opaque.
+      */}
       <div
         aria-hidden
-        className="absolute inset-x-0 -top-14 bottom-0 backdrop-blur-[6px] [mask-image:linear-gradient(to_bottom,transparent,black_32px)]"
+        className={cn(
+          'absolute inset-x-0 bottom-0 backdrop-blur-[6px] [mask-image:linear-gradient(to_bottom,transparent,black_32px)]',
+          platform.os === 'darwin' ? '-top-4' : '-top-14'
+        )}
       />
       <div
         aria-hidden
