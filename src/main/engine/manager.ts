@@ -21,6 +21,7 @@ import type {
   RpcCommand,
   RpcExtensionUIResponse,
   RpcResponse,
+  RpcSessionState,
   RpcSuccessResponse
 } from '@shared/engine-types'
 import { samePath } from '../paths'
@@ -34,6 +35,7 @@ import { EngineProcess } from './rpc-process'
 import { PrimeMockEngineProcess } from './prime/mock'
 import { asRecord, stringValue } from './prime/transport'
 import { requestSessionTree } from './session-tree'
+import { prepareEngineAttachment } from './session-attachment'
 import { inspectSubagent } from './subagents-inspect'
 import {
   assertPrimeHandoffIdle,
@@ -169,6 +171,7 @@ export class EngineManager {
     if (!AGENT_ID.test(agentId)) throw new Error(`Invalid agent id ${agentId}`)
     if (this.agents.has(agentId)) throw new Error(`Agent ${agentId} already exists`)
     const engine = normalizeEngineId(args.engine)
+    args = prepareEngineAttachment(args, this.agents.values(), hidden)
     const info: AgentInfo = {
       agentId,
       engine,
@@ -657,6 +660,7 @@ export class EngineManager {
           info.sessionFile = absoluteSessionFile(stringValue(state.sessionFile), info.cwd)
           info.sessionId = stringValue(state.sessionId)
           info.sessionName = stringValue(state.sessionName)
+          info.lineage = state.lineage as RpcSessionState['lineage']
         }
         if (agent.hidden) agent.bufferedEvents?.push(event)
         else this.hooks.onEvent(info.agentId, event)
@@ -744,6 +748,7 @@ export class EngineManager {
       agent.info.sessionFile = absoluteSessionFile(state.data.sessionFile, agent.info.cwd)
       agent.info.sessionId = state.data.sessionId
       agent.info.sessionName = state.data.sessionName
+      agent.info.lineage = state.data.lineage
     }
     if (commands.success && commands.command === 'get_commands') {
       agent.info.bridge =

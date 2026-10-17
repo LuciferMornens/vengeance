@@ -115,6 +115,13 @@ export async function checkNativeSubagents(
       }, 'initial native child task completed')
       assert.ok(child, 'the native child is discoverable through the public roster')
       assert.ok(child.activeSessionId)
+      const background = await application.invoke('engine:background-list', 'prime')
+      const childResident = background.find((entry) => entry.id === child.activeSessionId)
+      assert.equal(childResident.lineage.childId, child.id)
+      assert.equal(
+        childResident.lineage.parentNativeAgentId,
+        (await nativeCommand(application, agentId, 'get_state')).activeSessionId
+      )
       await application.waitForSettle()
       const childLabel = child.label || child.sessionName || child.id
       await openControls(application, 'Subagents')
@@ -133,7 +140,14 @@ export async function checkNativeSubagents(
       await application.page.getByRole('button', { name: 'Send message', exact: true }).click()
       const followUp = await server.waitForRequest(followUpRequest, { from: followUpFrom })
       await application.page.keyboard.press('Escape')
-      await application.page.getByRole('button', { name: `Resume ${CHILD_NAME}` }).click()
+      const family = application.page.getByRole('button', {
+        name: `Subagents of ${primaryName}`,
+        exact: true
+      })
+      await family.waitFor()
+      if ((await family.getAttribute('aria-expanded')) === 'false') await family.click()
+      const nested = application.page.locator('[data-prime-subagent]', { hasText: CHILD_NAME })
+      await nested.locator('[data-session-row]').click()
       const childAgentId = await until(async () => {
         const activeId = await application.activeAgentId()
         const active = activeId ? await application.agentState(activeId) : undefined
@@ -145,9 +159,15 @@ export async function checkNativeSubagents(
       assert.equal(await server.waitForOutcome(followUp), 'aborted')
       await application.waitForSettle()
       assert.equal((await application.agentState(childAgentId)).phase, 'idle')
-      const childRow = application.page
-        .locator('section[aria-label="Open sessions"]')
-        .locator('[data-session-row]', { hasText: CHILD_NAME })
+      const childRow = nested.locator('[data-session-row]')
+      assert.equal(
+        await application.page
+          .locator('section[aria-label="Background sessions"]')
+          .getByRole('button', { name: `Resume ${CHILD_NAME}`, exact: true })
+          .count(),
+        0,
+        'a delegated child is not an ordinary background session'
+      )
       await childRow.hover()
       await childRow.locator('xpath=..').getByRole('button', { name: 'Close tab' }).click()
       await application.page

@@ -17,10 +17,12 @@ const CACHE_ENTRY_OVERHEAD_BYTES = 512
 
 interface CachedFile {
   signature: string
-  header: PiSessionHeader | null
+  header: SessionFileHeader | null
   summary?: SessionListItem | null
   bytes: number
 }
+
+type SessionFileHeader = PiSessionHeader & { rlmDepth?: number }
 
 function fileSignature(stats: Stats): string {
   return `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeMs}:${stats.ctimeMs}`
@@ -100,18 +102,25 @@ function parseEntry(line: string): Record<string, unknown> | null {
   }
 }
 
-function sessionHeader(entry: Record<string, unknown>): PiSessionHeader | null {
+function sessionHeader(entry: Record<string, unknown>): SessionFileHeader | null {
   if (entry.type !== 'session' || typeof entry.id !== 'string') return null
   return {
     ...entry,
     type: 'session',
     id: entry.id,
     timestamp: typeof entry.timestamp === 'string' ? entry.timestamp : '',
-    cwd: typeof entry.cwd === 'string' ? entry.cwd : ''
+    cwd: typeof entry.cwd === 'string' ? entry.cwd : '',
+    parentSession: typeof entry.parentSession === 'string' ? entry.parentSession : undefined,
+    rlmDepth:
+      typeof entry.rlmDepth === 'number' &&
+      Number.isSafeInteger(entry.rlmDepth) &&
+      entry.rlmDepth >= 0
+        ? entry.rlmDepth
+        : undefined
   }
 }
 
-export async function readIndexedSessionHeader(path: string): Promise<PiSessionHeader> {
+export async function readIndexedSessionHeader(path: string): Promise<SessionFileHeader> {
   // The engine itself bounds header discovery to one MiB.
   for await (const line of sessionLines(path, HEADER_BUFFER_BYTES, MAX_HEADER_SCAN_BYTES)) {
     const entry = parseEntry(line)
@@ -150,7 +159,7 @@ async function readSummary(
   stats: Stats,
   format: 'pi' | 'prime'
 ): Promise<{ header: PiSessionHeader; summary: SessionListItem } | null> {
-  let header: PiSessionHeader | null = null
+  let header: SessionFileHeader | null = null
   let messageCount = 0
   let firstMessage = ''
   let searchText = ''
@@ -236,6 +245,10 @@ async function readSummary(
       cwd: header.cwd,
       name,
       parentSessionPath: header.parentSession,
+      lineage:
+        format === 'prime' && header.rlmDepth !== undefined
+          ? { depth: header.rlmDepth }
+          : undefined,
       createdAt,
       modifiedAt:
         lastActivity !== undefined && lastActivity > 0
@@ -324,10 +337,14 @@ export class SessionIndex {
     this.cachedBytes += bytes
   }
 
-  async header(path: string): Promise<{ header: PiSessionHeader; modifiedAt: number } | null> {
+  async header(path: string): Promise<{ header: SessionFileHeader; modifiedAt: number } | null> {
     const key = comparablePath(path)
     try {
       const stats = await stat(path)
+      if (!stats.isFile()) {
+        this.forget(key)
+        return null
+      }
       const signature = fileSignature(stats)
       const cached = this.cached(key, signature)
       if (cached) {
@@ -364,6 +381,10 @@ export class SessionIndex {
   private async loadSummary(path: string, key: string): Promise<SessionListItem | null> {
     try {
       const stats = await stat(path)
+      if (!stats.isFile()) {
+        this.forget(key)
+        return null
+      }
       const signature = fileSignature(stats)
       const cached = this.cached(key, signature)
       if (cached?.summary !== undefined) return cached.summary

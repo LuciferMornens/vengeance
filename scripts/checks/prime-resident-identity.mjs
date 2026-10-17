@@ -8,6 +8,7 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
+import { runConflictingIdentityFixture } from './prime-native-id-conflicts.mjs'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const nativeMode = process.argv.includes('--native')
@@ -44,8 +45,9 @@ async function loadAdapter() {
       contents: [
         "export { EngineManager } from './src/main/engine/manager'",
         "export { PrimeEngineProcess } from './src/main/engine/prime/process'",
-        "export { attachPrimeResident, connectPrimeDaemon, connectPrimeResident, probePrimeDaemon } from './src/main/engine/prime/daemon'",
-        "export { PrimeTransport } from './src/main/engine/prime/transport'"
+        "export { attachPrimeResident, connectPrimeDaemon, connectPrimeResident, listPrimeBackground, stopPrimeBackground, probePrimeDaemon } from './src/main/engine/prime/daemon'",
+        "export { PrimeTransport } from './src/main/engine/prime/transport'",
+        nativeMode ? '' : "export { savedIdentityReads } from 'vengeance-fixture-identity'"
       ].join('\n'),
       resolveDir: repositoryRoot,
       loader: 'ts'
@@ -59,6 +61,26 @@ async function loadAdapter() {
       {
         name: 'isolated-electron',
         setup(bundler) {
+          if (!nativeMode) {
+            bundler.onResolve(
+              { filter: /^(?:\.\/sessions|vengeance-fixture-identity)$/ },
+              ({ path, importer }) =>
+                path === 'vengeance-fixture-identity' || /[/\\]session-lineage\.ts$/.test(importer)
+                  ? { path: 'saved-identity', namespace: 'saved-identity' }
+                  : undefined
+            )
+            bundler.onLoad({ filter: /.*/, namespace: 'saved-identity' }, () => ({
+              contents: `
+                let reads = 0;
+                export const savedIdentityReads = () => reads;
+                export const primeSessionIdentity = async () => {
+                  reads++;
+                  return null;
+                };
+              `,
+              loader: 'js'
+            }))
+          }
           bundler.onResolve({ filter: /^electron$/ }, () => ({
             path: 'electron',
             namespace: 'fixture'
@@ -260,6 +282,21 @@ async function runProtocolFixture({ EngineManager, connectPrimeResident }) {
     )
     assert.equal(created.status, 'ready', created.error)
     assert.equal(created.pid, firstWorkerPid)
+    await assert.rejects(
+      manager.create(
+        { engine: 'prime', cwd: workspaceDirectory, sessionPath: originalPath },
+        'duplicate-file'
+      ),
+      /already open in Vengeance/
+    )
+    await assert.rejects(
+      manager.create(
+        { engine: 'prime', cwd: workspaceDirectory, nativeAgentId: originalId },
+        'duplicate-native'
+      ),
+      /already open in Vengeance/
+    )
+    assert.equal(manager.list().length, 1, 'one app handle owns the resident connection')
     await manager.nativeCommand(managedAgentId, 'switch_session', { sessionPath: switchedPath })
     assert.equal(manager.get(managedAgentId).nativeAgentId, currentId)
     await assertIdentitySelection(connectPrimeResident, currentId, originalPath, options)
@@ -281,6 +318,88 @@ async function runProtocolFixture({ EngineManager, connectPrimeResident }) {
     console.log('PASS metadata: get, list, and ready events report the replacement worker PID.')
   } finally {
     await manager.disposeAll()
+    await Promise.all(endpoints.map((server) => server.close()))
+  }
+}
+
+async function runBackgroundLineageFixture({ listPrimeBackground }) {
+  const parentPath = join(temporaryRoot, 'parent.jsonl')
+  const childPath = join(temporaryRoot, 'child.jsonl')
+  const parent = {
+    id: 'family-parent',
+    sessionFile: parentPath,
+    sessionId: 'saved-parent',
+    cwd: workspaceDirectory,
+    runtimeKind: 'top-level',
+    rlmDepth: 0,
+    hasRunningSubagents: true
+  }
+  const child = {
+    id: 'family-child',
+    sessionId: 'saved-child',
+    cwd: workspaceDirectory,
+    runtimeKind: 'subagent',
+    rlmDepth: 1,
+    rlmChildId: 'sub-review',
+    parentActiveSessionId: parent.id,
+    parentSessionId: parent.sessionId,
+    parentSessionPath: parentPath,
+    activity: 'working',
+    isStreaming: true
+  }
+  const commands = []
+  const rosters = [
+    [parent, child],
+    [parent, { ...child, sessionFile: childPath }]
+  ]
+  const endpoints = await Promise.all(
+    rosters.map((sessions) =>
+      endpoint((socket) => {
+        socket.write(
+          `${JSON.stringify({ type: 'daemon_hello', protocol, clientId: randomUUID() })}\n`
+        )
+        readFrames(socket, (frame) => {
+          if (frame.command.type === 'ack_result') return
+          commands.push(frame.command.type)
+          socket.write(
+            `${JSON.stringify({ type: 'response', id: frame.id, success: true, data: { sessions } })}\n`
+          )
+        })
+      })
+    )
+  )
+  try {
+    await writeRegistry(
+      endpoints.map((server) => ({
+        socketPath: server.socketPath,
+        executablePath: process.execPath,
+        packageDir: dirname(process.execPath),
+        version: '0.10.0'
+      }))
+    )
+    const listed = await listPrimeBackground({ agentDir: agentDirectory })
+    assert.equal(
+      listed.length,
+      2,
+      'duplicate endpoint rows converge, including a delayed file path'
+    )
+    const listedChild = listed.find((entry) => entry.id === child.id)
+    assert.equal(listedChild.sessionPath, childPath)
+    assert.equal(listedChild.busy, true)
+    assert.deepEqual(listedChild.lineage, {
+      parentSessionPath: parentPath,
+      parentSessionId: parent.sessionId,
+      parentNativeAgentId: parent.id,
+      depth: 1,
+      childId: child.rlmChildId,
+      runtimeKind: 'subagent'
+    })
+    assert.equal(listed.find((entry) => entry.id === parent.id).busy, true)
+    assert.ok(commands.length > 0 && commands.every((command) => command === 'list'))
+    console.log(
+      'PASS background families: endpoint duplicates converge; lineage and child activity survive read-only listing.'
+    )
+  } finally {
     await Promise.all(endpoints.map((server) => server.close()))
   }
 }
@@ -613,6 +732,16 @@ try {
     await runManagerRestart(adapter)
   } else {
     await runProtocolFixture(adapter)
+    await runBackgroundLineageFixture(adapter)
+    await runConflictingIdentityFixture(adapter, {
+      endpoint,
+      readFrames,
+      writeRegistry,
+      temporaryRoot,
+      workspaceDirectory,
+      agentDirectory,
+      protocol
+    })
     await runRecoveryFixture(adapter)
   }
   cleanupAllowed = true

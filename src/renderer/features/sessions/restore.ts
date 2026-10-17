@@ -1,4 +1,5 @@
 import type { OpenSessionRef } from '@shared/api/app'
+import { normalizeEngineId } from '@shared/api/engine'
 import { invoke } from '../../lib/ipc'
 import { normalizePath } from '../../lib/paths'
 import { useAgents, type AgentsStore } from '../../store/agents'
@@ -12,7 +13,9 @@ function runningSessions(state: AgentsStore): OpenSessionRef[] {
   return state.order.flatMap((id) => {
     const agent = state.agents[id]
     const path = agent && !agent.info.args.noSession ? agentSessionFile(agent) : undefined
-    return agent && path ? [{ path, cwd: agent.info.cwd, engine: agent.info.engine }] : []
+    return agent && path
+      ? [{ path, cwd: agent.info.cwd, engine: agent.info.engine, lineage: agent.info.lineage }]
+      : []
   })
 }
 
@@ -26,9 +29,9 @@ let persisted = ''
 function persistOpenSessions(): void {
   const agents = useAgents.getState()
   const running = runningSessions(agents)
-  const runningPaths = new Set(running.map((session) => normalizePath(session.path)))
+  const runningPaths = new Set(running.map(sessionKey))
   const { dormant } = useSessions.getState()
-  const stillDormant = dormant.filter((session) => !runningPaths.has(normalizePath(session.path)))
+  const stillDormant = dormant.filter((session) => !runningPaths.has(sessionKey(session)))
   if (stillDormant.length !== dormant.length) useSessions.setState({ dormant: stillDormant })
 
   const active = agents.activeAgentId ? agents.agents[agents.activeAgentId] : undefined
@@ -45,6 +48,10 @@ function persistOpenSessions(): void {
   void invoke('app:set-state', { openSessions, activeSession })
 }
 
+function sessionKey(session: OpenSessionRef): string {
+  return `${normalizeEngineId(session.engine)}:${normalizePath(session.path)}`
+}
+
 function startPersisting(): void {
   const { openSessions, activeSession } = useApp.getState().prefs
   persisted = JSON.stringify({ openSessions, activeSession })
@@ -58,6 +65,7 @@ function startPersisting(): void {
         return (
           agent?.info.cwd !== before?.info.cwd ||
           agent?.info.engine !== before?.info.engine ||
+          agent?.info.lineage !== before?.info.lineage ||
           agent?.info.args.noSession !== before?.info.args.noSession ||
           (agent && agentSessionFile(agent)) !== (before && agentSessionFile(before))
         )

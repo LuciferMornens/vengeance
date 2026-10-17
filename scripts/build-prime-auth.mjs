@@ -98,7 +98,19 @@ if (existsSync(stagedExecutable) && sourceHash === (await previousFingerprint())
   process.exit(0)
 }
 
-const args = ['build', '--locked', '--release', '--manifest-path', manifestPath, ...nativeOverrides]
+const buildJobs = Number(process.env.VENGEANCE_NATIVE_BUILD_JOBS ?? 4)
+if (!Number.isSafeInteger(buildJobs) || buildJobs < 1 || buildJobs > 32) {
+  throw new Error('VENGEANCE_NATIVE_BUILD_JOBS must be an integer between 1 and 32')
+}
+const args = [
+  'build',
+  '--locked',
+  '--release',
+  `-j${buildJobs}`,
+  '--manifest-path',
+  manifestPath,
+  ...nativeOverrides
+]
 
 console.log(`Building Prime authentication helper with ${basename(cargo)}`)
 const result = spawnSync(cargo, args, {

@@ -1,7 +1,7 @@
 import type { ChatPrefs } from './chat'
 import type { ComposerPrefs } from './composer'
 import type { EngineId } from './engine'
-import type { SessionsPrefs } from './sessions'
+import type { SessionLineage, SessionsPrefs } from './sessions'
 import type { SettingsPrefs } from './settings'
 import type { UpdatesPrefs } from './updates'
 
@@ -39,6 +39,7 @@ export interface OpenSessionRef {
   path: string
   /** Working folder its engine ran in. */
   cwd: string
+  lineage?: SessionLineage
 }
 
 /** Feature-owned persisted prefs; each lane extends its own interface in `shared/api/<feature>.ts`. */

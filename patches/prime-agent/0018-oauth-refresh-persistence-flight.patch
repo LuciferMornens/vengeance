@@ -1,0 +1,173 @@
+diff --git a/crates/pa-core/src/auth/manager.rs b/crates/pa-core/src/auth/manager.rs
+index d741ce4..23351c8 100644
+--- a/crates/pa-core/src/auth/manager.rs
++++ b/crates/pa-core/src/auth/manager.rs
+@@ -15,6 +15,9 @@ use super::types::{
+ #[cfg(test)]
+ mod tests;
+ 
++#[cfg(test)]
++mod refresh_flight_tests;
++
+ mod lookup;
+ 
+ mod prime_inference;
+@@ -41,8 +44,8 @@ fn now_epoch_ms() -> i64 {
+         .map_or(i64::MAX, |d| d.as_millis() as i64)
+ }
+ 
+-/// One OAuth refresh in flight per provider: the token fetch runs outside every
+-/// lock, so TS's single-threaded single-flight needs its own gate.
++/// One OAuth refresh in flight per provider through credential persistence.
++/// Token HTTP runs outside the document lock, behind this provider gate.
+ fn refresh_flight(provider: &str) -> std::sync::MutexGuard<'static, ()> {
+     static FLIGHTS: std::sync::OnceLock<
+         std::sync::Mutex<std::collections::HashMap<String, &'static std::sync::Mutex<()>>>,
+diff --git a/crates/pa-core/src/auth/manager/lookup.rs b/crates/pa-core/src/auth/manager/lookup.rs
+index 9e6f315..4998bdc 100644
+--- a/crates/pa-core/src/auth/manager/lookup.rs
++++ b/crates/pa-core/src/auth/manager/lookup.rs
+@@ -146,9 +146,9 @@ impl AuthStorage {
+     /// and write). The phases:
+     ///
+     /// 1. LOAD: the document through the read arm (no document lock).
+-    /// 2. FETCH: the token call outside every lock, behind [`refresh_flight`]'s
+-    ///    single-flight gate; the expiry is re-checked under the gate so a second
+-    ///    fetch never wastes a single-use refresh token.
++    /// 2. FETCH: the token call outside the document lock, behind [`refresh_flight`]'s
++    ///    provider gate; the expiry is re-checked under the gate so a second fetch
++    ///    never wastes a single-use refresh token. The gate also covers persistence.
+     /// 3. WRITE: the locked read-modify-write, holding the lock only for the re-read,
+     ///    insert, and atomic write. A peer that refreshed meanwhile keeps its fresher
+     ///    credential.
+@@ -181,9 +181,10 @@ impl AuthStorage {
+             self.reload();
+             return Some(credential);
+         }
+-        // FETCH: outside every lock, one flight per provider.
++        // Keep the provider flight through persistence so waiting callers see the refreshed token.
++        let _flight = refresh_flight(provider_id);
++        // FETCH: outside the document lock, one flight per provider.
+         let fetched = {
+-            let _flight = refresh_flight(provider_id);
+             // The gate may have just released a flight that wrote a fresh
+             // credential; re-check before spending a refresh token.
+             let content = self.storage.read().unwrap_or_default();
+diff --git a/crates/pa-core/src/auth/manager/refresh_flight_tests.rs b/crates/pa-core/src/auth/manager/refresh_flight_tests.rs
+new file mode 100644
+index 0000000..16f24ff
+--- /dev/null
++++ b/crates/pa-core/src/auth/manager/refresh_flight_tests.rs
+@@ -0,0 +1,112 @@
++use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
++use std::sync::{mpsc, Arc, Mutex};
++use std::time::Duration;
++
++use super::{AuthCredential, AuthStorage, AuthStorageBackend, AuthStorageData, OAuthIntegration};
++use crate::auth::storage::InMemoryAuthStorageBackend;
++
++struct PausedWriteBackend {
++    inner: InMemoryAuthStorageBackend,
++    pause_next_write: AtomicBool,
++    write_started: mpsc::SyncSender<()>,
++    release_write: Mutex<mpsc::Receiver<()>>,
++}
++
++impl AuthStorageBackend for PausedWriteBackend {
++    fn read(&self) -> anyhow::Result<Option<String>> {
++        self.inner.read()
++    }
++
++    fn with_lock(
++        &self,
++        update: &mut dyn FnMut(Option<String>) -> anyhow::Result<((), Option<String>)>,
++    ) -> anyhow::Result<()> {
++        if self.pause_next_write.swap(false, Ordering::SeqCst) {
++            self.write_started.send(())?;
++            self.release_write
++                .lock()
++                .unwrap()
++                .recv_timeout(Duration::from_secs(5))?;
++        }
++        self.inner.with_lock(update)
++    }
++}
++
++#[derive(Default)]
++struct CountingRefresh {
++    calls: AtomicUsize,
++}
++
++impl OAuthIntegration for CountingRefresh {
++    fn api_key_for(&self, _provider: &str, credential: &AuthCredential) -> Option<String> {
++        match credential {
++            AuthCredential::Oauth { access, .. } => Some(access.clone()),
++            _ => None,
++        }
++    }
++
++    fn refresh(&self, provider: &str, credentials: &AuthStorageData) -> Option<AuthCredential> {
++        self.calls.fetch_add(1, Ordering::SeqCst);
++        let mut credential = credentials.credential(provider)?;
++        if let AuthCredential::Oauth {
++            access, expires, ..
++        } = &mut credential
++        {
++            *access = "fresh-access".into();
++            *expires = i64::MAX;
++        }
++        Some(credential)
++    }
++}
++
++#[test]
++fn a_refresh_flight_covers_credential_persistence() {
++    const PROVIDER: &str = "write-boundary-refresh";
++    const SECOND_RESOLUTION_BOUND: Duration = Duration::from_secs(1);
++    const FIRST_WRITE_BOUND: Duration = Duration::from_secs(3);
++    let inner = InMemoryAuthStorageBackend::default();
++    let expired = serde_json::json!({
++        (PROVIDER): {
++            "type": "oauth", "access": "expired-access", "refresh": "single-use-refresh",
++            "expires": 0
++        }
++    })
++    .to_string();
++    inner
++        .with_lock(&mut |_| Ok(((), Some(expired.clone()))))
++        .unwrap();
++    let (write_started, write_waiting) = mpsc::sync_channel(1);
++    let (release_write, release_waiting) = mpsc::channel();
++    let backend: Arc<dyn AuthStorageBackend> = Arc::new(PausedWriteBackend {
++        inner,
++        pause_next_write: AtomicBool::new(true),
++        write_started,
++        release_write: Mutex::new(release_waiting),
++    });
++    let oauth = Arc::new(CountingRefresh::default());
++    let first_backend = Arc::clone(&backend);
++    let first_oauth = Arc::clone(&oauth);
++    let first = std::thread::spawn(move || {
++        AuthStorage::from_storage(first_backend, first_oauth).get_api_key(PROVIDER)
++    });
++    write_waiting.recv_timeout(FIRST_WRITE_BOUND).unwrap();
++
++    let (second_done, second_waiting) = mpsc::channel();
++    let second_oauth = Arc::clone(&oauth);
++    let second = std::thread::spawn(move || {
++        let result = AuthStorage::from_storage(backend, second_oauth).get_api_key(PROVIDER);
++        second_done.send(result.clone()).unwrap();
++        result
++    });
++    let premature = second_waiting.recv_timeout(SECOND_RESOLUTION_BOUND);
++    release_write.send(()).unwrap();
++    let first_key = first.join().unwrap();
++    let second_key = second.join().unwrap();
++    assert!(
++        matches!(premature, Err(mpsc::RecvTimeoutError::Timeout)),
++        "a second refresh resolved before the first credential write completed: {premature:?}"
++    );
++    assert_eq!(first_key.as_deref(), Some("fresh-access"));
++    assert_eq!(second_key.as_deref(), Some("fresh-access"));
++    assert_eq!(oauth.calls.load(Ordering::SeqCst), 1);
++}

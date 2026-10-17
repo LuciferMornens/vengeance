@@ -203,11 +203,12 @@ export async function createEngineFixture() {
       candidate ? executable : undefined
     )
     let cleaned = false
-    let nativeStopped = false
-    const stopNativeDaemon = async () => {
-      if (nativeStopped) return
-      await shutdownOwnedPrimeDaemons(primeDirectory, foreignPids)
-      nativeStopped = true
+    let nativeStop
+    const stopNativeDaemon = () => {
+      nativeStop ??= shutdownOwnedPrimeDaemons(primeDirectory, foreignPids).finally(() => {
+        nativeStop = undefined
+      })
+      return nativeStop
     }
 
     return {

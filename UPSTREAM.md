@@ -19,21 +19,24 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 
 ## Reconstructing and changing our builds
 
-`engines.lock.json` is the source of truth. Initial bases are pi `v1.2.0` at
-`06a466935536f8c9bcacb2d5efc0fc021be1bdff` and Prime `v0.10.0` at
-`763094e1b6a7c17450ee8399b06cda1853847ca5`. The builds identify as `1.2.0+vengeance.4` and
-`0.10.0+vengeance.6`. Never reuse a Vengeance build version for different shipped behavior.
+`engines.lock.json` is the source of truth. Current stable bases are pi `v1.3.0` at
+`71023aec1546d6d677a65669c5665c0927ce0dd0` and Prime `v0.10.0` at
+`763094e1b6a7c17450ee8399b06cda1853847ca5`. The builds identify as `1.3.0+vengeance.1` and
+`0.10.0+vengeance.9`. Never reuse a Vengeance build version for different shipped behavior.
 
-The latest upstream comparison, integration gaps and qualification evidence are recorded in
-[ENGINE-AUDIT-2026-10-14.md](docs/ENGINE-AUDIT-2026-10-14.md). Stable bases remain unchanged;
-the Engine 2 settings-preservation fix is an explicitly identified upstream backport.
+The current Prime source comparison and patch decisions are recorded in
+[PRIME-STABLE-AUDIT-2026-10-16.md](docs/PRIME-STABLE-AUDIT-2026-10-16.md).
+The [pi patch guide](patches/pi/README.md) records the 1.3.0 reconciliation and retired catalog
+fallback. The [14 October audit](docs/ENGINE-AUDIT-2026-10-14.md) records earlier integration
+evidence and gaps. Engine 2 settings preservation and rustls maintenance are identified upstream
+backports; its native base remains the latest stable release.
 
 [OpenAI native compaction](docs/openai-native-compaction.md) records the protocol study, checkpoint
 compatibility policy and regressions for Prime patch `0015` and the Engine bridge. Requalify both
 Responses transports, both authentication routes, cancellation and saved-session replay on upgrades.
 
 pi's package version and extension-facing SDK `VERSION` stay at the upstream release, currently
-`1.2.0`. Extensions can reject build suffixes even when all required APIs exist. The separate
+`1.3.0`. Extensions can reject build suffixes even when all required APIs exist. The separate
 `vengeance.version` metadata, native CLI `--version` and Vengeance engine descriptor report our build
 identity. Native install-change detection uses that identity so a same-base patch upgrade is visible.
 Qualify both forms through the native loader and repeat startup/restart with compatibility packages;
@@ -61,6 +64,8 @@ on PATH (`OBJDUMP` can select it). Users need none of these to load the engines:
 Prime includes its Python kernel package, skills and catalogs. Native kernel provisioning and tools may
 still acquire their own language environments/dependencies when first used.
 Package installation and developer tools keep their native prerequisites, such as npm, Git or Bash.
+`VENGEANCE_NATIVE_BUILD_JOBS=1` limits Engine 2 and helper build concurrency on smaller machines;
+the default is four. Run native qualification and package builds serially when memory is limited.
 
 pi uses upstream's locked build and runtime dependencies. Every internal runtime package is packed from
 our checkout and substituted into the runtime lock before `npm ci --ignore-scripts`; none is resolved to
@@ -94,7 +99,11 @@ residents' executable files. Validate transitions on isolated session copies bef
    `extensions/mcp/config.js`, `core/session-manager.js`, `core/model-runtime.js` and
    `core/settings-manager.js`. The SDK host (`src/main/engine/sdk-host/host.ts`): `core/model-runtime.js`,
    `core/settings-manager.js`, `core/package-manager.js`, `core/resource-loader.js`, `core/keybindings.js`
-   and pi-ai's `dist/env-api-keys.js`. Check the exports each one uses, not only that the file exists.
+   and pi-ai's `dist/env-api-keys.js`. Native saved sharing also imports
+   `core/saved-session-share.js`; live sharing uses its native RPC commands. Check the exports each
+   one uses, not only that the file exists. Readiness must not refresh credentials or write account
+   files. Destination consent must match the actual upload, and saved sharing must leave source
+   bytes intact, including an unterminated final JSONL entry.
    `mcp list --json` in pi 1.2 reports `resources: true` as a capability, with resource listings fetched
    on demand. The app accepts that and numeric counts from older custom engines.
 5. Review Vengeance's adapters and all Prime helper modes: OAuth, saved-session forks, resources, traces
@@ -197,6 +206,10 @@ sign-in testing only with explicit user authorization; report coverage gaps rath
 | Mixed-version resident attachment and Close tab versus Stop session | `scripts/qa/engines/resident-upgrade.qa.mjs`, `scripts/qa/engines/resident-close.qa.mjs`; selected-state and transport regressions                                 |
 | Packaged app, external bridge and native helper                     | `scripts/qa/engines/packaged.qa.mjs`, `scripts/checks/prime-auth-native.mjs`, `scripts/checks/prime-auth-oauth.mjs`                                                |
 | Scale and lifecycle retention when those contracts change           | `scripts/qa/performance/session-listing.qa.mjs`, `scripts/qa/performance/session-churn.qa.mjs`, `scripts/qa/performance/long-tools.qa.mjs`                         |
+| Engine 2 native long-history activation and retention               | `scripts/qa/performance/prime-long-history.qa.mjs`; public native writer, cold/resident opening, cached workspace switching and frame/heap bounds                  |
+| Mixed-engine workspace scale and hidden-workspace navigation        | `scripts/qa/performance/workspace-scale.qa.mjs`; full 8,300-history, 65-workspace corpus                                                                           |
+| Engine stable upgrade and recovery on an isolated copy              | `scripts/qa/engines/pi-transition.qa.mjs`; retain a complete baseline package with `QA_PI_BASELINE_PACKAGE`                                                        |
+| Engine 2 family identity, child history and deletion                | `scripts/qa/engines/subagent-lineage.qa.mjs`, `scripts/checks/prime-resident-identity.mjs`; native/helper lineage and deletion tests                               |
 
 The candidate fixture accepts an absolute `QA_PRIME_EXECUTABLE` and requires its exact
 `QA_PRIME_SHA256`. For executable transitions, set `QA_PRIME_BASELINE_EXECUTABLE` to a retained,
@@ -235,6 +248,11 @@ uses upstream `./test.sh`, including its filesystem-retention passes. Credential
 tests and external SSH fixtures remain explicitly reported as skipped. Prime runs the full Cargo
 workspace, formatting and clippy. `--with-kernel` builds the native CLI and bootstraps a temporary
 Python environment for the packaged-kernel tests; it never uses the account's kernel installation.
+Before the full pi suite or a targeted `env` run, its runner builds the locked Env daemon, matching
+[upstream CI](https://github.com/earendil-works/pi/blob/v1.3.0/.github/workflows/ci.yml).
+`QA_NATIVE_JOBS` bounds this Rust prerequisite to 1–32 jobs (default four). Env supports Windows
+file and command operations; its standalone package is outside the coding-agent SDK's runtime
+dependency graph. The test prerequisite does not add a daemon to Vengeance's payload.
 Git Bash utilities and a Python interpreter are native test prerequisites on Windows.
 `QA_PI_SOURCE` and `QA_PRIME_SOURCE` select an authoring checkout while
 developing a patch; release qualification must also reconstruct and build the exported patch series.
@@ -244,10 +262,11 @@ fragmented daemon commands interrupted by events, npm launching and edit errors.
 must keep its prefix when another event wins the daemon's select loop; test the actual socket protocol,
 including the reply's command ID. Do not replace these checks with longer timeouts.
 
-pi patch `0004` qualifies model data missing or stale in the pinned upstream catalog. Recheck its
-Claude Haiku/Sonnet 5.5 reasoning, vision limits and pricing against the next upstream catalog and
-the provider's model documentation. Retire the fallback when upstream supplies the qualified values;
-never regenerate or hand-edit the pinned catalog merely to satisfy a test.
+Retired pi patch `0004` qualified model data missing or stale in the former upstream catalog.
+The pinned 1.3.0 catalog supplies the qualified Claude Haiku/Sonnet 5.5 data, including Haiku Off
+thinking and Sonnet cache pricing. `scripts/checks/pi-catalog.mjs` checks the staged native models.
+Recheck reasoning, vision limits and pricing against the next upstream catalog and the provider's
+documentation; never regenerate or hand-edit the pinned catalog merely to satisfy a test.
 
 pi patch `0006` adds Abliteration's three models as a native provider, including API-key login,
 `ABLIT_KEY` discovery, per-session cache affinity, model-specific thinking levels and vision metadata.

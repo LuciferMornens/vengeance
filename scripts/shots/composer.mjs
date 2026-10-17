@@ -151,7 +151,19 @@ async function composerScenarios(page, { shot, test, wait }, workspace) {
   // A required `<test-filter>` completes instead of running; fill it in and run the template.
   await page.keyboard.type('session')
   await page.keyboard.press('Enter')
-  await wait(600)
+  await page
+    .locator('div.selectable')
+    .filter({ hasText: /^\/fix-tests session$/ })
+    .waitFor()
+  await page.waitForFunction(() => window.__vengeanceTest.agentState()?.phase === 'running')
+  // The first mock prompt runs showcase, whose later select dialog would cover the built-in dialogs.
+  const stoppedTemplate = await page.evaluate(() =>
+    window.vengeance.invoke('engine:command', window.__vengeanceTest.activeAgentId(), {
+      type: 'abort'
+    })
+  )
+  if (!stoppedTemplate.success) throw new Error('Could not stop the template showcase run')
+  await test('waitForIdle', 10_000)
   await typeSlash('/model ')
   await shot('slash-arg-hint-model')
   await typeSlash('/export ')
@@ -179,6 +191,7 @@ async function composerScenarios(page, { shot, test, wait }, workspace) {
   await runSlash('/changelog')
   await shot('slash-changelog', { settleMs: 1200 })
   await page.keyboard.press('Escape')
+  await page.getByRole('dialog', { name: 'What’s new in the engine' }).waitFor({ state: 'hidden' })
   await wait(400)
   await dismissToasts()
 

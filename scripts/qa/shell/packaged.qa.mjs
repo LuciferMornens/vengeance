@@ -1,15 +1,16 @@
-// The packaged app (release/win-unpacked/Vengeance.exe, `npm run dist` first): the package.json version, the
-// engine located from the packaged app, the bridge extension loaded from <resources>/bridge (outside
-// app.asar) and a real fake-LLM turn, plus where the app version is shown.
+// Packaged app identity, native engine and bridge loading, local transport and version UI.
+// QA_PACKAGED_EXE selects an unpacked build; QA_PACKAGED_NAME sets its expected Electron app name.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { FAKE_MODELS, FAKE_PROVIDER } from '../lib/agent-dir.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
-import { ROOT } from '../lib/app.mjs'
+import { reportShotsDir, ROOT } from '../lib/app.mjs'
 import { runSuite } from '../lib/suite.mjs'
-import { PACKAGED_EXE, processTable, shot, softSteps } from './lib/kit.mjs'
+import { PACKAGED_EXE as DEFAULT_PACKAGED_EXE, processTable, shot, softSteps } from './lib/kit.mjs'
 
+const PACKAGED_EXE = resolve(process.env.QA_PACKAGED_EXE || DEFAULT_PACKAGED_EXE)
+const EXPECTED_PRODUCT_NAME = process.env.QA_PACKAGED_NAME ?? 'Vengeance'
 const EXPECTED_VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version
 const resourcesDir = join(dirname(PACKAGED_EXE), 'resources')
 const engineManifest = JSON.parse(
@@ -38,7 +39,7 @@ await runSuite(
         }))
         assert.equal(main.packaged, true)
         assert.equal(main.version, EXPECTED_VERSION)
-        assert.equal(main.name, 'Vengeance')
+        assert.equal(main.name, EXPECTED_PRODUCT_NAME)
         assert.equal(main.resourcesPath.toLowerCase(), resourcesDir.toLowerCase())
         const platform = await app.page.evaluate(() => window.vengeance.platform)
         assert.equal(platform.appVersion, EXPECTED_VERSION)
@@ -175,5 +176,5 @@ await runSuite(
     })
     finish()
   },
-  { launch: { exe: PACKAGED_EXE, outDir: join(dirname(PACKAGED_EXE), '..', 'qa-shots') } }
+  { launch: { exe: PACKAGED_EXE, outDir: reportShotsDir('shell') } }
 )

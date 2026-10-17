@@ -275,6 +275,7 @@ function applyNativeSnapshot(state: AgentState, data: Record<string, unknown>): 
       sessionId: session.sessionId,
       sessionFile: session.sessionFile,
       sessionName: session.sessionName,
+      lineage: session.lineage,
       busy
     },
     phase: busy ? 'running' : 'idle',

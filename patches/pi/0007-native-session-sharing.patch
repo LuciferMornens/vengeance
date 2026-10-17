@@ -1,0 +1,1044 @@
+diff --git a/packages/coding-agent/src/core/export-html/index.ts b/packages/coding-agent/src/core/export-html/index.ts
+index 3762c26..1fe6fcc 100644
+--- a/packages/coding-agent/src/core/export-html/index.ts
++++ b/packages/coding-agent/src/core/export-html/index.ts
+@@ -241,10 +241,13 @@ export async function exportSessionToHtml(
+ 	const opts: ExportOptions = typeof options === "string" ? { outputPath: options } : options || {};
+ 
+ 	const sessionFile = sm.getSessionFile();
+-	if (!sessionFile) {
+-		throw new Error("Cannot export in-memory session to HTML");
++	let outputPath = opts.outputPath ? normalizePath(opts.outputPath) : undefined;
++	if (!outputPath) {
++		if (!sessionFile) throw new Error("Cannot export in-memory session to HTML without an output path");
++		const sessionBasename = basename(sessionFile, ".jsonl");
++		outputPath = `${APP_NAME}-session-${sessionBasename}.html`;
+ 	}
+-	if (!existsSync(sessionFile)) {
++	if (sessionFile && !existsSync(sessionFile)) {
+ 		throw new Error("Nothing to export yet - start a conversation first");
+ 	}
+ 
+@@ -271,12 +274,6 @@ export async function exportSessionToHtml(
+ 
+ 	const html = generateHtml(sessionData, opts.themeName);
+ 
+-	let outputPath = opts.outputPath ? normalizePath(opts.outputPath) : undefined;
+-	if (!outputPath) {
+-		const sessionBasename = basename(sessionFile, ".jsonl");
+-		outputPath = `${APP_NAME}-session-${sessionBasename}.html`;
+-	}
+-
+ 	writeFileSync(outputPath, html, "utf8");
+ 	return outputPath;
+ }
+diff --git a/packages/coding-agent/src/core/saved-session-share.ts b/packages/coding-agent/src/core/saved-session-share.ts
+new file mode 100644
+index 0000000..cf38eb5
+--- /dev/null
++++ b/packages/coding-agent/src/core/saved-session-share.ts
+@@ -0,0 +1,86 @@
++import { readFileSync } from "node:fs";
++import { join } from "node:path";
++import { ReadOnlyAuthStorage } from "./auth-storage.ts";
++import { ModelRuntime } from "./model-runtime.ts";
++import { InMemoryCodingAgentModelsStore } from "./models-store.ts";
++import { DefaultResourceLoader } from "./resource-loader.ts";
++import { createAgentSession } from "./sdk.ts";
++import { parseSessionEntries, SessionManager } from "./session-manager.ts";
++import {
++	getSessionShareReadiness,
++	type SessionShareReadiness,
++	type SessionShareResult,
++	type ShareDestination,
++	shareSessionHeadless,
++} from "./session-sharing.ts";
++import { SettingsManager } from "./settings-manager.ts";
++
++interface SavedShareScope {
++	cwd: string;
++	agentDir: string;
++	projectTrusted: boolean;
++}
++
++async function configuration(scope: SavedShareScope, readOnly: boolean) {
++	const settingsManager = SettingsManager.create(scope.cwd, scope.agentDir, {
++		projectTrusted: scope.projectTrusted,
++	});
++	const modelRuntime = await ModelRuntime.create({
++		authPath: join(scope.agentDir, "auth.json"),
++		credentials: readOnly ? new ReadOnlyAuthStorage(join(scope.agentDir, "auth.json")) : undefined,
++		modelsPath: join(scope.agentDir, "models.json"),
++		modelsStore: new InMemoryCodingAgentModelsStore(),
++		allowModelNetwork: false,
++	});
++	return { settingsManager, modelRuntime };
++}
++
++export async function getSavedSessionShareReadiness(scope: SavedShareScope): Promise<SessionShareReadiness> {
++	return getSessionShareReadiness(await configuration(scope, true));
++}
++
++/** Saved exports use in-memory native state and never execute extensions or modify the source. */
++export async function shareSavedSession(
++	options: SavedShareScope & { sessionPath: string; expectedDestination?: ShareDestination },
++): Promise<SessionShareResult> {
++	const entries = parseSessionEntries(readFileSync(options.sessionPath, "utf8"));
++	if (entries[0]?.type !== "session") throw new Error("Invalid session file");
++	let configured = await configuration(options, true);
++	if (
++		configured.settingsManager.getSessionShareDestination() !== "gist" &&
++		configured.modelRuntime.getProviderAuthStatus("radius").configured
++	) {
++		configured = await configuration(options, false);
++	}
++	const snapshot = configured.settingsManager.getSettings();
++	// Resource package resolution must not install or update packages just to share a saved file.
++	snapshot.packages = [];
++	const settingsManager = SettingsManager.inMemory(snapshot, {
++		projectTrusted: options.projectTrusted,
++	});
++	const resourceLoader = new DefaultResourceLoader({
++		cwd: options.cwd,
++		agentDir: options.agentDir,
++		settingsManager,
++		noExtensions: true,
++		noSkills: true,
++		noPromptTemplates: true,
++		noThemes: true,
++	});
++	await resourceLoader.reload();
++	const { session } = await createAgentSession({
++		cwd: options.cwd,
++		agentDir: options.agentDir,
++		modelRuntime: configured.modelRuntime,
++		settingsManager,
++		resourceLoader,
++		sessionManager: SessionManager.inMemory(options.cwd, undefined, entries),
++	});
++	try {
++		return await shareSessionHeadless(session, {
++			expectedDestination: options.expectedDestination,
++		});
++	} finally {
++		session.dispose();
++	}
++}
+diff --git a/packages/coding-agent/src/core/session-sharing.ts b/packages/coding-agent/src/core/session-sharing.ts
+new file mode 100644
+index 0000000..876f3c6
+--- /dev/null
++++ b/packages/coding-agent/src/core/session-sharing.ts
+@@ -0,0 +1,195 @@
++import { spawn, spawnSync } from "node:child_process";
++import * as crypto from "node:crypto";
++import * as fs from "node:fs";
++import * as os from "node:os";
++import * as path from "node:path";
++import { DEFAULT_RADIUS_GATEWAY } from "@earendil-works/pi-ai/providers/radius-config";
++import { getAuthCredential } from "../cli/auth-command.ts";
++import { getShareViewerUrl } from "../config.ts";
++import type { AgentSession } from "./agent-session.ts";
++import { exportSessionToJsonl } from "./session-export.ts";
++
++export type ShareDestination = "gist" | "radius";
++export type SessionShareResult =
++	| { destination: "gist"; url: string; gistUrl: string }
++	| { destination: "radius"; url: string };
++export type SessionShareReadiness =
++	| { ready: true; destination: ShareDestination }
++	| {
++			ready: false;
++			destination: ShareDestination;
++			reason: "missing-gh" | "signed-out" | "radius-signed-out";
++	  };
++
++type ShareConfiguration = Pick<AgentSession, "modelRuntime" | "settingsManager">;
++const MINIMUM_OAUTH_VALIDITY_MS = 5 * 60_000;
++const AUTH_STATUS_TIMEOUT_MS = 15_000;
++const UPLOAD_TIMEOUT_MS = 90_000;
++
++/** Trailing `pi.share` entry carrying presentation metadata for the session viewer. */
++export function createShareTrailingEntries(
++	session: AgentSession,
++	parentId: string | null,
++	timestamp: string,
++): object[] {
++	return [
++		{
++			type: "custom",
++			customType: "pi.share",
++			id: crypto.randomUUID().slice(0, 8),
++			parentId,
++			timestamp,
++			data: {
++				systemPrompt: session.state.systemPrompt,
++				tools: session.state.tools.map((tool) => ({
++					name: tool.name,
++					description: tool.description,
++					parameters: tool.parameters,
++				})),
++			},
++		},
++	];
++}
++
++export function exportSessionForShare(filePath: string, session: AgentSession): void {
++	exportSessionToJsonl(session.sessionManager, filePath, (parentId, timestamp) =>
++		createShareTrailingEntries(session, parentId, timestamp),
++	);
++}
++
++function gistReadiness(): SessionShareReadiness {
++	const result = spawnSync("gh", ["auth", "status"], {
++		encoding: "utf-8",
++		windowsHide: true,
++		timeout: AUTH_STATUS_TIMEOUT_MS,
++	});
++	if (result.error && "code" in result.error && result.error.code === "ENOENT") {
++		return { ready: false, destination: "gist", reason: "missing-gh" };
++	}
++	return result.status === 0
++		? { ready: true, destination: "gist" }
++		: { ready: false, destination: "gist", reason: "signed-out" };
++}
++
++/** Readiness never resolves or refreshes OAuth credentials. */
++export function getSessionShareReadiness(session: ShareConfiguration): SessionShareReadiness {
++	const preference = session.settingsManager.getSessionShareDestination();
++	const radiusConfigured =
++		preference !== "gist" &&
++		!!session.modelRuntime.getProvider("radius") &&
++		session.modelRuntime.getProviderAuthStatus("radius").configured;
++	if (radiusConfigured) return { ready: true, destination: "radius" };
++	if (preference === "radius") {
++		return { ready: false, destination: "radius", reason: "radius-signed-out" };
++	}
++	return gistReadiness();
++}
++
++async function radiusCredential(session: ShareConfiguration): Promise<string | undefined> {
++	if (!session.modelRuntime.getProvider("radius")) return undefined;
++	return getAuthCredential(
++		await session.modelRuntime.getAuth("radius", {
++			minOAuthValidityMs: MINIMUM_OAUTH_VALIDITY_MS,
++		}),
++	);
++}
++
++async function uploadRadius(filePath: string, token: string, signal?: AbortSignal): Promise<SessionShareResult> {
++	const body = fs.readFileSync(filePath);
++	const url = new URL("/v1/artifacts", DEFAULT_RADIUS_GATEWAY);
++	url.searchParams.set("visibility", "organization");
++	url.searchParams.set("title", "Pi session");
++	const response = await fetch(url, {
++		method: "POST",
++		headers: {
++			Authorization: `Bearer ${token}`,
++			"Content-Type": "application/x-ndjson",
++			"Content-Length": String(body.byteLength),
++		},
++		body,
++		signal,
++	});
++	const result = (await response.json().catch(() => null)) as {
++		artifact?: { canonical_url?: string };
++		error?: string;
++	} | null;
++	if (!response.ok || !result?.artifact?.canonical_url) {
++		throw new Error(`Failed to upload Radius artifact: ${result?.error || response.statusText || response.status}`);
++	}
++	return { destination: "radius", url: result.artifact.canonical_url };
++}
++
++async function uploadGist(filePath: string, signal?: AbortSignal): Promise<SessionShareResult> {
++	const result = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
++		const child = spawn("gh", ["gist", "create", "--public=false", filePath], {
++			windowsHide: true,
++			signal,
++		});
++		let stdout = "";
++		let stderr = "";
++		child.stdout?.on("data", (data) => {
++			stdout += data.toString();
++		});
++		child.stderr?.on("data", (data) => {
++			stderr += data.toString();
++		});
++		child.once("error", reject);
++		child.once("close", (code) => resolve({ stdout, stderr, code }));
++	});
++	if (result.code !== 0) {
++		throw new Error(`Failed to create gist: ${result.stderr.trim() || "Unknown error"}`);
++	}
++	const gistUrl = result.stdout.trim();
++	const gistId = gistUrl.split("/").pop();
++	if (!gistId) throw new Error("Failed to parse gist ID from gh output");
++	return { destination: "gist", url: getShareViewerUrl(gistId), gistUrl };
++}
++
++/** Resolve credentials before choosing a destination; upload failures never fall back to a gist. */
++export async function shareSessionHeadless(
++	session: AgentSession,
++	options: {
++		signal?: AbortSignal;
++		themeName?: string;
++		expectedDestination?: ShareDestination;
++	} = {},
++): Promise<SessionShareResult> {
++	options.signal?.throwIfAborted();
++	const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pi-share-"));
++	try {
++		const timeout = AbortSignal.timeout(UPLOAD_TIMEOUT_MS);
++		const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
++		const preference = session.settingsManager.getSessionShareDestination();
++		const token = preference === "gist" ? undefined : await radiusCredential(session);
++		if (!token && preference === "radius") {
++			throw new Error("Radius authentication is not configured. Run '/login radius' first.");
++		}
++		const destination = token ? "radius" : "gist";
++		if (options.expectedDestination && destination !== options.expectedDestination) {
++			throw new Error("The share destination changed. Review the destination and try again.");
++		}
++		signal.throwIfAborted();
++		if (token) {
++			const jsonlFile = path.join(directory, "session.jsonl");
++			exportSessionForShare(jsonlFile, session);
++			return await uploadRadius(jsonlFile, token, signal);
++		}
++		const readiness = gistReadiness();
++		if (!readiness.ready) {
++			throw new Error(
++				readiness.reason === "missing-gh"
++					? "GitHub CLI (gh) is not installed. Install it from https://cli.github.com/"
++					: "GitHub CLI is not logged in. Run 'gh auth login' first.",
++			);
++		}
++		const htmlFile = path.join(directory, "session.html");
++		await session.exportToHtml(htmlFile, { themeName: options.themeName });
++		return await uploadGist(htmlFile, signal);
++	} finally {
++		try {
++			fs.rmSync(directory, { recursive: true, force: true });
++		} catch {
++			// A temporary file can remain locked after upload; cleanup must not hide its result.
++		}
++	}
++}
+diff --git a/packages/coding-agent/src/modes/interactive/session-share.ts b/packages/coding-agent/src/modes/interactive/session-share.ts
+index 6908131..a1f5bfa 100644
+--- a/packages/coding-agent/src/modes/interactive/session-share.ts
++++ b/packages/coding-agent/src/modes/interactive/session-share.ts
+@@ -1,17 +1,11 @@
+-import { spawn, spawnSync } from "node:child_process";
+-import * as crypto from "node:crypto";
+-import * as fs from "node:fs";
+-import * as os from "node:os";
+-import * as path from "node:path";
+-import { DEFAULT_RADIUS_GATEWAY } from "@earendil-works/pi-ai/providers/radius-config";
+ import { type Container, type EditorComponent, hyperlink, type TUI } from "@earendil-works/pi-tui";
+-import { getAuthCredential } from "../../cli/auth-command.ts";
+-import { getShareViewerUrl } from "../../config.ts";
+ import type { AgentSession } from "../../core/agent-session.ts";
+-import { exportSessionToJsonl } from "../../core/session-export.ts";
++import { shareSessionHeadless } from "../../core/session-sharing.ts";
+ import { BorderedLoader } from "./components/bordered-loader.ts";
+ import { theme } from "./theme/theme.ts";
+ 
++export { createShareTrailingEntries, exportSessionForShare } from "../../core/session-sharing.ts";
++
+ interface SessionShareContext {
+ 	session: AgentSession;
+ 	ui: TUI;
+@@ -21,204 +15,42 @@ interface SessionShareContext {
+ 	showError: (message: string) => void;
+ }
+ 
+-/** Trailing `pi.share` entry carrying the system prompt and tool schemas for the session viewer. */
+-export function createShareTrailingEntries(
+-	session: AgentSession,
+-	parentId: string | null,
+-	timestamp: string,
+-): object[] {
+-	return [
+-		{
+-			type: "custom",
+-			customType: "pi.share",
+-			id: crypto.randomUUID().slice(0, 8),
+-			parentId,
+-			timestamp,
+-			data: {
+-				systemPrompt: session.state.systemPrompt,
+-				tools: session.state.tools.map((tool) => ({
+-					name: tool.name,
+-					description: tool.description,
+-					parameters: tool.parameters,
+-				})),
+-			},
+-		},
+-	];
+-}
+-
+-/** Export the current branch with presentation metadata for Radius. */
+-export function exportSessionForShare(filePath: string, session: AgentSession): void {
+-	exportSessionToJsonl(session.sessionManager, filePath, (parentId, timestamp) =>
+-		createShareTrailingEntries(session, parentId, timestamp),
+-	);
+-}
+-
+-/** Share the current session through Radius, falling back to a private gist. */
++/** Share the current session using the native destination preference. */
+ export async function shareSession(context: SessionShareContext): Promise<void> {
+-	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-share-"));
+-	const jsonlFile = path.join(tempDir, "session.jsonl");
+-	const htmlFile = path.join(tempDir, "session.html");
+-
+-	try {
+-		try {
+-			exportSessionForShare(jsonlFile, context.session);
+-		} catch (error: unknown) {
+-			context.showError(`Failed to export session: ${error instanceof Error ? error.message : "Unknown error"}`);
+-			return;
+-		}
+-		const destination = context.session.settingsManager.getSessionShareDestination();
+-		if (destination !== "gist") {
+-			if (await tryShareViaRadius(jsonlFile, context)) return;
+-			if (destination === "radius") {
+-				context.showError("Radius authentication is not configured. Run '/login radius' first.");
+-				return;
+-			}
+-		}
+-
+-		try {
+-			const authResult = spawnSync("gh", ["auth", "status"], { encoding: "utf-8" });
+-			if (authResult.status !== 0) {
+-				context.showError("GitHub CLI is not logged in. Run 'gh auth login' first.");
+-				return;
+-			}
+-		} catch {
+-			context.showError("GitHub CLI (gh) is not installed. Install it from https://cli.github.com/");
+-			return;
+-		}
+-
+-		try {
+-			await context.session.exportToHtml(htmlFile, { themeName: theme.name });
+-		} catch (error: unknown) {
+-			context.showError(`Failed to export session: ${error instanceof Error ? error.message : "Unknown error"}`);
+-			return;
+-		}
+-		await shareViaGist(htmlFile, context);
+-	} finally {
+-		try {
+-			fs.rmSync(tempDir, { recursive: true, force: true });
+-		} catch {
+-			// Ignore cleanup errors
+-		}
+-	}
+-}
+-
+-async function tryShareViaRadius(tmpFile: string, context: SessionShareContext): Promise<boolean> {
+-	const provider = context.session.modelRuntime.getProvider("radius");
+-	if (!provider) return false;
+-
+-	const token = getAuthCredential(
+-		await context.session.modelRuntime.getAuth("radius", { minOAuthValidityMs: 5 * 60_000 }),
+-	);
+-	if (!token) return false;
+-
+-	const loader = new BorderedLoader(context.ui, theme, "Uploading to Radius...");
++	const loader = new BorderedLoader(context.ui, theme, "Sharing session...");
+ 	context.editorContainer.clear();
+ 	context.editorContainer.addChild(loader);
+ 	context.ui.setFocus(loader);
+ 	context.ui.requestRender();
+-	loader.onAbort = () => {
+-		restoreEditor(loader, context);
+-		context.showStatus("Share cancelled");
++	let restored = false;
++	const restoreEditor = () => {
++		if (restored) return;
++		restored = true;
++		loader.dispose();
++		context.editorContainer.clear();
++		context.editorContainer.addChild(context.editor);
++		context.ui.setFocus(context.editor);
+ 	};
+-
+-	try {
+-		const body = fs.readFileSync(tmpFile);
+-		const url = new URL("/v1/artifacts", DEFAULT_RADIUS_GATEWAY);
+-		url.searchParams.set("visibility", "organization");
+-		url.searchParams.set("title", "Pi session");
+-		const response = await fetch(url, {
+-			method: "POST",
+-			headers: {
+-				Authorization: `Bearer ${token}`,
+-				"Content-Type": "application/x-ndjson",
+-				"Content-Length": String(body.byteLength),
+-			},
+-			body,
+-			signal: loader.signal,
+-		});
+-		if (loader.signal.aborted) return true;
+-		const json = (await response.json().catch(() => null)) as {
+-			artifact?: { canonical_url: string };
+-			error?: string;
+-		} | null;
+-		if (loader.signal.aborted) return true;
+-		restoreEditor(loader, context);
+-		if (!response.ok || !json?.artifact) {
+-			context.showError(
+-				`Failed to upload Radius artifact: ${json?.error || response.statusText || response.status}`,
+-			);
+-			return true;
+-		}
+-		const shareUrl = json.artifact.canonical_url;
+-		context.showStatus(`Share URL: ${hyperlink(shareUrl, shareUrl)}`);
+-		return true;
+-	} catch (error: unknown) {
+-		if (!loader.signal.aborted) {
+-			restoreEditor(loader, context);
+-			context.showError(
+-				`Failed to upload Radius artifact: ${error instanceof Error ? error.message : "Unknown error"}`,
+-			);
+-		}
+-		return true;
+-	}
+-}
+-
+-async function shareViaGist(tmpFile: string, context: SessionShareContext): Promise<void> {
+-	const loader = new BorderedLoader(context.ui, theme, "Creating gist...");
+-	context.editorContainer.clear();
+-	context.editorContainer.addChild(loader);
+-	context.ui.setFocus(loader);
+-	context.ui.requestRender();
+-
+-	let proc: ReturnType<typeof spawn> | null = null;
+ 	loader.onAbort = () => {
+-		proc?.kill();
+-		restoreEditor(loader, context);
++		restoreEditor();
+ 		context.showStatus("Share cancelled");
+ 	};
+-
+ 	try {
+-		const result = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
+-			proc = spawn("gh", ["gist", "create", "--public=false", tmpFile]);
+-			let stdout = "";
+-			let stderr = "";
+-			proc.stdout?.on("data", (data) => {
+-				stdout += data.toString();
+-			});
+-			proc.stderr?.on("data", (data) => {
+-				stderr += data.toString();
+-			});
+-			proc.on("close", (code) => resolve({ stdout, stderr, code }));
++		const result = await shareSessionHeadless(context.session, {
++			signal: loader.signal,
++			themeName: theme.name,
+ 		});
+-
+ 		if (loader.signal.aborted) return;
+-		restoreEditor(loader, context);
+-
+-		if (result.code !== 0) {
+-			context.showError(`Failed to create gist: ${result.stderr?.trim() || "Unknown error"}`);
+-			return;
+-		}
+-
+-		const gistUrl = result.stdout?.trim();
+-		const gistId = gistUrl?.split("/").pop();
+-		if (!gistId) {
+-			context.showError("Failed to parse gist ID from gh output");
+-			return;
++		const links = [`Share URL: ${hyperlink(result.url, result.url)}`];
++		if (result.destination === "gist") {
++			links.push(`Gist: ${hyperlink(result.gistUrl, result.gistUrl)}`);
+ 		}
+-
+-		const previewUrl = getShareViewerUrl(gistId);
+-		context.showStatus(`Share URL: ${hyperlink(previewUrl, previewUrl)}\nGist: ${hyperlink(gistUrl, gistUrl)}`);
++		context.showStatus(links.join("\n"));
+ 	} catch (error: unknown) {
+ 		if (!loader.signal.aborted) {
+-			restoreEditor(loader, context);
+-			context.showError(`Failed to create gist: ${error instanceof Error ? error.message : "Unknown error"}`);
++			context.showError(error instanceof Error ? error.message : "Failed to share session");
+ 		}
++	} finally {
++		restoreEditor();
+ 	}
+ }
+-
+-function restoreEditor(loader: BorderedLoader, context: SessionShareContext): void {
+-	loader.dispose();
+-	context.editorContainer.clear();
+-	context.editorContainer.addChild(context.editor);
+-	context.ui.setFocus(context.editor);
+-}
+diff --git a/packages/coding-agent/src/modes/rpc/rpc-mode.ts b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
+index 1c0995d..c6fbad3 100644
+--- a/packages/coding-agent/src/modes/rpc/rpc-mode.ts
++++ b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
+@@ -12,6 +12,7 @@
+  */
+ 
+ import * as crypto from "node:crypto";
++import { getAgentDir } from "../../config.ts";
+ import type { AgentSessionRuntime } from "../../core/agent-session-runtime.ts";
+ import type {
+ 	ExtensionUIContext,
+@@ -25,6 +26,8 @@ import {
+ 	waitForRawStdoutBackpressure,
+ 	writeRawStdout,
+ } from "../../core/output-guard.ts";
++import { getSavedSessionShareReadiness } from "../../core/saved-session-share.ts";
++import { shareSessionHeadless } from "../../core/session-sharing.ts";
+ import { killTrackedDetachedChildren } from "../../utils/shell.ts";
+ import { type Theme, theme } from "../interactive/theme/theme.ts";
+ import { toJsonEvent } from "../json-event.ts";
+@@ -600,6 +603,25 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
+ 				return success(id, "export_html", { path });
+ 			}
+ 
++			case "share_readiness": {
++				await session.settingsManager.reload();
++				const readiness = await getSavedSessionShareReadiness({
++					cwd: session.sessionManager.getCwd(),
++					agentDir: getAgentDir(),
++					projectTrusted: session.settingsManager.isProjectTrusted(),
++				});
++				return success(id, "share_readiness", readiness);
++			}
++
++			case "share_session": {
++				await session.settingsManager.reload();
++				const result = await shareSessionHeadless(session, {
++					expectedDestination: command.expectedDestination,
++					themeName: theme.name,
++				});
++				return success(id, "share_session", result);
++			}
++
+ 			case "switch_session": {
+ 				const result = await runtimeHost.switchSession(command.sessionPath);
+ 				if (!result.cancelled) {
+diff --git a/packages/coding-agent/src/modes/rpc/rpc-types.ts b/packages/coding-agent/src/modes/rpc/rpc-types.ts
+index 7fc7151..93d64a3 100644
+--- a/packages/coding-agent/src/modes/rpc/rpc-types.ts
++++ b/packages/coding-agent/src/modes/rpc/rpc-types.ts
+@@ -11,6 +11,7 @@ import type { PromptDisposition, QueuedInputDisposition, SessionStats } from "..
+ import type { BashResult } from "../../core/bash-executor.ts";
+ import type { CompactionResult } from "../../core/compaction/index.ts";
+ import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
++import type { SessionShareReadiness, SessionShareResult } from "../../core/session-sharing.ts";
+ import type { SourceInfo } from "../../core/source-info.ts";
+ 
+ // ============================================================================
+@@ -58,6 +59,8 @@ export type RpcCommand =
+ 	// Session
+ 	| { id?: string; type: "get_session_stats" }
+ 	| { id?: string; type: "export_html"; outputPath?: string }
++	| { id?: string; type: "share_readiness" }
++	| { id?: string; type: "share_session"; expectedDestination?: "gist" | "radius" }
+ 	| { id?: string; type: "switch_session"; sessionPath: string }
+ 	| { id?: string; type: "fork"; entryId: string }
+ 	| { id?: string; type: "clone" }
+@@ -196,6 +199,20 @@ export type RpcResponse =
+ 	// Session
+ 	| { id?: string; type: "response"; command: "get_session_stats"; success: true; data: SessionStats }
+ 	| { id?: string; type: "response"; command: "export_html"; success: true; data: { path: string } }
++	| {
++			id?: string;
++			type: "response";
++			command: "share_readiness";
++			success: true;
++			data: SessionShareReadiness;
++	  }
++	| {
++			id?: string;
++			type: "response";
++			command: "share_session";
++			success: true;
++			data: SessionShareResult;
++	  }
+ 	| { id?: string; type: "response"; command: "switch_session"; success: true; data: { cancelled: boolean } }
+ 	| { id?: string; type: "response"; command: "fork"; success: true; data: { text: string; cancelled: boolean } }
+ 	| { id?: string; type: "response"; command: "clone"; success: true; data: { cancelled: boolean } }
+diff --git a/packages/coding-agent/test/saved-session-share.test.ts b/packages/coding-agent/test/saved-session-share.test.ts
+new file mode 100644
+index 0000000..27f63d8
+--- /dev/null
++++ b/packages/coding-agent/test/saved-session-share.test.ts
+@@ -0,0 +1,191 @@
++import type * as childProcess from "node:child_process";
++import { EventEmitter } from "node:events";
++import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { PassThrough } from "node:stream";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { getSavedSessionShareReadiness, shareSavedSession } from "../src/core/saved-session-share.ts";
++
++const processes = vi.hoisted(() => ({ spawn: vi.fn() }));
++
++vi.mock("node:child_process", async (importOriginal) => ({
++	...(await importOriginal<typeof childProcess>()),
++	spawnSync: vi.fn(() => ({ status: 0 })),
++	spawn: processes.spawn,
++}));
++
++describe("saved session sharing", () => {
++	let root: string;
++	let scope: { cwd: string; agentDir: string; projectTrusted: boolean };
++	let sessionPath: string;
++	let settingsPath: string;
++	let authPath: string;
++	let extensionMarker: string;
++
++	beforeEach(() => {
++		vi.clearAllMocks();
++		root = mkdtempSync(join(tmpdir(), "pi-saved-share-test-"));
++		scope = { cwd: join(root, "workspace"), agentDir: join(root, "account"), projectTrusted: true };
++		mkdirSync(scope.cwd, { recursive: true });
++		mkdirSync(scope.agentDir, { recursive: true });
++		mkdirSync(join(scope.cwd, ".pi"), { recursive: true });
++		settingsPath = join(scope.agentDir, "settings.json");
++		authPath = join(scope.agentDir, "auth.json");
++		extensionMarker = join(root, "extension-was-executed");
++		const extensionPath = join(root, "extension.ts");
++		writeFileSync(
++			extensionPath,
++			`import { writeFileSync } from 'node:fs';\n` +
++				`export default function () { writeFileSync(${JSON.stringify(extensionMarker)}, 'executed') }\n`,
++		);
++		writeFileSync(
++			settingsPath,
++			JSON.stringify({
++				sessionShareDestination: "radius",
++				extensions: [extensionPath],
++			}),
++		);
++		writeFileSync(authPath, JSON.stringify({ radius: { type: "api_key", key: "qa-radius-value" } }));
++		sessionPath = join(root, "source.jsonl");
++		const timestamp = new Date().toISOString();
++		writeFileSync(
++			sessionPath,
++			`${[
++				{ type: "session", version: 3, id: "saved-session", cwd: scope.cwd, timestamp },
++				{
++					type: "message",
++					id: "user",
++					parentId: null,
++					timestamp,
++					message: { role: "user", content: "saved branch", timestamp: Date.now() },
++				},
++			]
++				.map((entry) => JSON.stringify(entry))
++				.join("\n")}\n`,
++		);
++	});
++
++	afterEach(() => {
++		vi.unstubAllGlobals();
++		rmSync(root, { recursive: true, force: true });
++	});
++
++	it("reads workspace-specific preferences afresh without network, extensions or configuration writes", async () => {
++		const before = [settingsPath, authPath, sessionPath].map((filePath) => readFileSync(filePath, "utf8"));
++		const filesBefore = readdirSync(root, { recursive: true });
++		const fetchMock = vi.fn(() => {
++			throw new Error("readiness must not use the network");
++		});
++		vi.stubGlobal("fetch", fetchMock);
++		expect(await getSavedSessionShareReadiness(scope)).toEqual({ ready: true, destination: "radius" });
++		expect(fetchMock).not.toHaveBeenCalled();
++		expect(existsSync(extensionMarker)).toBe(false);
++		expect([settingsPath, authPath, sessionPath].map((filePath) => readFileSync(filePath, "utf8"))).toEqual(before);
++		expect(readdirSync(root, { recursive: true })).toEqual(filesBefore);
++		writeFileSync(join(scope.cwd, ".pi", "settings.json"), JSON.stringify({ sessionShareDestination: "gist" }));
++		expect(await getSavedSessionShareReadiness(scope)).toEqual({ ready: true, destination: "gist" });
++		expect(await getSavedSessionShareReadiness({ ...scope, projectTrusted: false })).toEqual({
++			ready: true,
++			destination: "radius",
++		});
++		writeFileSync(authPath, "{}");
++		expect(await getSavedSessionShareReadiness({ ...scope, projectTrusted: false })).toEqual({
++			ready: false,
++			destination: "radius",
++			reason: "radius-signed-out",
++		});
++	});
++
++	it("does not create an account store when no Radius credential exists", async () => {
++		rmSync(authPath);
++		expect(await getSavedSessionShareReadiness(scope)).toEqual({
++			ready: false,
++			destination: "radius",
++			reason: "radius-signed-out",
++		});
++		expect(existsSync(authPath)).toBe(false);
++	});
++
++	it.each([true, false])(
++		"shares a source with trailing newline %s without changing it or settings",
++		async (terminated) => {
++			if (!terminated) writeFileSync(sessionPath, readFileSync(sessionPath, "utf8").trimEnd());
++			const before = [settingsPath, authPath, sessionPath].map((filePath) => readFileSync(filePath, "utf8"));
++			const fetchMock = vi.fn(async () =>
++				Response.json({
++					artifact: { canonical_url: "https://radius.test/artifacts/saved" },
++				}),
++			);
++			vi.stubGlobal("fetch", fetchMock);
++			expect(await shareSavedSession({ ...scope, sessionPath, expectedDestination: "radius" })).toEqual({
++				destination: "radius",
++				url: "https://radius.test/artifacts/saved",
++			});
++			expect(fetchMock).toHaveBeenCalledOnce();
++			const [url, options] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
++			expect(url.pathname).toBe("/v1/artifacts");
++			expect(String(options.body)).toContain("saved branch");
++			expect(String(options.body)).toContain('"customType":"pi.share"');
++			expect(existsSync(extensionMarker)).toBe(false);
++			expect([settingsPath, authPath, sessionPath].map((filePath) => readFileSync(filePath, "utf8"))).toEqual(
++				before,
++			);
++		},
++	);
++
++	it.each([
++		{ preference: "gist", accountExists: false },
++		{ preference: "gist", accountExists: true },
++		{ preference: "auto", accountExists: false },
++		{ preference: "auto", accountExists: true },
++	])("shares retired-model history with $preference and account store $accountExists", async (fixture) => {
++		if (fixture.accountExists) writeFileSync(authPath, "{}");
++		else rmSync(authPath);
++		const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
++		settings.sessionShareDestination = fixture.preference;
++		writeFileSync(settingsPath, JSON.stringify(settings));
++		const history =
++			readFileSync(sessionPath, "utf8") +
++			JSON.stringify({
++				type: "model_change",
++				id: "retired-model",
++				parentId: "user",
++				timestamp: new Date().toISOString(),
++				provider: "retired-provider",
++				modelId: "retired-model",
++			});
++		writeFileSync(sessionPath, history);
++		const accountFiles = readdirSync(scope.agentDir);
++		const settingsBefore = readFileSync(settingsPath, "utf8");
++		const fetchMock = vi.fn(() => {
++			throw new Error("gist must not use provider APIs");
++		});
++		vi.stubGlobal("fetch", fetchMock);
++		let uploadedHtml = "";
++		processes.spawn.mockImplementation((_command: string, args: string[]) => {
++			uploadedHtml = readFileSync(args.at(-1)!, "utf8");
++			const child = Object.assign(new EventEmitter(), {
++				stdout: new PassThrough(),
++				stderr: new PassThrough(),
++			});
++			queueMicrotask(() => {
++				child.stdout.end("https://gist.github.com/test/saved-no-model\n");
++				child.emit("close", 0);
++			});
++			return child;
++		});
++		expect(await shareSavedSession({ ...scope, sessionPath, expectedDestination: "gist" })).toMatchObject({
++			destination: "gist",
++			gistUrl: "https://gist.github.com/test/saved-no-model",
++		});
++		expect(processes.spawn).toHaveBeenCalledOnce();
++		expect(uploadedHtml).toContain("<html");
++		expect(fetchMock).not.toHaveBeenCalled();
++		expect(existsSync(extensionMarker)).toBe(false);
++		expect(readFileSync(sessionPath, "utf8")).toBe(history);
++		expect(readFileSync(settingsPath, "utf8")).toBe(settingsBefore);
++		expect(readdirSync(scope.agentDir)).toEqual(accountFiles);
++		if (fixture.accountExists) expect(readFileSync(authPath, "utf8")).toBe("{}");
++	});
++});
+diff --git a/packages/coding-agent/test/session-share.test.ts b/packages/coding-agent/test/session-share.test.ts
+index d46835a..a027b6e 100644
+--- a/packages/coding-agent/test/session-share.test.ts
++++ b/packages/coding-agent/test/session-share.test.ts
+@@ -123,12 +123,11 @@ describe("shareSession", () => {
+ 		} as never);
+ 
+ 		expect(getProvider).not.toHaveBeenCalled();
+-		expect(childProcessMocks.spawn).toHaveBeenCalledWith("gh", [
+-			"gist",
+-			"create",
+-			"--public=false",
+-			expect.any(String),
+-		]);
++		expect(childProcessMocks.spawn).toHaveBeenCalledWith(
++			"gh",
++			["gist", "create", "--public=false", expect.any(String)],
++			expect.objectContaining({ windowsHide: true }),
++		);
+ 		expect(statuses[0]).toContain("https://pi.dev/session/#forced-gist");
+ 	});
+ 
+diff --git a/packages/coding-agent/test/session-sharing-headless.test.ts b/packages/coding-agent/test/session-sharing-headless.test.ts
+new file mode 100644
+index 0000000..9e66d56
+--- /dev/null
++++ b/packages/coding-agent/test/session-sharing-headless.test.ts
+@@ -0,0 +1,152 @@
++import { EventEmitter } from "node:events";
++import { existsSync, writeFileSync } from "node:fs";
++import { PassThrough } from "node:stream";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import type { AgentSession } from "../src/core/agent-session.ts";
++import { SessionManager } from "../src/core/session-manager.ts";
++import { getSessionShareReadiness, shareSessionHeadless } from "../src/core/session-sharing.ts";
++
++const processes = vi.hoisted(() => ({
++	spawn: vi.fn(),
++	spawnSync: vi.fn(() => ({ status: 0 })),
++}));
++vi.mock("node:child_process", () => processes);
++
++function session(preference: "auto" | "gist" | "radius", token?: string) {
++	const manager = SessionManager.inMemory(process.cwd());
++	const root = manager.appendMessage({ role: "user", content: "root", timestamp: Date.now() });
++	manager.appendMessage({ role: "user", content: "abandoned", timestamp: Date.now() });
++	manager.branch(root);
++	manager.appendMessage({ role: "user", content: "selected", timestamp: Date.now() });
++	const getAuth = vi.fn(async () => (token ? { auth: { apiKey: token } } : undefined));
++	const native = {
++		sessionManager: manager,
++		state: {
++			systemPrompt: "system instructions",
++			tools: [{ name: "read", description: "Read a file", parameters: { type: "object" } }],
++		},
++		settingsManager: { getSessionShareDestination: () => preference },
++		modelRuntime: {
++			getProvider: () => ({ id: "radius" }),
++			getProviderAuthStatus: () => ({ configured: !!token }),
++			getAuth,
++		},
++		exportToHtml: vi.fn(async (filePath: string) => writeFileSync(filePath, "native html")),
++	};
++	// Narrow fixture at the native session boundary; tests call only the public sharing functions.
++	return { native: native as unknown as AgentSession, getAuth, manager };
++}
++
++describe("headless session sharing", () => {
++	beforeEach(() => {
++		vi.clearAllMocks();
++		processes.spawnSync.mockReturnValue({ status: 0 });
++		processes.spawn.mockImplementation(() => {
++			const child = Object.assign(new EventEmitter(), {
++				stdout: new PassThrough(),
++				stderr: new PassThrough(),
++			});
++			queueMicrotask(() => {
++				child.stdout.end("https://gist.github.com/test/native-gist\n");
++				child.emit("close", 0);
++			});
++			return child;
++		});
++	});
++	afterEach(() => vi.unstubAllGlobals());
++
++	it("reports the configured destination without resolving OAuth", () => {
++		const fixture = session("auto", "qa-token");
++		expect(getSessionShareReadiness(fixture.native)).toEqual({ ready: true, destination: "radius" });
++		expect(fixture.getAuth).not.toHaveBeenCalled();
++		expect(processes.spawnSync).not.toHaveBeenCalled();
++	});
++
++	it("uploads the active branch and native presentation metadata to the organization", async () => {
++		const fixture = session("auto", "qa-token");
++		const before = fixture.manager.getBranch();
++		const fetchMock = vi.fn(async () =>
++			Response.json({
++				artifact: { canonical_url: "https://radius.test/artifact/shared" },
++			}),
++		);
++		vi.stubGlobal("fetch", fetchMock);
++		expect(await shareSessionHeadless(fixture.native, { expectedDestination: "radius" })).toEqual({
++			destination: "radius",
++			url: "https://radius.test/artifact/shared",
++		});
++		const [url, options] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
++		expect(url.pathname).toBe("/v1/artifacts");
++		expect(url.searchParams.get("visibility")).toBe("organization");
++		expect(url.searchParams.get("title")).toBe("Pi session");
++		expect(options.method).toBe("POST");
++		expect(options.headers).toMatchObject({ Authorization: "Bearer qa-token" });
++		const body = String(options.body);
++		expect(body).toContain("selected");
++		expect(body).not.toContain("abandoned");
++		expect(body).toContain('"customType":"pi.share"');
++		expect(body).toContain("system instructions");
++		expect(body).toContain("Read a file");
++		expect(fixture.getAuth).toHaveBeenCalledWith("radius", { minOAuthValidityMs: 300_000 });
++		expect(fixture.manager.getBranch()).toEqual(before);
++		expect(processes.spawn).not.toHaveBeenCalled();
++	});
++
++	it("forces gist without resolving Radius credentials and removes its temporary export", async () => {
++		const fixture = session("gist", "qa-token");
++		const result = await shareSessionHeadless(fixture.native, { expectedDestination: "gist" });
++		expect(result).toMatchObject({ destination: "gist", gistUrl: "https://gist.github.com/test/native-gist" });
++		expect(fixture.getAuth).not.toHaveBeenCalled();
++		const filePath = processes.spawn.mock.calls[0][1].at(-1) as string;
++		expect(existsSync(filePath)).toBe(false);
++	});
++
++	it("falls back to gist only when auto has no Radius credential", async () => {
++		const fixture = session("auto");
++		expect(await shareSessionHeadless(fixture.native)).toMatchObject({ destination: "gist" });
++		expect(fixture.getAuth).toHaveBeenCalledOnce();
++	});
++
++	it("refuses Radius without credentials", async () => {
++		const fixture = session("radius");
++		expect(getSessionShareReadiness(fixture.native)).toEqual({
++			ready: false,
++			destination: "radius",
++			reason: "radius-signed-out",
++		});
++		await expect(shareSessionHeadless(fixture.native)).rejects.toThrow("authentication is not configured");
++		expect(processes.spawn).not.toHaveBeenCalled();
++	});
++
++	it.each(["upload", "auth"])("does not fall back after a Radius %s failure", async (failure) => {
++		const fixture = session("auto", "qa-token");
++		if (failure === "auth") fixture.getAuth.mockRejectedValue(new Error("refresh failed"));
++		vi.stubGlobal(
++			"fetch",
++			vi.fn(async () => Response.json({ error: "upload refused" }, { status: 403 })),
++		);
++		await expect(shareSessionHeadless(fixture.native)).rejects.toThrow(
++			failure === "auth" ? "refresh failed" : "upload refused",
++		);
++		expect(processes.spawn).not.toHaveBeenCalled();
++		expect(processes.spawnSync).not.toHaveBeenCalled();
++	});
++
++	it("requires another review when credentials change the destination", async () => {
++		const fixture = session("auto");
++		await expect(shareSessionHeadless(fixture.native, { expectedDestination: "radius" })).rejects.toThrow(
++			"destination changed",
++		);
++		expect(processes.spawn).not.toHaveBeenCalled();
++		expect(fixture.native.exportToHtml).not.toHaveBeenCalled();
++	});
++
++	it("does not export or upload an aborted request", async () => {
++		const fixture = session("gist");
++		const controller = new AbortController();
++		controller.abort();
++		await expect(shareSessionHeadless(fixture.native, { signal: controller.signal })).rejects.toThrow();
++		expect(processes.spawn).not.toHaveBeenCalled();
++		expect(fixture.native.exportToHtml).not.toHaveBeenCalled();
++	});
++});

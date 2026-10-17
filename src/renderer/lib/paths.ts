@@ -1,11 +1,15 @@
 import { platform } from './ipc'
+import { stripWindowsPathPrefix } from '@shared/session-identity'
 
 /**
  * Canonical form of a filesystem path for comparisons: one separator, no trailing separator, and
  * case-folded on Windows (where `d:\proj` and `D:\Proj` are the same folder).
  */
 export function normalizePath(path: string): string {
-  const unified = path.replace(/[\\/]+/g, platform.os === 'win32' ? '\\' : '/').replace(/[\\/]$/, '')
+  const ordinary = stripWindowsPathPrefix(path)
+  const unified = ordinary
+    .replace(/[\\/]+/g, platform.os === 'win32' ? '\\' : '/')
+    .replace(/[\\/]$/, '')
   return platform.os === 'win32' ? unified.toLowerCase() : unified
 }
 

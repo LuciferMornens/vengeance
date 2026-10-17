@@ -1,9 +1,9 @@
-import { Fragment, useEffect, useMemo, useRef, type KeyboardEvent } from 'react'
+import { Fragment, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { AnimatePresence, LayoutGroup, motion } from 'motion/react'
 import { useShallow } from 'zustand/react/shallow'
-import { ChevronRight, FolderOpen, Pin, Search, Settings, Trash2, X } from 'lucide-react'
+import { ChevronRight, FolderOpen, Pin, Settings, Trash2, X } from 'lucide-react'
 import type { OpenSessionRef } from '@shared/api/app'
-import { ENGINE_LABELS, normalizeEngineId } from '@shared/api/engine'
+import { ENGINE_LABELS, normalizeEngineId, type EngineId } from '@shared/api/engine'
 import type { SessionListItem } from '@shared/api/sessions'
 import { cn } from '../../lib/cn'
 import { basename, pluralize } from '../../lib/format'
@@ -11,7 +11,7 @@ import { spring } from '../../lib/motion'
 import { normalizePath, samePath } from '../../lib/paths'
 import { useAgents, type AgentsStore } from '../../store/agents'
 import { useApp } from '../../store/app'
-import { Button, IconButton, Input, Tooltip } from '../../ui'
+import { Button, IconButton, Tooltip } from '../../ui'
 import { chooseWorkspace } from '../shell/workspace'
 import {
   activateAgent,
@@ -55,6 +55,13 @@ import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { BackgroundSessions } from './BackgroundSessions'
 import { WindowedList } from './WindowedList'
 import { inWorkspaceView } from './workspace-view'
+import { onSessionListKeyDown, SidebarSearch } from './SidebarSearch'
+import { buildPrimeSessionFamilies, primeFamilyNode } from './prime-family-model'
+import {
+  PrimeFamilyChildren,
+  primeFamilyMatches,
+  PrimeOrphanSessions
+} from './PrimeSessionFamilies'
 
 const WORKSPACE_GROUP_HEIGHT = 294
 
@@ -112,6 +119,7 @@ function SubagentSessions({ items, searching }: { items: SessionListItem[]; sear
 }
 
 interface SubagentRowProps {
+  family?: ReactNode
   /** Subagent child sessions stored under this one. */
   subagents?: SessionListItem[]
   /** The search matches one of them (they show expanded). */
@@ -129,6 +137,7 @@ function HistoryRow({
   pinned,
   showWorkspace,
   subagents,
+  family,
   searching = false
 }: HistoryRowProps) {
   const title = itemTitle(item)
@@ -176,6 +185,7 @@ function HistoryRow({
       {subagents && subagents.length > 0 && (
         <SubagentSessions items={subagents} searching={searching} />
       )}
+      {family}
     </>
   )
 }
@@ -314,6 +324,7 @@ function DormantRow({
   pinned,
   foreignWorkspace,
   subagents,
+  family,
   searching = false
 }: DormantRowProps) {
   const title = listing ? itemTitle(listing) : 'Untitled session'
@@ -360,68 +371,9 @@ function DormantRow({
       {subagents && subagents.length > 0 && (
         <SubagentSessions items={subagents} searching={searching} />
       )}
+      {family}
     </>
   )
-}
-
-function SearchField() {
-  const query = useSessions((s) => s.query)
-  const setQuery = useSessions((s) => s.setQuery)
-  const nonce = useSessions((s) => s.searchFocusNonce)
-  const ref = useRef<HTMLInputElement>(null)
-  useEffect(() => {
-    if (nonce > 0) {
-      // Let the sidebar finish opening before taking focus.
-      const t = setTimeout(() => ref.current?.focus(), 60)
-      return () => clearTimeout(t)
-    }
-  }, [nonce])
-  return (
-    <Input
-      ref={ref}
-      inputSize="sm"
-      value={query}
-      placeholder="Search sessions"
-      aria-label="Search sessions"
-      leading={<Search />}
-      trailing={
-        query ? (
-          <button
-            type="button"
-            aria-label="Clear search"
-            onClick={() => setQuery('')}
-            className="rounded-xs p-0.5 text-fg-3 hover:bg-active hover:text-fg"
-          >
-            <X className="size-3" />
-          </button>
-        ) : undefined
-      }
-      onChange={(e) => setQuery(e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape' && query) {
-          e.stopPropagation()
-          setQuery('')
-        } else if (e.key === 'ArrowDown') {
-          e.preventDefault()
-          document.querySelector<HTMLElement>('[data-session-list] [data-session-row]')?.focus()
-        }
-      }}
-      className="bg-transparent [&_input]:bg-[color-mix(in_oklab,var(--surface-2)_60%,transparent)] [&_input]:shadow-[inset_0_0_0_1px_var(--hairline)]"
-    />
-  )
-}
-
-/** Roving arrow-key focus between session rows. */
-function onListKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
-  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
-  const rows = [...event.currentTarget.querySelectorAll<HTMLElement>('[data-session-row]')]
-  const index = rows.indexOf(document.activeElement as HTMLElement)
-  if (index < 0) return
-  event.preventDefault()
-  const next = rows[index + (event.key === 'ArrowDown' ? 1 : -1)]
-  if (next) next.focus()
-  else if (event.key === 'ArrowUp')
-    document.querySelector<HTMLInputElement>('input[aria-label="Search sessions"]')?.focus()
 }
 
 /** Left sidebar: workspace switcher, open agents, pinned + dated session history, search, footer. */
@@ -435,6 +387,7 @@ export function SessionSidebar() {
   // Per-agent strings only (shallow-compared), never the agents map: streaming frames don't re-render the list.
   const openIds = useAgents(useShallow(openIdsOf))
   const openCwds = useAgents(useShallow((s) => openIdsOf(s).map((id) => s.agents[id]!.info.cwd)))
+  const openInfos = useAgents(useShallow((s) => openIdsOf(s).map((id) => s.agents[id]!.info)))
   const openFileList = useAgents(
     useShallow((s) => openIdsOf(s).map((id) => agentSessionFile(s.agents[id]!) ?? ''))
   )
@@ -470,6 +423,12 @@ export function SessionSidebar() {
 
   const pinned = useMemo(() => new Set(pinnedPaths.map(normalizePath)), [pinnedPaths])
   const listed = list?.items
+  const families = useMemo(
+    () => buildPrimeSessionFamilies({ open: openInfos, dormant, background, saved: listed ?? [] }),
+    [openInfos, dormant, background, listed]
+  )
+  const familyOf = (path?: string, nativeId?: string, engine?: EngineId, agentId?: string) =>
+    engine === 'prime' ? primeFamilyNode(families, path, nativeId, agentId) : undefined
   const byPath = useMemo(
     () => new Map((listed ?? []).map((i) => [normalizePath(i.path), i])),
     [listed]
@@ -479,6 +438,7 @@ export function SessionSidebar() {
     const topLevel: SessionListItem[] = []
     const children = new Map<string, SessionListItem[]>()
     for (const item of listed ?? []) {
+      if (item.engine === 'prime' && primeFamilyNode(families, item.path)?.child) continue
       const parent = item.subagentRun ? normalizePath(item.subagentRun.parentPath) : undefined
       if (!parent || !byPath.has(parent)) {
         topLevel.push(item)
@@ -489,10 +449,20 @@ export function SessionSidebar() {
       else children.set(parent, [item])
     }
     return { items: topLevel, subagentsByParent: children }
-  }, [listed, byPath])
-  const subagentsOf = (path: string): SubagentRowProps => {
+  }, [listed, byPath, families])
+  const subagentsOf = (path: string, engine?: EngineId): SubagentRowProps => {
     const subagents = subagentsByParent.get(normalizePath(path))
-    return { subagents, searching: !!query.trim() && someMatch(query, subagents) }
+    return {
+      subagents,
+      searching: !!query.trim() && someMatch(query, subagents),
+      family: (
+        <PrimeFamilyChildren
+          parent={familyOf(path, undefined, engine)}
+          query={query}
+          inView={inView}
+        />
+      )
+    }
   }
 
   const inView = (cwd: string) => inWorkspaceView(cwd, { scope, activeWorkspace, workspaces })
@@ -501,6 +471,8 @@ export function SessionSidebar() {
     const listing = file ? byPath.get(normalizePath(file)) : undefined
     return {
       id,
+      engine: openInfos[i]?.engine,
+      nativeId: openInfos[i]?.nativeAgentId,
       cwd: openCwds[i] ?? '',
       file,
       listing,
@@ -509,19 +481,26 @@ export function SessionSidebar() {
     }
   })
   const visibleOpen = open.filter(
-    (a) => inView(a.cwd) && matchesQuery(query, a.title, a.searchText)
+    (agent) =>
+      !familyOf(agent.file, agent.nativeId, agent.engine, agent.id)?.child &&
+      inView(agent.cwd) &&
+      (matchesQuery(query, agent.title, agent.searchText) ||
+        primeFamilyMatches(familyOf(agent.file, agent.nativeId, agent.engine, agent.id), query))
   )
   const runningFiles = new Set(openFileList.filter(Boolean).map(normalizePath))
   const backgroundFiles = new Set(
     background.flatMap((agent) => (agent.sessionPath ? [normalizePath(agent.sessionPath)] : []))
   )
   const visibleDormant = dormant
+    .filter((session) => !familyOf(session.path, undefined, session.engine)?.child)
     .filter((session) => inView(session.cwd))
     .filter((session) => !backgroundFiles.has(normalizePath(session.path)))
     .filter((session) => !runningFiles.has(normalizePath(session.path)))
     .map((session) => ({ session, listing: findListed(lists, session.path) }))
-    .filter(({ listing }) =>
-      matchesQuery(query, listing ? itemTitle(listing) : '', listing?.searchText)
+    .filter(
+      ({ listing }) =>
+        matchesQuery(query, listing ? itemTitle(listing) : '', listing?.searchText) ||
+        primeFamilyMatches(familyOf(listing?.path, undefined, listing?.engine), query)
     )
   const openCount = visibleOpen.length + visibleDormant.length
   // A string key (not a Set) so the history memo only recomputes when the set of open files really changes.
@@ -536,13 +515,15 @@ export function SessionSidebar() {
     const openFiles = new Set(openFilesKey.split('|'))
     // A parent also matches through its subagent sessions (they show expanded under it).
     const matches = (item: SessionListItem) =>
-      someMatch(query, [item]) || someMatch(query, subagentsByParent.get(normalizePath(item.path)))
+      someMatch(query, [item]) ||
+      someMatch(query, subagentsByParent.get(normalizePath(item.path))) ||
+      (item.engine === 'prime' && primeFamilyMatches(primeFamilyNode(families, item.path), query))
     const history = items.filter((i) => !openFiles.has(normalizePath(i.path)) && matches(i))
     return {
       pinnedItems: history.filter((i) => pinned.has(normalizePath(i.path))),
       rest: history.filter((i) => !pinned.has(normalizePath(i.path)))
     }
-  }, [items, subagentsByParent, openFilesKey, query, pinned])
+  }, [items, subagentsByParent, openFilesKey, query, pinned, families])
   const historyCount = pinnedItems.length + rest.length
 
   const now = new Date()
@@ -567,7 +548,11 @@ export function SessionSidebar() {
   const hasBackgroundMatch = background.some((agent) =>
     matchesQuery(query, agent.name, agent.cwd, agent.status)
   )
-  const nothing = !loading && historyCount === 0 && openCount === 0 && !hasBackgroundMatch
+  const hasFamilyMatch = families.nodes.some(
+    (node) => node.child && inView(node.cwd) && primeFamilyMatches(node, query)
+  )
+  const nothing =
+    !loading && historyCount === 0 && openCount === 0 && !hasBackgroundMatch && !hasFamilyMatch
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -576,21 +561,23 @@ export function SessionSidebar() {
         <NewSessionActions />
       </div>
       <div className="px-3 pt-2 pb-1.5">
-        <SearchField />
+        <SidebarSearch />
       </div>
 
       <LayoutGroup>
         <div
           ref={scrollRef}
           data-session-list
-          onKeyDown={onListKeyDown}
+          onKeyDown={onSessionListKeyDown}
           className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pb-3 [scrollbar-gutter:stable]"
         >
           {openCount > 0 && (
             <section aria-label="Open sessions">
               <SectionHeader label="Open" count={openCount} />
               {visibleOpen.map((agent) => {
-                const { subagents, searching } = agent.file ? subagentsOf(agent.file) : {}
+                const { subagents, searching } = agent.file
+                  ? subagentsOf(agent.file, agent.engine)
+                  : {}
                 return (
                   <Fragment key={agent.id}>
                     <OpenRow
@@ -605,6 +592,11 @@ export function SessionSidebar() {
                       }
                     />
                     {subagents && <SubagentSessions items={subagents} searching={!!searching} />}
+                    <PrimeFamilyChildren
+                      parent={familyOf(agent.file, agent.nativeId, agent.engine, agent.id)}
+                      query={query}
+                      inView={inView}
+                    />
                   </Fragment>
                 )
               })}
@@ -620,7 +612,7 @@ export function SessionSidebar() {
                         ? workspaceName(session.cwd, workspaces)
                         : undefined
                     }
-                    {...subagentsOf(session.path)}
+                    {...subagentsOf(session.path, session.engine)}
                   />
                 )}
               </WindowedList>
@@ -639,18 +631,20 @@ export function SessionSidebar() {
                     showWorkspace={
                       scope === 'all' ? workspaceName(item.cwd, workspaces) : undefined
                     }
-                    {...subagentsOf(item.path)}
+                    {...subagentsOf(item.path, item.engine)}
                   />
                 )}
               </WindowedList>
             </section>
           )}
 
-          <BackgroundSessions />
+          <BackgroundSessions families={families} />
+          <PrimeOrphanSessions families={families} query={query} inView={inView} />
 
           <SessionListFeedback
             loading={loading}
             error={list?.error}
+            warning={list?.warning}
             empty={nothing}
             query={query}
             scope={scope}
@@ -670,7 +664,7 @@ export function SessionSidebar() {
                       key={item.path}
                       item={item}
                       pinned={false}
-                      {...subagentsOf(item.path)}
+                      {...subagentsOf(item.path, item.engine)}
                     />
                   )}
                 </WindowedList>
@@ -701,7 +695,7 @@ export function SessionSidebar() {
                       <HistoryRow
                         item={item}
                         pinned={pinned.has(normalizePath(item.path))}
-                        {...subagentsOf(item.path)}
+                        {...subagentsOf(item.path, item.engine)}
                       />
                     )}
                   </WorkspaceSection>

@@ -6,13 +6,13 @@ tools, authentication, configuration and saved sessions.
 
 The app version is defined in [package.json](package.json). Engine revisions, distribution versions
 and ordered patches are pinned in [engines.lock.json](engines.lock.json); engines update with the app.
-The current native builds are Engine `1.2.0+vengeance.4` and Engine 2 `0.10.0+vengeance.6`.
+The current native builds are Engine `1.3.0+vengeance.1` and Engine 2 `0.10.0+vengeance.9`.
 
 Engine includes all three Abliteration models. Connect in **Settings → Providers & accounts →
 Abliteration**, or supply `ABLIT_KEY` in the launch environment. Abliterated Model Large V2 offers
 Minimal, Low, Medium, High, Extra high and Max reasoning effort.
 
-Latest local release: [Vengeance 0.2.12 — changes, checks and artifact hashes](docs/RELEASE-0.2.12.md).
+Latest local release: [Vengeance 0.2.14 — changes, checks and artifact hashes](docs/RELEASE-0.2.14.md).
 
 ## Current guides
 
@@ -41,6 +41,8 @@ These reports describe the exact versions, hashes and observations at their stat
 They are evidence, not current installation status or promises that local generated artifacts still
 exist. Use the lockfile and current guides for maintenance instructions.
 
+- [Release 0.2.13](docs/RELEASE-0.2.13.md): native conversation handoff between engines.
+- [Release 0.2.12](docs/RELEASE-0.2.12.md): conversation deletion, workspace navigation and long histories.
 - [Release 0.2.11](docs/RELEASE-0.2.11.md): native Abliteration models and full Large V2 reasoning.
 - [Release 0.2.10](docs/RELEASE-0.2.10.md): collapsible Engine todo list above the composer.
 
@@ -69,3 +71,8 @@ keeping the current tab, draft and selected branch's history. The destination us
 settings. A recovery copy stays with the source engine; native goals, schedules and child workers do
 not transfer. Nonempty ephemeral sessions cannot switch. The same menu and the sidebar's new-session
 menu can start a conversation with either engine without changing the workspace default.
+
+Engine 2 subagent histories appear beneath their native parent, with accessible orphan histories
+when the parent is outside the current view. Independent sessions and same-depth forks stay separate.
+Engine sharing follows the native Auto, Gist or Radius preference; Radius links use organization
+visibility and the dialog identifies the actual destination before uploading.

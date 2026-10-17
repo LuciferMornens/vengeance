@@ -1,3 +1,4 @@
+import type { ShareDestination, ShareReadiness, ShareSessionResult } from '@shared/api/sessions'
 import type {
   ConfiguredPackage,
   ModelLike,
@@ -46,6 +47,14 @@ export interface PackageScope {
 
 /** Every operation: `[arguments, result]`. */
 export interface SdkHostOps {
+  'share-readiness': [args: PackageScope, result: ShareReadiness]
+  'share-session': [
+    args: PackageScope & {
+      sessionPath: string
+      expectedDestination?: ShareDestination
+    },
+    result: ShareSessionResult
+  ]
   catalog: [
     args: { agentDir: string; extraModels: LevelModel[]; extraProviderIds: string[] },
     result: RuntimeCatalog
@@ -58,7 +67,10 @@ export interface SdkHostOps {
     args: { agentDir: string; fetch: boolean },
     result: { usingOAuth: boolean; ids: string[] | null }
   ]
-  packages: [args: PackageScope, result: { configured: ConfiguredPackage[]; resolved: ResolvedPaths }]
+  packages: [
+    args: PackageScope,
+    result: { configured: ConfiguredPackage[]; resolved: ResolvedPaths }
+  ]
   'package-updates': [
     args: PackageScope,
     result: { updates: PackageUpdate[]; configured: ConfiguredPackage[] }
@@ -94,5 +106,4 @@ export interface SdkHostRequest {
 
 /** Host → main, for the request with the same `id`. */
 export type SdkHostMessage =
-  | { id: number; type: 'result'; value: unknown }
-  | { id: number; type: 'error'; message: string }
+  { id: number; type: 'result'; value: unknown } | { id: number; type: 'error'; message: string }

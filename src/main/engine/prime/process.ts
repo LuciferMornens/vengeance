@@ -45,6 +45,7 @@ import { PrimeSpeedControl } from './speed'
 import { samePath } from '../../paths'
 import { locatePrimeEngine } from './locate'
 import { guardPrimeHandoff } from './daemon-activity'
+import { PrimeSessionLineage } from './session-lineage'
 
 export interface PrimeEngineProcessOptions {
   args: CreateAgentArgs
@@ -86,6 +87,7 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
   private retired = false
   private ownsSession = false
   private args: CreateAgentArgs
+  private readonly sessionLineage = new PrimeSessionLineage()
   private readonly eventAdapter = new PrimeEventAdapter((event) => this.emit('event', event))
   private readonly bashRunner = new PrimeBashRunner((event) => this.emit('event', event))
   private readonly speedControl = new PrimeSpeedControl((type, payload) =>
@@ -446,7 +448,7 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
     const { id: _id, type, ...payload } = command
     if (type === 'get_state') {
       const state = await this.nativeCommand('get_state')
-      return normalizeState(this.state, state)
+      return this.sessionLineage.apply(normalizeState(this.state, state))
     }
     if (type === 'get_available_thinking_levels') {
       const state = await this.nativeCommand('get_state')
@@ -566,10 +568,11 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
   private async applySnapshot(snapshot: PrimeRecord, cursor?: unknown): Promise<boolean> {
     const client = this.requireClient()
     const sessionId = this.activeSessionId
-    const state = await resolveStateModel(
-      { ...this.state, ...asRecord(snapshot.summary), ...asRecord(snapshot.state) },
-      () => client.request('get_model_catalog', { activeSessionId: sessionId })
+    const incoming = { ...asRecord(snapshot.summary), ...asRecord(snapshot.state) }
+    const state = await resolveStateModel({ ...this.state, ...incoming }, () =>
+      client.request('get_model_catalog', { activeSessionId: sessionId })
     )
+    await this.sessionLineage.load(stringValue(state.sessionFile), incoming.rlmDepth)
     if (
       this.stopping ||
       !client.connected ||
@@ -596,7 +599,7 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
       name: 'session_snapshot',
       data: {
         messages,
-        state: normalizeState(this.state, {}),
+        state: this.sessionLineage.apply(normalizeState(this.state, {})),
         cursor: this.cursor,
         steering: Array.isArray(actions.steering) ? actions.steering : [],
         followUp: Array.isArray(actions.followUps) ? actions.followUps : [],

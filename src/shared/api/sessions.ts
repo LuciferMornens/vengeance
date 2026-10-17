@@ -11,6 +11,7 @@ import type { EngineId } from './engine'
 /** One persisted session file (mirrors pi's `SessionInfo`, dates as epoch ms, transcript text bounded). */
 export interface SessionListItem {
   engine?: EngineId
+  lineage?: SessionLineage
   /** Absolute path to the `.jsonl` file (the identity). */
   path: string
   id: string
@@ -32,6 +33,16 @@ export interface SessionListItem {
   subagentRun?: { parentPath: string; runId: string }
 }
 
+/** Native family identity; a source-session path alone can also describe a fork. */
+export interface SessionLineage {
+  parentSessionPath?: string
+  parentSessionId?: string
+  parentNativeAgentId?: string
+  depth?: number
+  childId?: string
+  runtimeKind?: string
+}
+
 export interface SessionListQuery {
   engine?: EngineId
   /** Workspace folder, or null for every workspace. */
@@ -40,6 +51,7 @@ export interface SessionListQuery {
 
 export interface SessionListResult {
   sessions: SessionListItem[]
+  warning?: string
   /** Directory the sessions were read from (custom `sessionDir` or pi's per-workspace default). */
   sessionDir: string
 }
@@ -53,6 +65,7 @@ export interface WorkspaceDiscovery {
 export interface SessionIdentity {
   cwd: string
   engine: EngineId
+  lineage?: SessionLineage
 }
 
 export interface ResolveSessionArgs {
@@ -156,19 +169,24 @@ export interface ShareSessionArgs {
   sessionPath: string
   agentId?: string
   title?: string
+  /** The destination reviewed in the share dialog; a change requires another review. */
+  destination?: ShareDestination
 }
 
-/** What sharing needs on this machine: the GitHub CLI, signed in. */
+export type ShareDestination = 'gist' | 'radius'
+
+/** The selected backend's destination and account readiness for this session. */
 export type ShareReadiness =
-  | { ready: true }
-  | { ready: false; reason: 'missing-gh' | 'signed-out'; detail?: string }
+  | { ready: true; destination: ShareDestination }
+  | {
+      ready: false
+      destination: ShareDestination
+      reason: 'missing-gh' | 'signed-out' | 'radius-signed-out'
+      detail?: string
+    }
 
-export interface ShareSessionResult {
-  /** Viewer link (`PI_SHARE_VIEWER_URL` or the engine's default viewer) for the gist. */
-  url: string
-  /** The secret gist holding the HTML export. */
-  gistUrl: string
-}
+export type ShareSessionResult =
+  { destination: 'gist'; url: string; gistUrl: string } | { destination: 'radius'; url: string }
 
 export interface SessionsInvokeMap {
   'sessions:workspaces': [result: WorkspaceDiscovery[]]
@@ -203,8 +221,8 @@ export interface SessionsInvokeMap {
   'sessions:pick-import': [result: ImportCandidate | null]
   /** Copy a picked file into the session folder of the folder it continues in (like the engine's /import). */
   'sessions:import': [args: ImportSessionArgs, result: ImportSessionResult]
-  'sessions:share-readiness': [result: ShareReadiness]
-  /** Export HTML and upload it as a secret GitHub gist (like the engine's /share). */
+  'sessions:share-readiness': [args: ShareSessionArgs, result: ShareReadiness]
+  /** Share through the selected backend's native destination. */
   'sessions:share': [args: ShareSessionArgs, result: ShareSessionResult]
 }
 

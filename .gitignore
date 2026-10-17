@@ -6,5 +6,5 @@ release/
 *.log
 .env
 .engine-staging/
-.cache/prime-auth/
+.cache/
 resources/prime-auth/bin/

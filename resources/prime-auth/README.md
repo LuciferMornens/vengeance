@@ -96,6 +96,30 @@ Success returns `{ "ok": true, "path": "..." }`; failure returns
 does not start a daemon, a model request, or a Python environment. It writes only
 the new destination session. Listing and workspace discovery do not invoke it.
 
+## Saved lineage and explicit child deletion
+
+`--session-lineage` accepts `{ "agentDir": "...", "sessionDirs": ["..."] }` and returns
+`{ "ok": true, "result": { "sessions": [], "excludedPaths": [], "warning": null } }`.
+Each session row contains its canonical `path`, optional ledger `name`, and `lineage` with native
+child ID, depth, runtime kind and parent identity. The ledger supplies topology and tombstones;
+bounded native headers supply durable IDs. No worker, daemon, provider request, kernel or legacy
+registry migration starts. Missing parents remain explicit orphan lineage. Unsupported paths,
+non-session sidecars and unadmitted artifact files are omitted. Capacity failures produce a warning
+while the app keeps independently listed root sessions visible.
+
+The metadata advertises `sessionLineage: true` and `sessionDelete: true`. `--session-delete` is an
+explicit mutation mode used only for a user's Delete action. It validates the child header and unique
+ledger edge while holding mandatory native leases for both parent and child. Live ownership refuses
+the operation. A recovery transcript is synced before the source is removed, then the helper writes
+the native deletion/usage record. Main moves the recovery file to the Recycle Bin; a failed native
+write or recycle action reports its retained recovery path. Resident parents use their native
+`delete_rlm_subagent` command, including its running-child refusal.
+
+Patch `0016` adds the native read-only constructor and a single resolved-edge replay snapshot.
+The ordinary native constructor keeps its migration behavior. Requalify moved/orphan paths,
+retained tombstoned files, duplicate session IDs, active-owner refusals and failed deletion recovery
+when changing this boundary.
+
 ## Resource mode
 
 `--resources` accepts one bounded JSON object with `operation`, `cwd`, and

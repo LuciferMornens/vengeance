@@ -1,20 +1,22 @@
-import { useEffect, useRef, useState } from 'react'
-import { ArrowUpRight, CircleStop, RefreshCw } from 'lucide-react'
+import { Fragment, useEffect, useRef } from 'react'
+import { ArrowUpRight, RefreshCw } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import type { BackgroundAgentInfo } from '@shared/api/engine'
 import { basename } from '../../lib/format'
-import { invoke } from '../../lib/ipc'
 import { normalizePath } from '../../lib/paths'
 import { useWindowFocused } from '../../lib/window-focus'
 import { useAgents } from '../../store/agents'
 import { useApp } from '../../store/app'
-import { Button, Dialog, IconButton, toast } from '../../ui'
+import { IconButton } from '../../ui'
 import { resumeBackgroundAgent } from './actions'
 import { LiveDot } from './LiveDot'
 import { agentSessionFile, matchesQuery } from './model'
 import { SectionHeader } from './SessionListParts'
 import { useSessions, useSessionsPrefs } from './store'
 import { inWorkspaceView } from './workspace-view'
+import { primeBackgroundFamilyNode, type PrimeSessionFamilies } from './prime-family-model'
+import { PrimeFamilyChildren, primeFamilyMatches } from './PrimeSessionFamilies'
+import { BackgroundSessionStop } from './BackgroundSessionStop'
 
 const BACKGROUND_REFRESH_MS = 5_000
 
@@ -22,7 +24,7 @@ function residentTitle(agent: BackgroundAgentInfo): string {
   return agent.name?.trim() || basename(agent.cwd) || 'Background session'
 }
 
-export function BackgroundSessions() {
+export function BackgroundSessions({ families }: { families: PrimeSessionFamilies }) {
   const agents = useSessions((state) => state.background)
   const error = useSessions((state) => state.backgroundError)
   const loading = useSessions((state) => state.backgroundLoading)
@@ -38,11 +40,10 @@ export function BackgroundSessions() {
       state.order.flatMap((id) => {
         const agent = state.agents[id]
         const path = agent ? agentSessionFile(agent) : undefined
-        return path ? [normalizePath(path)] : []
+        return agent && path ? [`${agent.info.engine}:${normalizePath(path)}`] : []
       })
     )
   )
-  const [stopping, setStopping] = useState<BackgroundAgentInfo | null>(null)
   const attachedIds = useAgents(
     useShallow((state) =>
       state.order.flatMap((id) => {
@@ -52,7 +53,6 @@ export function BackgroundSessions() {
       })
     )
   )
-  const [busy, setBusy] = useState(false)
   const listed = useRef(false)
   const openPathsKey = [...openPaths, ...attachedIds].join('|')
 
@@ -76,31 +76,16 @@ export function BackgroundSessions() {
   }, [sidebarOpen, openPathsKey, focused, anyBusy])
 
   const open = new Set(openPaths)
+  const inView = (cwd: string) => inWorkspaceView(cwd, { scope, activeWorkspace, workspaces })
   const visible = agents.filter(
     (agent) =>
-      inWorkspaceView(agent.cwd, { scope, activeWorkspace, workspaces }) &&
-      (!agent.sessionPath || !open.has(normalizePath(agent.sessionPath))) &&
-      !attachedIds.includes(`${agent.engine}:${agent.id}`) &&
-      matchesQuery(query, residentTitle(agent), agent.cwd, agent.status)
+      !primeBackgroundFamilyNode(families, agent)?.child &&
+      inView(agent.cwd) &&
+      (!agent.sessionPath || !open.has(`${agent.engine}:${normalizePath(agent.sessionPath)}`)) &&
+      (!!agent.sessionPath || !attachedIds.includes(`${agent.engine}:${agent.id}`)) &&
+      (matchesQuery(query, residentTitle(agent), agent.cwd, agent.status) ||
+        primeFamilyMatches(primeBackgroundFamilyNode(families, agent), query))
   )
-
-  async function stop(): Promise<void> {
-    if (!stopping) return
-    setBusy(true)
-    try {
-      await invoke('engine:background-stop', stopping.engine, stopping.id)
-      setStopping(null)
-      await useSessions.getState().loadBackground()
-    } catch (failure) {
-      toast({
-        level: 'error',
-        title: 'Could not stop the session',
-        description: failure instanceof Error ? failure.message : String(failure)
-      })
-    } finally {
-      setBusy(false)
-    }
-  }
 
   if (visible.length === 0 && !error) return null
   return (
@@ -116,67 +101,50 @@ export function BackgroundSessions() {
         </IconButton>
       </SectionHeader>
       {visible.map((agent) => (
-        <div
-          key={`${agent.engine}:${agent.id}`}
-          className="group mx-2 flex items-center gap-1 rounded-md hover:bg-hover"
+        <Fragment
+          key={`${agent.engine}:${agent.sessionPath ? normalizePath(agent.sessionPath) : agent.id}`}
         >
-          <button
-            type="button"
-            aria-label={`Resume ${residentTitle(agent)}`}
-            title={agent.cwd}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left disabled:opacity-60"
-            onClick={() => void resumeBackgroundAgent(agent)}
-          >
-            <LiveDot state={agent.busy ? 'running' : 'idle'} />
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-sm font-medium text-fg-2">{residentTitle(agent)}</span>
-              <span className="truncate text-xs text-fg-3">
-                {agent.busy
-                  ? 'Working in background'
-                  : agent.status === 'idle'
-                    ? 'Idle'
-                    : agent.status}{' '}
-                · {basename(agent.cwd)}
+          <div className="group mx-2 flex items-center gap-1 rounded-md hover:bg-hover">
+            <button
+              type="button"
+              aria-label={`Resume ${residentTitle(agent)}`}
+              title={agent.cwd}
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-left disabled:opacity-60"
+              onClick={() => void resumeBackgroundAgent(agent)}
+            >
+              <LiveDot state={agent.busy ? 'running' : 'idle'} />
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-sm font-medium text-fg-2">
+                  {residentTitle(agent)}
+                </span>
+                <span className="truncate text-xs text-fg-3">
+                  {agent.busy
+                    ? 'Working in background'
+                    : agent.status === 'idle'
+                      ? 'Idle'
+                      : agent.status}{' '}
+                  · {basename(agent.cwd)}
+                </span>
               </span>
-            </span>
-            <ArrowUpRight className="size-3.5 shrink-0 text-fg-3" />
-          </button>
-          <IconButton
-            label={`Stop session ${residentTitle(agent)}`}
-            size="xs"
-            className="mr-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-            onClick={() => setStopping(agent)}
-          >
-            <CircleStop />
-          </IconButton>
-        </div>
+              <ArrowUpRight className="size-3.5 shrink-0 text-fg-3" />
+            </button>
+            <BackgroundSessionStop
+              resident={agent}
+              title={residentTitle(agent)}
+              className="mr-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+            />
+          </div>
+          <PrimeFamilyChildren
+            parent={primeBackgroundFamilyNode(families, agent)}
+            query={query}
+            inView={inView}
+          />
+        </Fragment>
       ))}
       {error && (
         <p role="status" className="px-4 py-2 text-xs text-fg-3">
           Could not refresh background sessions. {error}
         </p>
-      )}
-      {stopping && (
-        <Dialog
-          open
-          onOpenChange={(next) => !next && !busy && setStopping(null)}
-          persistent={busy}
-          size="confirm"
-          icon={<CircleStop />}
-          iconTone="warning"
-          title="Stop this session?"
-          description={`“${residentTitle(stopping)}” will stop running and its scheduled work will be cancelled. Its saved conversation remains in your history.`}
-          footer={
-            <>
-              <Button variant="ghost" disabled={busy} onClick={() => setStopping(null)}>
-                Keep running
-              </Button>
-              <Button variant="danger" loading={busy} onClick={() => void stop()}>
-                Stop session
-              </Button>
-            </>
-          }
-        />
       )}
     </section>
   )

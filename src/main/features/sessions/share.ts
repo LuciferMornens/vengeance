@@ -1,12 +1,7 @@
 import { execFile } from 'node:child_process'
 import type { ShareReadiness, ShareSessionResult } from '@shared/api/sessions'
-import { piConfig, type PiConfigModule } from '../settings/pi-modules'
 
-/**
- * `/share` for the desktop, following the engine's `session-share.js` gist path: the HTML export is
- * uploaded as a secret gist with the GitHub CLI, and the link opens it in the engine's share viewer
- * (`getShareViewerUrl`, which honours `PI_SHARE_VIEWER_URL`).
- */
+/** Engine 2 shares its native HTML export through the GitHub CLI. */
 
 function run(
   command: string,
@@ -28,19 +23,22 @@ function run(
 
 export async function shareReadiness(): Promise<ShareReadiness> {
   const version = await run('gh', ['--version'], 10_000)
-  if (version.missing) return { ready: false, reason: 'missing-gh' }
+  if (version.missing) return { ready: false, destination: 'gist', reason: 'missing-gh' }
   const auth = await run('gh', ['auth', 'status'], 15_000)
   if (auth.code !== 0)
     return {
       ready: false,
+      destination: 'gist',
       reason: 'signed-out',
       detail: (auth.stderr || auth.stdout).trim().split('\n')[0]
     }
-  return { ready: true }
+  return { ready: true, destination: 'gist' }
 }
 
 /** Upload an HTML export as a secret gist; returns the viewer link and the gist URL. */
-export async function uploadGistHtml(htmlPath: string): Promise<ShareSessionResult> {
+export async function uploadGistHtml(
+  htmlPath: string
+): Promise<Extract<ShareSessionResult, { destination: 'gist' }>> {
   const readiness = await shareReadiness()
   if (!readiness.ready) {
     throw new Error(
@@ -55,15 +53,5 @@ export async function uploadGistHtml(htmlPath: string): Promise<ShareSessionResu
   const gistUrl = result.stdout.trim().split('\n').pop()?.trim() ?? ''
   const gistId = gistUrl.split('/').pop()
   if (!gistUrl || !gistId) throw new Error('Could not read the gist link from the GitHub CLI')
-  return { url: gistUrl, gistUrl }
-}
-
-export async function uploadGist(
-  overridePath: string | null,
-  htmlPath: string
-): Promise<ShareSessionResult> {
-  const { gistUrl } = await uploadGistHtml(htmlPath)
-  const gistId = gistUrl.split('/').pop()!
-  const config = await piConfig(overridePath).catch((): Partial<PiConfigModule> => ({}))
-  return { url: config.getShareViewerUrl ? config.getShareViewerUrl(gistId) : gistUrl, gistUrl }
+  return { destination: 'gist', url: gistUrl, gistUrl }
 }

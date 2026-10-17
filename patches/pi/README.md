@@ -1,12 +1,28 @@
 # Vengeance's pi build
 
-Vengeance builds stable `v1.2.0`, commit `06a466935536f8c9bcacb2d5efc0fc021be1bdff`,
-as `1.2.0+vengeance.4`. See [UPSTREAM.md](../../UPSTREAM.md) and
+Vengeance builds stable `v1.3.0`, commit `71023aec1546d6d677a65669c5665c0927ce0dd0`,
+as `1.3.0+vengeance.1`. See [UPSTREAM.md](../../UPSTREAM.md) and
 [engines.lock.json](../../engines.lock.json) for the source and maintenance contract.
 
-The current series also includes native runtime qualification (0003), model catalog qualification
-(0004), and Windows native test fixtures (0005). The [October 2026 audit](../../docs/ENGINE-AUDIT-2026-10-14.md)
-records the upstream comparison; `v1.2.0` remains the newest stable release at that checkpoint.
+The active series includes distribution policy (0001), extension runtime version identity (0002),
+native runtime qualification (0003), Windows native test fixtures (0005), Abliteration (0006), and
+native session sharing (0007).
+Patch `0005` normalizes the external-editor fixture's temporary path on Windows. Patch `0006`
+also supplies Abliteration's native default model, required by the 1.3 provider-selection contract.
+The series applies to the stable base without source conflict.
+
+Patch `0005` also separates Bun result settlement from process exit in the real-worker fixture.
+Upstream [issue 10748](https://github.com/earendil-works/pi/issues/10748) documents that Bun can keep
+a non-interruptible worker alive after cancellation settles. The fixture reads Bun's result and
+terminates its owned process during cleanup; Node still must exit cleanly. Both runtimes keep the
+one-second result bound, and Node keeps the one-second exit bound. No runtime code changes.
+
+Patch `0004` is historical and no longer applied. Upstream's content-addressed catalog
+`sha256-ffa3e98626230f378f80200debb736c4a2238b5f2ba246a92cfc7d8e19604678`
+supplies Claude Haiku 5.5 with its reasoning, vision, context, output and pricing metadata, and
+Claude Sonnet 5.5 with the qualified cache-read price. Upstream commit
+[`dc93991`](https://github.com/earendil-works/pi/commit/dc93991) also enables Haiku 5.5's supported
+Off thinking level. The native catalog supplies these values directly.
 
 Patch `0006` adds the Abliteration provider through native provider and catalog APIs without changing
 the pinned catalog files. It supports native API-key login and `ABLIT_KEY`, all three models,
@@ -14,12 +30,20 @@ session-affinity headers, current prices and model-specific thinking and image c
 The native `abliteration.test.ts` and `scripts/qa/auth/abliteration.qa.mjs` qualify the integration;
 see `UPSTREAM.md` for the provider documentation and retirement criteria.
 
+Patch `0007` exposes the native sharing implementation to RPC and saved-session callers. The terminal
+and Vengeance share the same Radius authentication, native session export, gist upload and destination
+preference. Readiness uses read-only native authentication and model stores; uploading refreshes native
+authentication only after the user requests a link. Settings are reloaded per operation, and the
+expected destination prevents an already reviewed share dialog from silently changing upload targets.
+Explicit-path HTML exports support native in-memory sessions, allowing saved gist shares without
+opening the source session for writing or requiring a currently available model.
+
 The distribution patch refuses native self-updates and suppresses upstream release notifications.
 Extension/package updates and model catalog refreshes remain native operations. Built-in extensions,
 the CLI, RPC entry and the SDK all come from our source checkout. Internal runtime packages are
 packed locally and substituted into upstream's installation lock; external dependencies stay pinned.
 
-The compatibility patch keeps the native package version and SDK `VERSION` at `1.2.0`.
+The compatibility patch keeps the native package version and SDK `VERSION` at `1.3.0`.
 Some extensions require a dotted upstream release and reject SemVer build metadata. Distribution
 identity lives in `package.json`'s `vengeance.version`, the engine manifest and CLI `--version`.
 Install-change detection compares the distribution identity, including builds on the same upstream base.

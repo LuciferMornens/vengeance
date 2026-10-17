@@ -16,6 +16,11 @@ import {
 
 const SUITE_NAME = 'engine2-resident-upgrade'
 const OBSERVE = process.argv.includes('--observe')
+const BASELINE_VISION_SWITCH = process.env.QA_PRIME_BASELINE_VISION_SWITCH ?? 'stale'
+assert.ok(
+  ['working', 'stale'].includes(BASELINE_VISION_SWITCH),
+  'QA_PRIME_BASELINE_VISION_SWITCH must be working or stale'
+)
 const VISION_PROVIDER = 'openai-codex'
 const VISION_MODEL = 'gpt-6.1-sol'
 const MODEL_INFO_PREFIX = 'QA_MODEL_INFO='
@@ -270,7 +275,12 @@ async function main() {
   const baseline = await packageIdentity(baselineExecutable)
   assert.equal(baseline.sha256, baselineHash, 'The reviewed older executable hash matches')
   const fixture = await createEngineFixture()
-  const report = { startedAt: new Date().toISOString(), checks: [], observations: {} }
+  const report = {
+    startedAt: new Date().toISOString(),
+    baselineVisionSwitch: BASELINE_VISION_SWITCH,
+    checks: [],
+    observations: {}
+  }
   let application
   let failure
 
@@ -393,8 +403,19 @@ async function main() {
     )
     report.observations.oldLiveSwitch = oldProbe
     await check(
-      'older live switch has the known stale native prompt and kernel binding',
+      BASELINE_VISION_SWITCH === 'working'
+        ? 'older live switch refreshes its native image binding and selected controls'
+        : 'older live switch has the known stale native prompt and kernel binding',
       async () => {
+        if (BASELINE_VISION_SWITCH === 'working') {
+          assertVisionProbe(oldProbe, 'old-switched-image')
+          await assertSelectedMetadata(application, agentId, VISION_PROVIDER, VISION_MODEL)
+          const selected = (await application.agentState(agentId)).model
+          assert.equal(selected.provider, VISION_PROVIDER)
+          assert.equal(selected.id, VISION_MODEL)
+          assert.deepEqual(selected.input, ['text', 'image'])
+          return
+        }
         assert.match(oldProbe.firstPrompt, /cannot see images/)
         assert.deepEqual(oldProbe.modelInfo.input, ['text'])
         assert.equal(oldProbe.nativeResult.details.status, 'error')

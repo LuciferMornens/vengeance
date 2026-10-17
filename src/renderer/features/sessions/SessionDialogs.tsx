@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import {
   Check,
   CircleStop,
@@ -168,6 +168,20 @@ function ShareSetup({
   checking: boolean
 }) {
   const missing = readiness.reason === 'missing-gh'
+  if (readiness.reason === 'radius-signed-out') {
+    return (
+      <div className="flex flex-col gap-3 rounded-card bg-surface-1 p-3.5 shadow-elev-0">
+        <p className="text-sm leading-relaxed text-fg-2">
+          Sign in to Radius in Engine settings → Providers & Accounts, then check again.
+        </p>
+        <div className="flex justify-end">
+          <Button size="sm" variant="secondary" loading={checking} onClick={onRetry}>
+            Check again
+          </Button>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="flex flex-col gap-3 rounded-card bg-surface-1 p-3.5 shadow-elev-0">
       <div className="flex items-start gap-2.5">
@@ -219,8 +233,14 @@ function ShareSetup({
   )
 }
 
-function ShareResult({ result }: { result: ShareSessionResult }) {
-  const [copied, setCopied] = useState(true)
+function ShareResult({
+  result,
+  initiallyCopied
+}: {
+  result: ShareSessionResult
+  initiallyCopied: boolean
+}) {
+  const [copied, setCopied] = useState(initiallyCopied)
   return (
     <div className="flex flex-col gap-2.5">
       <div className="flex h-9 items-center gap-2 rounded-md bg-surface-1 pr-1 pl-3 shadow-elev-0">
@@ -232,22 +252,26 @@ function ShareResult({ result }: { result: ShareSessionResult }) {
           size="xs"
           variant="ghost"
           leading={copied ? <Check className="text-success" /> : <Copy />}
-          onClick={() => {
-            void navigator.clipboard.writeText(result.url)
-            setCopied(true)
+          onClick={async () => {
+            await navigator.clipboard
+              .writeText(result.url)
+              .then(() => setCopied(true))
+              .catch(() => setCopied(false))
           }}
         >
           {copied ? 'Copied' : 'Copy'}
         </Button>
       </div>
-      <button
-        type="button"
-        onClick={() => void invoke('sys:open-external', result.gistUrl)}
-        className="flex items-center gap-1.5 self-start rounded-xs text-xs text-fg-3 hover:text-fg-2"
-      >
-        Gist <span className="font-mono">{result.gistUrl.replace(/^https:\/\//, '')}</span>
-        <ExternalLink className="size-3" />
-      </button>
+      {result.destination === 'gist' && (
+        <button
+          type="button"
+          onClick={() => void invoke('sys:open-external', result.gistUrl)}
+          className="flex items-center gap-1.5 self-start rounded-xs text-xs text-fg-3 hover:text-fg-2"
+        >
+          Gist <span className="font-mono">{result.gistUrl.replace(/^https:\/\//, '')}</span>
+          <ExternalLink className="size-3" />
+        </button>
+      )}
     </div>
   )
 }
@@ -258,26 +282,53 @@ function ShareDialog({ target, onClose }: { target: SessionTarget; onClose: () =
   const [sharing, setSharing] = useState(false)
   const [result, setResult] = useState<ShareSessionResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const checkRequest = useRef(0)
+  const engine = sessionTargetEngine(target)
 
   const check = useCallback(() => {
+    const request = ++checkRequest.current
     setChecking(true)
-    invoke('sessions:share-readiness')
-      .then(setReadiness)
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setChecking(false))
-  }, [])
-  useEffect(check, [check])
+    setReadiness(null)
+    setError(null)
+    invoke('sessions:share-readiness', {
+      engine,
+      sessionPath: target.path ?? '',
+      agentId: target.agentId
+    })
+      .then((value) => {
+        if (request === checkRequest.current) setReadiness(value)
+      })
+      .catch((failure: Error) => {
+        if (request === checkRequest.current) setError(failure.message)
+      })
+      .finally(() => {
+        if (request === checkRequest.current) setChecking(false)
+      })
+  }, [engine, target.path, target.agentId])
+  useEffect(() => {
+    check()
+    return () => {
+      checkRequest.current++
+    }
+  }, [check])
 
   const share = async () => {
     setSharing(true)
     setError(null)
     try {
       const shared = await invoke('sessions:share', {
+        engine,
         sessionPath: target.path ?? '',
         agentId: target.agentId,
-        title: target.title
+        title: target.title,
+        destination: readiness?.destination
       })
-      await navigator.clipboard.writeText(shared.url).catch(() => undefined)
+      const copied = await navigator.clipboard
+        .writeText(shared.url)
+        .then(() => true)
+        .catch(() => false)
+      setCopied(copied)
       setResult(shared)
     } catch (e) {
       setError((e as Error).message)
@@ -287,6 +338,17 @@ function ShareDialog({ target, onClose }: { target: SessionTarget; onClose: () =
   }
 
   const ready = readiness?.ready === true
+  const destination = result?.destination ?? readiness?.destination
+  const description =
+    destination === 'radius'
+      ? result
+        ? 'Shared with your Radius organization.'
+        : 'Uploads this session to your Radius organization and copies its link.'
+      : destination === 'gist'
+        ? result
+          ? 'Anyone with the link can view the session. Delete the gist on GitHub to take it down.'
+          : 'Creates a secret GitHub gist with a web page of this session and copies its link.'
+        : 'Checking the sharing destination for this session.'
   return (
     <Dialog
       open
@@ -295,12 +357,8 @@ function ShareDialog({ target, onClose }: { target: SessionTarget; onClose: () =
       size="form"
       icon={result ? <Check /> : <Share2 />}
       iconTone={result ? 'success' : 'neutral'}
-      title={result ? 'Link copied' : 'Share this session'}
-      description={
-        result
-          ? 'Anyone with the link can view the session. Delete the gist on GitHub to take it down.'
-          : 'Creates a secret GitHub gist with a web page of this session and copies a link to it.'
-      }
+      title={result ? (copied ? 'Link copied' : 'Session shared') : 'Share this session'}
+      description={description}
       footer={
         result ? (
           <>
@@ -334,7 +392,7 @@ function ShareDialog({ target, onClose }: { target: SessionTarget; onClose: () =
       }
     >
       {result ? (
-        <ShareResult result={result} />
+        <ShareResult result={result} initiallyCopied={copied} />
       ) : (
         <div className="flex flex-col gap-3 pb-1">
           <div className="rounded-card bg-surface-1 px-3.5 py-3 shadow-elev-0">
@@ -345,7 +403,8 @@ function ShareDialog({ target, onClose }: { target: SessionTarget; onClose: () =
               {[
                 'Every message on the current branch',
                 'Tool calls with their output, including file contents',
-                'Command output and extension messages'
+                'Command output and extension messages',
+                ...(destination === 'radius' ? ['System instructions and tool definitions'] : [])
               ].map((line) => (
                 <li key={line} className="flex items-center gap-2">
                   <span className="size-1 shrink-0 rounded-full bg-fg-3" />
@@ -359,12 +418,20 @@ function ShareDialog({ target, onClose }: { target: SessionTarget; onClose: () =
           )}
           {!readiness && !error && (
             <div className="flex items-center gap-2 px-1 text-xs text-fg-3">
-              <Spinner size={11} /> Checking the GitHub CLI…
+              <Spinner size={11} /> Checking sharing destination…
             </div>
           )}
           {error && (
-            <div className="selectable rounded-md bg-danger-soft px-3 py-2 text-sm text-danger shadow-[inset_0_0_0_1px_var(--danger-border)]">
-              {error}
+            <div className="flex flex-col gap-2">
+              <p
+                role="alert"
+                className="selectable rounded-md bg-danger-soft px-3 py-2 text-sm text-danger shadow-[inset_0_0_0_1px_var(--danger-border)]"
+              >
+                {error}
+              </p>
+              <Button size="sm" variant="secondary" loading={checking} onClick={check}>
+                Check destination again
+              </Button>
             </div>
           )}
         </div>
@@ -531,8 +598,8 @@ function DeleteDialog({
       description={
         <>
           <span className="font-medium text-fg">“{target.title}”</span> moves to the Recycle Bin.
-          {stopsResident && ' Its running work and schedules will stop.'} You can restore the saved
-          conversation from the Recycle Bin.
+          {stopsResident && ' Its running work and schedules will stop.'} To recover the
+          conversation, restore its file from the Recycle Bin and import it as a new session.
         </>
       }
       footer={

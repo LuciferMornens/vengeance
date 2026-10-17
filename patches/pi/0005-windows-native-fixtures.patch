@@ -21,6 +21,147 @@ index 2c044ba..4997a1d 100644
  					violations.push(`${path}: ${specifier}`);
  				}
  			}
+diff --git a/packages/codemode/test/worker-lifetime.test.ts b/packages/codemode/test/worker-lifetime.test.ts
+index 67ac4b2..22ee7c9 100644
+--- a/packages/codemode/test/worker-lifetime.test.ts
++++ b/packages/codemode/test/worker-lifetime.test.ts
+@@ -1,10 +1,11 @@
+-import { execFile, spawnSync } from "node:child_process";
++import { spawn, spawnSync } from "node:child_process";
+ import { fileURLToPath } from "node:url";
+-import { promisify } from "node:util";
+ import { Worker } from "node:worker_threads";
+ import { afterEach, describe, expect, it, vi } from "vitest";
+ import { type CodemodeResult, CodemodeSandbox } from "../src/index.ts";
+ 
++const stopModes = ["abort", "timeout", "close"] as const;
++
+ afterEach(() => {
+ 	vi.useRealTimers();
+ 	vi.restoreAllMocks();
+@@ -69,7 +70,7 @@ describe("worker lifetime", () => {
+ 	});
+ 
+ 	// #10748: Bun can leave terminate() pending while a non-interruptible built-in runs.
+-	it.each(["abort", "timeout", "close"] as const)("settles %s without waiting for worker exit", async (how) => {
++	it.each(stopModes)("settles %s without waiting for worker exit", async (how) => {
+ 		vi.useFakeTimers();
+ 		const terminate = Worker.prototype.terminate;
+ 		let worker: Worker | undefined;
+@@ -77,7 +78,8 @@ describe("worker lifetime", () => {
+ 		const termination = new Promise<number>((resolve) => {
+ 			releaseTermination = resolve;
+ 		});
+-		const terminateSpy = vi.spyOn(Worker.prototype, "terminate").mockImplementation(function (this: Worker) {
++		const terminateSpy = vi.spyOn(Worker.prototype, "terminate");
++		terminateSpy.mockImplementation(function (this: Worker) {
+ 			worker = this;
+ 			// Like the real Node/Bun implementation, termination refs the worker while waiting for exit.
+ 			this.ref();
+@@ -114,7 +116,9 @@ describe("worker lifetime", () => {
+ 		const controller = new AbortController();
+ 		let result: CodemodeResult | undefined;
+ 		let didClose = false;
+-		const pending = sandbox.execute('text("partial"); await tools.hang()', { signal: controller.signal });
++		const pending = sandbox.execute('text("partial"); await tools.hang()', {
++			signal: controller.signal,
++		});
+ 		void pending.then((value) => {
+ 			result = value;
+ 		});
+@@ -162,7 +166,10 @@ describe("worker lifetime", () => {
+ 		const exits: Promise<void>[] = [];
+ 		const releaseWorker = vi.fn();
+ 		const acquireWorker = vi.fn(() => releaseWorker);
+-		const sandbox = new CodemodeSandbox({ acquireWorker, onWorkerStarted: (exited) => void exits.push(exited) });
++		const sandbox = new CodemodeSandbox({
++			acquireWorker,
++			onWorkerStarted: (exited) => void exits.push(exited),
++		});
+ 		try {
+ 			expect(await sandbox.execute("return 1")).toMatchObject({ ok: true, value: 1 });
+ 			const run = sandbox.start("return 2", { startedAt: 0, seed: 0, onCall: () => {} });
+@@ -204,25 +211,67 @@ describe("worker lifetime", () => {
+ 
+ const runtimes = [
+ 	{ name: "Node", command: process.execPath, available: true },
+-	{ name: "Bun", command: "bun", available: spawnSync("bun", ["--version"], { timeout: 5000 }).status === 0 },
++	{
++		name: "Bun",
++		command: "bun",
++		available: spawnSync("bun", ["--version"], { timeout: 5000 }).status === 0,
++	},
+ ];
+ 
+ describe.each(runtimes)("$name process lifetime", ({ name, command, available }) => {
+ 	// #10748: verify both prompt cancellation and, on Node, prompt process exit with a real worker.
+-	// Bun 1.4.0's pending terminate() keeps the process alive even after unref(), independently of codemode.
+-	it.skipIf(!available).each(["abort", "timeout", "close"] as const)(
+-		name === "Node" ? "exits promptly after %s with a real worker" : "settles %s promptly with a real worker",
++	// Bun 1.4.0's pending terminate() keeps the process alive after unref(),
++	// independently of codemode.
++	const action = name === "Node" ? "exits after" : "settles";
++	it.skipIf(!available).each(stopModes)(
++		`${action} %s promptly with a real worker`,
+ 		async (how) => {
+ 			const fixture = fileURLToPath(new URL("./fixtures/worker-process-exit.ts", import.meta.url));
+-			const { stdout } = await promisify(execFile)(command, [fixture, how], { timeout: 20000 });
+-			const lines = stdout.trim().split(/\r?\n/);
+-			expect(lines).toHaveLength(2);
+-			const result = JSON.parse(lines[0]) as { type: string; kind: string; elapsedMs: number };
+-			const exit = JSON.parse(lines[1]) as { type: string; elapsedMs: number };
+-			expect(result).toMatchObject({ type: "result", kind: how === "timeout" ? "timeout" : "aborted" });
+-			expect(exit.type).toBe("exit");
+-			expect(result.elapsedMs).toBeLessThan(1000);
+-			if (name === "Node") expect(exit.elapsedMs - result.elapsedMs).toBeLessThan(1000);
++			const child = spawn(command, [fixture, how], {
++				timeout: 20000,
++				windowsHide: true,
++				stdio: ["ignore", "pipe", "pipe"],
++			});
++			const exited = new Promise<void>((resolve) => child.once("close", () => resolve()));
++			try {
++				const stdout = await new Promise<string>((resolve, reject) => {
++					let output = "";
++					let errors = "";
++					child.stdout.on("data", (chunk) => {
++						output += chunk.toString();
++						// #10748: Bun's result settles independently of its non-interruptible worker exit.
++						if (name === "Bun" && output.includes("\n")) resolve(output);
++					});
++					child.stderr.on("data", (chunk) => {
++						errors += chunk.toString();
++					});
++					child.once("error", reject);
++					child.once("close", (code) => {
++						if (code !== 0) reject(new Error(`Worker fixture exited with ${code}: ${errors}`));
++						else resolve(output);
++					});
++				});
++				const lines = stdout.trim().split(/\r?\n/);
++				const result = JSON.parse(lines[0]) as {
++					type: string;
++					kind: string;
++					elapsedMs: number;
++				};
++				expect(result).toMatchObject({
++					type: "result",
++					kind: how === "timeout" ? "timeout" : "aborted",
++				});
++				expect(result.elapsedMs).toBeLessThan(1000);
++				if (name === "Node") {
++					expect(lines).toHaveLength(2);
++					const exit = JSON.parse(lines[1]) as { type: string; elapsedMs: number };
++					expect(exit.type).toBe("exit");
++					expect(exit.elapsedMs - result.elapsedMs).toBeLessThan(1000);
++				}
++			} finally {
++				child.kill();
++				await exited;
++			}
+ 		},
+ 		25000,
+ 	);
 diff --git a/packages/coding-agent/test/config.test.ts b/packages/coding-agent/test/config.test.ts
 index ff652ca..5d58af8 100644
 --- a/packages/coding-agent/test/config.test.ts
@@ -111,9 +252,17 @@ index ff652ca..5d58af8 100644
  		expect(getSelfUpdateCommand("@earendil-works/pi-coding-agent")).toBeUndefined();
  		expect(getSelfUpdateUnavailableInstruction("@earendil-works/pi-coding-agent")).toContain(
 diff --git a/packages/coding-agent/test/external-editor.test.ts b/packages/coding-agent/test/external-editor.test.ts
-index 5cbbc93..75d1fc7 100644
+index 5cbbc93..d51fead 100644
 --- a/packages/coding-agent/test/external-editor.test.ts
 +++ b/packages/coding-agent/test/external-editor.test.ts
+@@ -1,6 +1,6 @@
+ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+ import { tmpdir } from "node:os";
+-import { basename, dirname, join } from "node:path";
++import { basename, dirname, join, resolve } from "node:path";
+ import { fileURLToPath } from "node:url";
+ import { describe, expect, it } from "vitest";
+ import { type ExternalEditorResult, editInExternalEditor } from "../src/modes/interactive/external-editor.ts";
 @@ -18,11 +18,11 @@ async function runExternalEditor(fixtureFlag?: "--fail" | "--empty"): Promise<{
  	result: ExternalEditorResult;
  	capture: EditorCapture;
@@ -128,6 +277,15 @@ index 5cbbc93..75d1fc7 100644
  			content: "original",
  		});
  		const capture = JSON.parse(readFileSync(capturePath, "utf-8")) as EditorCapture;
+@@ -38,7 +38,7 @@ describe("editInExternalEditor", () => {
+ 		const directory = dirname(capture.filePath);
+ 
+ 		expect(result).toEqual({ status: "complete", content: "edited" });
+-		expect(dirname(directory)).toBe(tmpdir());
++		expect(dirname(directory)).toBe(resolve(tmpdir()));
+ 		expect(basename(directory)).toMatch(/^pi-editor-.+$/);
+ 		expect(basename(capture.filePath)).toBe("prompt.md");
+ 		expect(capture.entries).toEqual(["prompt.md"]);
 diff --git a/packages/coding-agent/test/file-mutation-queue.test.ts b/packages/coding-agent/test/file-mutation-queue.test.ts
 index 8e13a45..071e971 100644
 --- a/packages/coding-agent/test/file-mutation-queue.test.ts
@@ -954,7 +1112,7 @@ index 0000000..c6c44d0
 +/** File-link metadata tests require Windows symlink privilege; directory/alias tests always run. */
 +export const fileSymlinksAvailable = probeFileSymlinks();
 diff --git a/test.sh b/test.sh
-index d3f07be..2861446 100755
+index 574b5cd..2296ef4 100755
 --- a/test.sh
 +++ b/test.sh
 @@ -12,6 +12,13 @@ mkdir -p "$test_root/home/.config" "$test_root/tmp" "$test_root/cache/npm"

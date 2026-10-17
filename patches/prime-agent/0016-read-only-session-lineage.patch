@@ -1,0 +1,246 @@
+diff --git a/crates/pa-daemon/src/rlm_ledger.rs b/crates/pa-daemon/src/rlm_ledger.rs
+index 3bf550d..952cc6b 100644
+--- a/crates/pa-daemon/src/rlm_ledger.rs
++++ b/crates/pa-daemon/src/rlm_ledger.rs
+@@ -153,6 +153,19 @@ impl RlmSpawnLedger {
+         &self.path
+     }
+ 
++    /// Open a ledger for observation without migrating legacy registries or writing account files.
++    /// A missing ledger reads empty; native daemon admission owns legacy migration.
++    pub fn read_only(
++        agent_dir: &Path,
++        sessions_dir: &Path,
++        log: impl Fn(&str) + Send + Sync + 'static,
++    ) -> Self {
++        Self {
++            seed_attempted: AtomicBool::new(true),
++            ..Self::new(agent_dir, sessions_dir, log)
++        }
++    }
++
+     fn log(&self, message: &str) {
+         (self.log)(message);
+     }
+@@ -533,6 +546,41 @@ impl RlmSpawnLedger {
+             .collect())
+     }
+ 
++    /// One replay snapshot with endpoint paths resolved independently. Missing parents retain
++    /// their recorded identity; tombstones remain authoritative even when transcripts survive.
++    ///
++    /// # Errors
++    ///
++    /// Returns an error when the ledger exceeds its replay bounds.
++    pub fn edges_with_resolved_paths(&self, include_deleted: bool) -> Result<Vec<RlmLedgerEdge>> {
++        self.seed_once()?;
++        let state = self.replay_cached()?;
++        let mut resolver =
++            LivePathResolver::new(self.agent_dir.clone(), self.canonical_sessions_dir.clone());
++        Ok(state
++            .edges
++            .iter()
++            .filter(|edge| include_deleted || edge.deleted.is_none())
++            .map(|edge| RlmLedgerEdge {
++                parent: if edge.deleted.is_some() {
++                    edge.parent.clone()
++                } else {
++                    resolver
++                        .resolve(&edge.parent)
++                        .map_or_else(|| edge.parent.clone(), |path| path.to_string_lossy().into())
++                },
++                child: if edge.deleted.is_some() {
++                    edge.child.clone()
++                } else {
++                    resolver
++                        .resolve(&edge.child)
++                        .map_or_else(|| edge.child.clone(), |path| path.to_string_lossy().into())
++                },
++                ..edge.clone()
++            })
++            .collect())
++    }
++
+     /// Live edges reconciled by liveness of their recorded endpoints: a dead endpoint drops the
+     /// edge; a MOVED path resolves through its durable session id first.
+     ///
+diff --git a/crates/pa-daemon/tests/read_only_roster.rs b/crates/pa-daemon/tests/read_only_roster.rs
+new file mode 100644
+index 0000000..2cacd04
+--- /dev/null
++++ b/crates/pa-daemon/tests/read_only_roster.rs
+@@ -0,0 +1,174 @@
++use std::path::Path;
++
++use pa_daemon::rlm_ledger::{RlmLedgerDeleteReason, RlmSpawnInput, RlmSpawnLedger};
++use serde_json::json;
++
++fn write_session(path: &Path, identifier: &str) {
++    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
++    std::fs::write(
++        path,
++        format!(
++            "{}\n",
++            json!({
++                "type": "session", "version": 3, "id": identifier,
++                "timestamp": "2026-10-16T00:00:00Z", "cwd": "/fixture"
++            })
++        ),
++    )
++    .unwrap();
++}
++
++#[test]
++fn observing_a_missing_ledger_does_not_migrate_legacy_children() {
++    let directory = tempfile::tempdir().unwrap();
++    let sessions = directory.path().join("sessions");
++    let parent = sessions.join("parent.jsonl");
++    let child = directory
++        .path()
++        .join("session-artifacts/parent/sub-child/child.jsonl");
++    write_session(&parent, "parent");
++    write_session(&child, "child");
++    let legacy = child
++        .parent()
++        .unwrap()
++        .parent()
++        .unwrap()
++        .join("rlm-subagents.jsonl");
++    std::fs::write(
++        &legacy,
++        format!(
++            "{}\n",
++            json!({
++                "childId": "sub-child", "sessionFile": child,
++                "rlmDepth": 1, "status": "completed"
++            })
++        ),
++    )
++    .unwrap();
++    let legacy_before = std::fs::read(&legacy).unwrap();
++    let ledger = RlmSpawnLedger::read_only(directory.path(), &sessions, |_| {});
++    assert!(ledger.edges(true).unwrap().is_empty());
++    assert!(ledger.live_edges().unwrap().is_empty());
++    assert!(!ledger.ledger_path().exists());
++    assert!(!directory.path().join("rlm-ledger").exists());
++    assert_eq!(std::fs::read(&legacy).unwrap(), legacy_before);
++}
++
++#[test]
++fn read_only_roster_hides_a_tombstoned_child_whose_transcript_remains() {
++    let directory = tempfile::tempdir().unwrap();
++    let sessions = directory.path().join("sessions");
++    let parent = sessions.join("parent.jsonl");
++    let child = directory
++        .path()
++        .join("session-artifacts/parent/sub-child/child.jsonl");
++    write_session(&parent, "parent");
++    write_session(&child, "child");
++    let writer = RlmSpawnLedger::new(directory.path(), &sessions, |_| {});
++    writer
++        .append_spawn(&RlmSpawnInput {
++            child_id: "sub-child".into(),
++            parent: parent.to_string_lossy().into(),
++            child: child.to_string_lossy().into(),
++            depth: 1,
++            name: "Child".into(),
++        })
++        .unwrap();
++    let reader = RlmSpawnLedger::read_only(directory.path(), &sessions, |_| {});
++    assert_eq!(reader.edges_with_resolved_paths(false).unwrap().len(), 1);
++    writer
++        .append_delete(
++            "sub-child",
++            &child.to_string_lossy(),
++            RlmLedgerDeleteReason::User,
++        )
++        .unwrap();
++    let bytes_before = std::fs::read(writer.ledger_path()).unwrap();
++    assert!(reader.edges_with_resolved_paths(false).unwrap().is_empty());
++    let snapshot = reader.edges_with_resolved_paths(true).unwrap();
++    assert_eq!(snapshot.len(), 1);
++    assert_eq!(snapshot[0].deleted, Some(RlmLedgerDeleteReason::User));
++    assert!(child.is_file());
++    assert_eq!(std::fs::read(writer.ledger_path()).unwrap(), bytes_before);
++}
++
++#[test]
++fn a_tombstone_does_not_follow_a_different_file_with_the_same_header_id() {
++    let directory = tempfile::tempdir().unwrap();
++    let sessions = directory.path().join("sessions");
++    let parent = sessions.join("parent.jsonl");
++    let child = directory
++        .path()
++        .join("session-artifacts/parent/sub-child/child.jsonl");
++    write_session(&parent, "parent");
++    write_session(&child, "child");
++    let ledger = RlmSpawnLedger::new(directory.path(), &sessions, |_| {});
++    ledger
++        .append_spawn(&RlmSpawnInput {
++            child_id: "sub-child".into(),
++            parent: parent.to_string_lossy().into(),
++            child: child.to_string_lossy().into(),
++            depth: 1,
++            name: "Child".into(),
++        })
++        .unwrap();
++    ledger
++        .append_delete(
++            "sub-child",
++            &child.to_string_lossy(),
++            RlmLedgerDeleteReason::User,
++        )
++        .unwrap();
++    std::fs::remove_file(&child).unwrap();
++    let imported = sessions.join("child.jsonl");
++    write_session(&imported, "child");
++    let reader = RlmSpawnLedger::read_only(directory.path(), &sessions, |_| {});
++    let snapshot = reader.edges_with_resolved_paths(true).unwrap();
++    assert_eq!(snapshot.len(), 1);
++    assert_eq!(
++        snapshot[0].child,
++        pa_daemon::lease::canonical_session_path(&child).to_string_lossy()
++    );
++    assert_ne!(
++        snapshot[0].child,
++        pa_daemon::lease::canonical_session_path(&imported).to_string_lossy()
++    );
++}
++
++#[test]
++fn a_single_snapshot_resolves_moved_children_without_dropping_missing_parents() {
++    let directory = tempfile::tempdir().unwrap();
++    let sessions = directory.path().join("sessions");
++    let parent = sessions.join("parent.jsonl");
++    let child = sessions.join("child.jsonl");
++    write_session(&parent, "parent");
++    write_session(&child, "child");
++    let ledger = RlmSpawnLedger::new(directory.path(), &sessions, |_| {});
++    ledger
++        .append_spawn(&RlmSpawnInput {
++            child_id: "sub-child".into(),
++            parent: parent.to_string_lossy().into(),
++            child: child.to_string_lossy().into(),
++            depth: 1,
++            name: "Child".into(),
++        })
++        .unwrap();
++    let moved = directory
++        .path()
++        .join("session-artifacts/parent/sub-child/child.jsonl");
++    std::fs::create_dir_all(moved.parent().unwrap()).unwrap();
++    std::fs::rename(&child, &moved).unwrap();
++    std::fs::remove_file(&parent).unwrap();
++    let reader = RlmSpawnLedger::read_only(directory.path(), &sessions, |_| {});
++    let snapshot = reader.edges_with_resolved_paths(true).unwrap();
++    assert_eq!(snapshot.len(), 1);
++    assert_eq!(
++        snapshot[0].child,
++        pa_daemon::lease::canonical_session_path(&moved).to_string_lossy()
++    );
++    assert_eq!(
++        snapshot[0].parent,
++        pa_daemon::lease::canonical_session_path(&parent).to_string_lossy()
++    );
++    assert_eq!(snapshot[0].depth, 1);
++}

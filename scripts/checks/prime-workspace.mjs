@@ -7,12 +7,19 @@ import { killTree } from '../qa/lib/processes.mjs'
 import { snapshotRealConfig } from '../qa/lib/real-guard.mjs'
 import { tempRoot } from '../qa/lib/tmp.mjs'
 
+const timeoutMs = Number(process.env.QA_NATIVE_TIMEOUT_MS ?? 15 * 60 * 1000)
+const maximumTimerDelayMs = 2 ** 31 - 1
+if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > maximumTimerDelayMs) {
+  throw new Error('QA_NATIVE_TIMEOUT_MS must be an integer between 1 and 2147483647')
+}
+const buildJobs = Number(process.env.QA_NATIVE_JOBS ?? 4)
+if (!Number.isSafeInteger(buildJobs) || buildJobs < 1 || buildJobs > 32) {
+  throw new Error('QA_NATIVE_JOBS must be an integer between 1 and 32')
+}
 const source = process.env.QA_PRIME_SOURCE
   ? resolve(process.env.QA_PRIME_SOURCE)
   : await prepareSource('prime', engineLock.prime)
 const fixture = await tempRoot('vengeance-native-workspace-')
-const timeoutMs = Number(process.env.QA_NATIVE_TIMEOUT_MS ?? 15 * 60 * 1000)
-if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error('Invalid native timeout')
 const guardedAccounts = await Promise.all(
   ['.pi', '.prime'].map((directory) => snapshotRealConfig(join(homedir(), directory, 'agent')))
 )
@@ -82,7 +89,7 @@ try {
     '--locked',
     '--target-dir',
     join(root, '.cache', 'prime-auth', 'target'),
-    '-j4'
+    `-j${buildJobs}`
   ]
   const requested = process.argv.slice(2)
   const kernelFlag = requested.indexOf('--with-kernel')

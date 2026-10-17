@@ -14,6 +14,8 @@ import type {
   ExportSessionResult,
   ImportCandidate,
   SessionExportFormat,
+  ShareReadiness,
+  ShareSessionResult,
   ShareSessionArgs
 } from '@shared/api/sessions'
 import { isEngineId, normalizeEngineId, type EngineId } from '@shared/api/engine'
@@ -22,6 +24,7 @@ import { env } from '../env'
 import type { EngineManager } from '../engine/manager'
 import {
   branchMockSession,
+  findMockSession,
   importMockSession,
   listMockSessions,
   MOCK_SESSIONS_ROOT,
@@ -55,8 +58,11 @@ import {
   setSessionLabel,
   trashSession
 } from '../features/sessions/service'
-import { shareReadiness, uploadGist, uploadGistHtml } from '../features/sessions/share'
-import { replaceFile } from '../features/settings/json-file'
+import { shareReadiness, uploadGistHtml } from '../features/sessions/share'
+import { sdkHostCall } from '../engine/sdk-host/client'
+import { agentDir, globalSettingsPath, projectSettingsPath } from '../features/settings/agent-dir'
+import { trustPreflight } from '../features/launch/trust'
+import { readJsonFile, replaceFile } from '../features/settings/json-file'
 import type { IpcContext } from './context'
 import { broadcast, handle, onQuit } from './handle'
 import { comparablePath, directoryExists, samePath } from '../paths'
@@ -95,7 +101,8 @@ function knownWorkspacePaths(): string[] {
 async function sessionEngine(
   context: IpcContext,
   path: string,
-  requested?: EngineId
+  requested?: EngineId,
+  identifyPrime: typeof primeSessionIdentity = primeSessionIdentity
 ): Promise<EngineId> {
   const running = context.manager
     .list()
@@ -107,7 +114,7 @@ async function sessionEngine(
     if (!isEngineId(requested)) throw new Error('Choose a supported engine')
     return requested
   }
-  return (await primeSessionIdentity(path)) ? 'prime' : 'pi'
+  return (await identifyPrime(path)) ? 'prime' : 'pi'
 }
 
 function safeFileName(title: string | undefined): string {
@@ -146,7 +153,7 @@ async function showOpen(
   return result.canceled ? null : (result.filePaths[0] ?? null)
 }
 
-/** Save dialog offering both formats (the requested one first); the extension kept decides the format. */
+/** Offer both formats with the requested one first; the chosen extension decides the format. */
 async function chooseExportPath(
   args: ExportSessionArgs,
   event: IpcMainInvokeEvent
@@ -166,7 +173,7 @@ async function chooseExportPath(
 }
 
 /**
- * N3: `/export <path>` without a dialog, with the engine's own /export rules: `.jsonl` exports JSONL,
+ * Export directly to the supplied path using the engine's rules: `.jsonl` exports JSONL,
  * anything else HTML; relative paths resolve against the session's folder.
  */
 async function explicitExportTarget(
@@ -203,7 +210,7 @@ function assertClosed(manager: EngineManager, path: string): void {
   }
 }
 
-/** JSONL export of a running engine's active branch (its live leaf, also for ephemeral sessions). */
+/** Export the running engine's active branch, including ephemeral sessions, as JSONL. */
 async function exportAgentJsonl(
   context: IpcContext,
   agentId: string,
@@ -265,30 +272,114 @@ async function exportHtml(
   await exportSessionWithCli(context.engineOverridePath(), args.sessionPath, outputPath)
 }
 
+async function shareTarget(context: IpcContext, args: ShareSessionArgs) {
+  const agent = args.agentId
+    ? context.manager.get(args.agentId)
+    : context.manager
+        .list()
+        .find((candidate) =>
+          candidate.sessionFile ? samePath(candidate.sessionFile, args.sessionPath) : false
+        )
+  if (args.agentId && !agent) throw new Error('This session is no longer open')
+  const engine = agent?.engine ?? (await sessionEngine(context, args.sessionPath, args.engine))
+  const cwd =
+    agent?.cwd ??
+    (engine === 'prime'
+      ? await primeSessionCwd(args.sessionPath)
+      : await sessionCwd(context.engineOverridePath(), args.sessionPath))
+  return { engine, cwd, agentId: agent?.agentId }
+}
+
+async function savedShareScope(context: IpcContext, cwd: string) {
+  const trust = await trustPreflight(context.engineOverridePath(), cwd)
+  return { cwd, agentDir: agentDir(), projectTrusted: trust.engineDefault }
+}
+
+function mockShareDestination(context: IpcContext, args: ShareSessionArgs): 'gist' | 'radius' {
+  const agent = args.agentId ? context.manager.get(args.agentId) : undefined
+  if ((agent?.engine ?? args.engine) === 'prime') return 'gist'
+  const cwd = agent?.cwd ?? findMockSession(args.sessionPath)?.cwd
+  const global = readJsonFile(globalSettingsPath()).data
+  const project = cwd ? readJsonFile(projectSettingsPath(cwd)).data : {}
+  return (project.sessionShareDestination ?? global.sessionShareDestination) === 'radius'
+    ? 'radius'
+    : 'gist'
+}
+
+async function sessionShareReadiness(
+  context: IpcContext,
+  args: ShareSessionArgs
+): Promise<ShareReadiness> {
+  if (env.mock) return { ready: true, destination: mockShareDestination(context, args) }
+  const target = await shareTarget(context, args)
+  if (target.engine === 'prime') return shareReadiness()
+  if (target.agentId) {
+    const response = await context.manager.command(target.agentId, { type: 'share_readiness' })
+    if (!response.success) throw new Error(response.error)
+    if (response.command !== 'share_readiness') throw new Error('Unexpected engine response')
+    return response.data
+  }
+  return sdkHostCall(
+    context.engineOverridePath(),
+    'share-readiness',
+    await savedShareScope(context, target.cwd)
+  )
+}
+
 async function shareSession(
   context: IpcContext,
   args: ShareSessionArgs
-): Promise<{ url: string; gistUrl: string }> {
+): Promise<ShareSessionResult> {
+  if (args.destination !== 'gist' && args.destination !== 'radius') {
+    throw new Error('Review the sharing destination before creating a link')
+  }
   if (env.mock) {
+    const destination = mockShareDestination(context, args)
+    if (args.destination !== destination) {
+      throw new Error('The share destination changed. Review the destination and try again.')
+    }
     await new Promise((resolve) => setTimeout(resolve, 900))
+    if (destination === 'radius') {
+      return { destination, url: 'https://radius.example/artifacts/mock-session' }
+    }
     const id = '4f9c2e7a1b3d5e6f8a0c'
-    return { url: `https://pi.dev/session/#${id}`, gistUrl: `https://gist.github.com/dev/${id}` }
+    return {
+      destination: 'gist',
+      url: `https://pi.dev/session/#${id}`,
+      gistUrl: `https://gist.github.com/dev/${id}`
+    }
+  }
+  const target = await shareTarget(context, args)
+  if (target.engine === 'pi') {
+    if (target.agentId) {
+      const response = await context.manager.command(target.agentId, {
+        type: 'share_session',
+        expectedDestination: args.destination
+      })
+      if (!response.success) throw new Error(response.error)
+      if (response.command !== 'share_session') throw new Error('Unexpected engine response')
+      return response.data
+    }
+    return sdkHostCall(context.engineOverridePath(), 'share-session', {
+      ...(await savedShareScope(context, target.cwd)),
+      sessionPath: args.sessionPath,
+      expectedDestination: args.destination
+    })
+  }
+  if (args.destination !== 'gist') {
+    throw new Error('The share destination changed. Review the destination and try again.')
   }
   const dir = await mkdtemp(join(tmpdir(), 'vengeance-share-'))
   try {
     const htmlPath = join(dir, 'session.html')
-    await exportHtml(context, args, htmlPath)
-    const engine = args.agentId
-      ? context.manager.get(args.agentId)?.engine
-      : await sessionEngine(context, args.sessionPath, args.engine)
-    if (engine === 'prime') return await uploadGistHtml(htmlPath)
-    return await uploadGist(context.engineOverridePath(), htmlPath)
+    await exportHtml(context, { ...args, agentId: target.agentId, engine: 'prime' }, htmlPath)
+    return await uploadGistHtml(htmlPath)
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => undefined)
   }
 }
 
-/** Session browser: list / rename / trash / branch / label / export / import / share, live file watching. */
+/** Register session browser operations and live file watching. */
 export function registerSessionsIpc(context: IpcContext): void {
   const watchers: Record<EngineId, SessionsWatcher> = {
     pi: new SessionsWatcher((root) => broadcast('sessions:changed', { root })),
@@ -364,15 +455,23 @@ export function registerSessionsIpc(context: IpcContext): void {
   })
 
   handle('sessions:describe', async (path) => {
-    const engine = await sessionEngine(context, path)
+    let primeIdentity: ReturnType<typeof primeSessionIdentity> | undefined
+    const identifyPrime = (): ReturnType<typeof primeSessionIdentity> =>
+      (primeIdentity ??= primeSessionIdentity(path))
+    const engine = await sessionEngine(context, path, undefined, identifyPrime)
     const saved = appState.getPrefs().openSessions.some((session) => samePath(session.path, path))
-    const cwd = env.mock
-      ? (listMockSessions(null).find((session) => samePath(session.path, path))?.cwd ?? '')
-      : saved
-        ? (await readSessionHeader(path)).cwd
-        : engine === 'prime'
-          ? await primeSessionCwd(path)
-          : await sessionCwd(override(), path)
+    let cwd: string
+    if (env.mock) {
+      cwd = listMockSessions(null).find((session) => samePath(session.path, path))?.cwd ?? ''
+    } else if (saved) {
+      cwd = (await readSessionHeader(path)).cwd
+    } else if (engine === 'prime') {
+      const identity = await identifyPrime()
+      if (!identity) throw new Error('This file is not in an Engine 2 session folder')
+      cwd = identity.cwd
+    } else {
+      cwd = await sessionCwd(override(), path)
+    }
     const cwdExists = env.mock || (await directoryExists(cwd))
     return { cwd, engine, cwdExists }
   })
@@ -569,9 +668,7 @@ export function registerSessionsIpc(context: IpcContext): void {
     return importSession(override(), args)
   })
 
-  handle('sessions:share-readiness', async () =>
-    env.mock ? { ready: true as const } : shareReadiness()
-  )
+  handle('sessions:share-readiness', async (args) => sessionShareReadiness(context, args))
 
   handle('sessions:share', async (args) => shareSession(context, args))
 }
