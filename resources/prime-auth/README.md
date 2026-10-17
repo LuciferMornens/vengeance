@@ -35,9 +35,10 @@ entries, reach both the engine and helper. Build objects live in the ignored
 
 Packaging places the binary and `THIRD-PARTY-NOTICES.txt` in
 `<resources>/prime-auth`. End users need neither Rust nor the other engine.
-The build applies Engine 2's runtime dependency checks: no non-system Windows DLL; on Linux only
-the C runtime and no symbol newer than GLIBC 2.35; on macOS only system libraries, a macOS 13.0
-minimum and a reproducible ad-hoc signature.
+The build applies Engine 2's runtime dependency checks: no GNU compiler runtime DLL on Windows
+(`libgcc`, `libstdc++`, `libwinpthread`); on Linux only the C runtime and no symbol newer than
+GLIBC 2.35; on macOS only system libraries, a macOS 13.0 minimum and a reproducible ad-hoc
+signature.
 
 ## Protocol and lifecycle
 
@@ -81,7 +82,8 @@ new upstream base or native patch:
    compatible; otherwise update both ends' version checks.
 4. Rebuild and run the mock bridge, native no-network, application typecheck,
    build, and screenshot checks. Verify the packaged helper with a minimal
-   system PATH so a local compiler install cannot hide a DLL dependency.
+   system PATH so a local compiler install cannot hide a DLL or shared-library
+   dependency.
 
 Interactive provider sign-in is a separate manual verification step and must
 only run when the user authorizes it. Automated tests use temporary account
@@ -116,9 +118,9 @@ The metadata advertises `sessionLineage: true` and `sessionDelete: true`. `--ses
 explicit mutation mode used only for a user's Delete action. It validates the child header and unique
 ledger edge while holding mandatory native leases for both parent and child. Live ownership refuses
 the operation. A recovery transcript is synced before the source is removed, then the helper writes
-the native deletion/usage record. Main moves the recovery file to the Recycle Bin; a failed native
-write or recycle action reports its retained recovery path. Resident parents use their native
-`delete_rlm_subagent` command, including its running-child refusal.
+the native deletion/usage record. Main moves the recovery file to the Recycle Bin (the Trash on
+macOS and Linux); a failed native write or recycle action reports its retained recovery path.
+Resident parents use their native `delete_rlm_subagent` command, including its running-child refusal.
 
 Patch `0016` adds the native read-only constructor and a single resolved-edge replay snapshot.
 The ordinary native constructor keeps its migration behavior. Requalify moved/orphan paths,

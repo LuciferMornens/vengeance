@@ -1,10 +1,13 @@
 # VENGEANCE — Master Spec
 
-Vengeance is a premium **Windows-first native desktop app** (Electron) for AI coding agents.
-It ships two customized native backends: **pi** and **Prime Agent**. The product must never _look_ like a
-wrapper around a CLI: no backend branding in the UI, no terminal aesthetics in chrome. The UI calls pi
-**"Engine"** and Prime Agent **"Engine 2"**; engine selectors, settings and session controls use those labels.
-Internally (code, comments, development documentation) use pi and Prime freely.
+Vengeance is a premium **cross-platform native desktop app** (Electron) for AI coding agents, shipped for
+Windows x64, macOS (Apple silicon and Intel) and Linux x64/arm64. Each platform follows its own window,
+menu, packaging and update conventions (§1 rule 4, §2.4, §3.7); Windows behavior is the reference, and
+supporting another platform never changes it. It ships two customized native backends: **pi** and
+**Prime Agent**. The product must never _look_ like a wrapper around a CLI: no backend branding in the UI,
+no terminal aesthetics in chrome. The UI calls pi **"Engine"** and Prime Agent **"Engine 2"**; engine
+selectors, settings and session controls use those labels. Internally (code, comments, development
+documentation) use pi and Prime freely.
 
 Goal: so smooth and so beautiful that people get hooked. Full native capability coverage and visual editing
 of models, settings, providers, packages, resources and MCP are product requirements. This spec defines
@@ -27,10 +30,19 @@ protocol, configuration, authentication and session behavior.
    `settings.json` key).
 3. **The GUI adds visual editing** for all of it. Hand-editing JSON should never be required (but an
    "Edit raw JSON" escape hatch is welcome for advanced users).
-4. **Desktop, not browser.** Native frameless window, Windows 11 Mica material, native caption buttons via
-   `titleBarOverlay` (snap layouts must work), single-instance, tray-less, proper app icon, NSIS installer via
-   electron-builder. No browser-y UI (no visible URL-ish things, no default focus rings, no text-selection on
-   chrome, no default scrollbars, no white flash on launch).
+4. **Desktop, not browser.** Native frameless window, single-instance, tray-less, proper app icon, packaged
+   by electron-builder; closing the window quits the app on every platform. No browser-y UI (no visible
+   URL-ish things, no default focus rings, no text-selection on chrome, no default scrollbars, no white
+   flash on launch). Each platform keeps its own window conventions:
+   - **Windows:** Windows 11 Mica material (22H2 or newer; solid elsewhere), native caption buttons via
+     `titleBarOverlay` (snap layouts must work), per-user NSIS installer.
+   - **macOS:** hidden titlebar with the native traffic lights inset at its left edge, the standard app,
+     Edit and Window menus (system editing shortcuts; nothing reloads, opens developer tools or closes the
+     window), folders dropped on the Dock icon open as workspaces, dmg and zip per architecture.
+   - **Linux:** Electron's caption buttons via `titleBarOverlay` on floating desktops and no client-side
+     controls on tiling compositors (Hyprland, sway, niri, i3 and the like), native Wayland in Wayland
+     sessions (Electron's default; X11 elsewhere) with Wayland input methods, app ID `vengeance`, AppImage,
+     deb, rpm and tar.gz, plus pacman on x64.
 5. **Beauty + smoothness are requirements, not polish.** 60fps streaming, zero layout jank, spring motion,
    crisp typography. If it looks average, it is not done.
 
@@ -45,8 +57,9 @@ vengeance/
       engine-types.ts       # common transcript/RPC types, including normalized Prime events
       api/<feature>.ts      # per-feature request/response types
     main/
-      index.ts              # app bootstrap, window, single-instance
-      window.ts             # BrowserWindow (Mica, titleBarOverlay, bg color, show-on-ready)
+      index.ts              # app bootstrap, window, single-instance, macOS menu
+      window.ts             # BrowserWindow (per-OS titlebar and window controls, Mica, bg color, show-on-ready)
+      shell-env.ts          # childBaseEnv(): the environment every child process starts from (§2.4)
       engine/
         locate.ts           # bundled Vengeance Engine, with an explicit development override
         rpc-process.ts      # EngineProcess: spawn the selected CLI with Node, strict LF JSONL framing
@@ -86,7 +99,8 @@ vengeance/
   sidebar with live activity indicators).
 - Spawn: run the bundled CLI with `process.execPath` and `ELECTRON_RUN_AS_NODE=1`.
   Explicit custom locations can use compatible system Node, with Electron's Node as the fallback.
-  `windowsHide: true`. Pass through env. Args built from session options: `--session <path>` to resume,
+  `windowsHide: true`; on macOS and Linux the child leads its own process group (§2.4). Env:
+  `childBaseEnv()` plus the managed variables. Args built from session options: `--session <path>` to resume,
   `--fork <path>`, `--model`, `--thinking`, `--name`, `--approve`/`--no-approve` for project trust, etc.
 - Framing: **split stdout only on `\n`, strip trailing `\r`. Do NOT use Node `readline`** (it splits on
   U+2028/2029). Write one JSON object + `\n` per command, honor backpressure.
@@ -149,17 +163,65 @@ backend; `engine:background-list`/`engine:background-stop` manage native residen
 `src/shared/api/engine.ts` for the full signatures, bridge, adoption and native Prime command surface.
 System channels: `sys:pick-folder`, `sys:pick-files`, `sys:open-external`, `sys:reveal`, `sys:read-file`
 (bounded, for previews), `sys:list-files(cwd, query)` (fast: prefer `git ls-files`, then an available
-`~/.pi/agent/bin/fd.exe`, then a bounded directory walk), `win:*` (window actions/theme and focus events),
-`app:get-state`/`app:set-state` (persisted app prefs in userData: recent workspaces, open tabs, window
-bounds, UI prefs).
+`~/.pi/agent/bin/fd` (`fd.exe` on Windows), then a bounded directory walk), `win:*` (window actions/theme
+and focus events), `app:get-state`/`app:set-state` (persisted app prefs in userData: recent workspaces,
+open tabs, window bounds, UI prefs).
+
+### 2.4 Platform boundary
+
+Main owns every operating-system difference and gates it on `process.platform`. A POSIX code path is added
+beside the Windows one, never in its place.
+
+- **Child environment.** Every child process the app starts (both engines, their CLI subcommands, the
+  native helper, git, fd, share tools) builds on `childBaseEnv()` from `src/main/shell-env.ts`.
+  - On macOS and Linux an app opened from the Dock, Finder or a desktop launcher gets the session's minimal
+    PATH. Main therefore reads the user's login shell environment once at startup (interactive login
+    shell, its own process group, 10-second timeout) and merges what it adds into every child's
+    environment: PATH, version managers, API keys. Engine and helper spawns await that read; a failed or
+    timed-out read logs a warning and keeps the launch environment.
+  - Engine and app selection variables (`PI_*`, `PRIME_*`, `VENGEANCE_*`, `ELECTRON_*`) and the probe
+    shell's session state (`PWD`, `SHLVL`, `XDG_RUNTIME_DIR` …) always come from the launch environment.
+  - On macOS and Linux children never inherit Electron's or the AppImage runtime's changes:
+    `ELECTRON_RUN_AS_NODE` is removed (the Engine sets it explicitly when it runs on Electron's Node), and
+    inside an AppImage `APPDIR`, `APPIMAGE`, `ARGV0`, `OWD` and every path entry inside its mount (`PATH`,
+    `LD_LIBRARY_PATH`, `XDG_DATA_DIRS` …) are dropped, since resident Engine 2 daemons outlive the mount.
+    Linux children get the session's `XDG_CURRENT_DESKTOP` back from `ORIGINAL_XDG_CURRENT_DESKTOP`.
+  - Windows children inherit the app's environment unchanged. Mock, test (`VENGEANCE_TEST=1`) and
+    `VENGEANCE_SKIP_SHELL_ENV=1` runs keep the launch environment on every platform.
+- **Window controls.** Main fills `PlatformInfo` (`src/shared/api/app.ts`); the renderer reads it and
+  never guesses from `navigator.platform`.
+  - `windowControls`: `right` (Windows caption buttons; Electron's on floating Linux desktops), `left`
+    (macOS traffic lights) or `none` (tiling Linux: Hyprland, sway, niri, river, i3, bspwm, dwm, qtile,
+    awesome, xmonad, wayfire, detected from `XDG_CURRENT_DESKTOP`, `XDG_SESSION_DESKTOP` and
+    `DESKTOP_SESSION`). `VENGEANCE_WINDOW_CONTROLS=native|none` overrides the Linux detection.
+  - `captionButtonsWidth`: the right-side reserve (138 px on Windows, an estimate on floating Linux, 0 on
+    macOS and tiling Linux). `titlebarInsetLeft`: the traffic-light inset on macOS, 0 elsewhere.
+  - The titlebar prefers the live Window Controls Overlay geometry (`env(titlebar-area-*)`) and falls back
+    to these numbers. When the overlay reports itself hidden (macOS full screen), nothing is reserved.
+  - `platform.os` also drives shortcut semantics and wording: `mod` is ⌘ on macOS and Ctrl elsewhere,
+    macOS shows ⌘⌥⇧ glyphs, and labels name Explorer/Finder/the file manager and Recycle Bin/Trash. This
+    spec writes app shortcuts with Ctrl and Alt; on macOS read ⌘ and Option.
+- **Processes.** On macOS and Linux every child the app stops as a tree leads its own process group;
+  stopping signals the group with SIGTERM, then SIGKILL after a short grace period. Windows keeps its
+  PID tree walk. Engine 2 daemons listen on named pipes on Windows and on Unix sockets elsewhere, in a
+  folder only the user can open (`$XDG_RUNTIME_DIR/vengeance` on Linux, then the user's temporary
+  folder, then `/tmp`), within the platform's socket path limit.
+- **Paths.** On macOS and Linux workspace folders enter the app as their physical path (symlinks
+  resolved), the way POSIX `getcwd` reports them and pi records sessions. Canonical paths returned by
+  native components map back below the roots they were listed under. Windows paths stay as given.
+- **Linux secret store.** On desktops where Chromium would fall back to plain text, safeStorage asks the
+  Secret Service (libsecret) instead; an explicit `--password-store` switch wins. Without OS encryption,
+  saved workspace launch-environment values stay plain in `app-state.json`, which only the user can read
+  on macOS and Linux, and the daemon registry stores no sealed overrides (§10.2).
 
 ## 3. Product & UX
 
 ### 3.1 Layout
 
-- **Titlebar** (custom, 40px, draggable, Mica-through): app mark + workspace breadcrumb,
-  center: command search pill ("Search or run a command… Ctrl K"), right: native caption buttons via
-  `titleBarOverlay` (colors matched to theme).
+- **Titlebar** (custom, 40px, draggable, Mica-through on Windows 11): app mark + workspace breadcrumb,
+  center: command search pill ("Search or run a command… Ctrl K", ⌘K on macOS), and room for the native
+  window controls of §2.4: caption buttons at the right via `titleBarOverlay` on Windows and floating Linux
+  desktops (colors matched to theme), traffic lights at the left on macOS, none on tiling Linux.
 - **Left sidebar** (resizable, collapsible `Ctrl+B`): "New session" (Ctrl+N), workspace switcher, sessions
   grouped by workspace and date (Today / Yesterday / This week / Older) with live state dots (streaming pulse,
   waiting-for-input, error), search filter, pinned sessions, right-click menu (rename, fork, export, reveal
@@ -263,24 +325,35 @@ session) never offer a restart, and a project's config changes only concern that
   installed packages (`pi list` + npm/git latest) and the Vengeance app. Surface an "Updates available"
   pill in the titlebar → Updates sheet showing the included engine build and package/app updates.
 - Auto-update setting: Off / Notify (default) / Automatic. Automatic updates packages when no agent
-  is streaming and downloads app updates. Native self-update, engine reinstall, upstream channel
-  switching and per-engine rollback are unavailable; updating/reinstalling Vengeance owns engine files.
+  is streaming and downloads app updates where the install can replace itself. Native self-update,
+  engine reinstall, upstream channel switching and per-engine rollback are unavailable;
+  updating/reinstalling Vengeance owns engine files.
 - After package or resource changes, refresh the affected backend's capabilities and settings.
   Engine can reload through its bridge. Engine 2 applies startup-bound changes through an explicit,
   guarded saved-session restart; selecting or installing a new build does not replace live residents.
-- Vengeance app self-update: wire `electron-updater` (generic provider, configurable feed URL; disabled
-  when no feed configured) so the shell can update too.
+- Vengeance app self-update: `electron-updater` with the generic provider, so the shell can update too.
+  Release builds bake `https://github.com/LuciferMornens/vengeance/releases/latest/download` with update
+  channel `latest`, so prerelease builds also check the newest stable release. A feed URL set in
+  Settings → General wins over the baked one. Local `npm run dist` builds carry no feed unless
+  `VENGEANCE_UPDATE_FEED` is set. Without a feed, and in unpackaged runs, app updates are disabled.
+  Installation follows the package type:
+  - **Windows NSIS and Linux AppImage** replace themselves. Notify announces the version and offers the
+    download, Automatic downloads it, and a downloaded update installs on Restart or when the app quits.
+  - **macOS** (ad-hoc signed; Squirrel.Mac needs a Developer ID signature) **and Linux deb, rpm, pacman
+    and tar.gz** are notify-only: the Updates sheet names the version (and the package type to get, when
+    one is recorded) and its Download action opens that version's GitHub release page. The app never
+    downloads or installs these updates; the system package manager or the user does.
 
 ## 4. Visual design language — "Obsidian & Ember"
 
 - Mood: dark, quiet, expensive. Think Linear × Raycast × Arc, with a dangerous edge. Dark theme is the hero;
   a refined light theme ("Bone") also ships.
-- Colors (dark): background `#0B0B0E` (under Mica, window bg slightly translucent), surfaces layered
-  `#111116`, `#16161D`, `#1C1C24`; hairlines `rgba(255,255,255,0.06–0.10)`; text `#EDEDF2` / secondary
-  `#A0A0AE` / tertiary `#6B6B78`. **Ember accent**: `#FF4D3D` → `#FF8A3D` gradient, used sparingly (send
-  button, active streaming glow, focus ring, selection, the logo). Semantic: success `#3DDC97`, warning
-  `#F5B84B`, danger `#FF5C6C`, info `#6CA8FF`. All as CSS variables in `tokens.css`; accent is user-swappable
-  (Ember, Violet, Cyan, Lime, Rose, Mono).
+- Colors (dark): background `#0B0B0E` (under Windows 11 Mica, window bg slightly translucent; solid on
+  macOS and Linux), surfaces layered `#111116`, `#16161D`, `#1C1C24`; hairlines
+  `rgba(255,255,255,0.06–0.10)`; text `#EDEDF2` / secondary `#A0A0AE` / tertiary `#6B6B78`. **Ember
+  accent**: `#FF4D3D` → `#FF8A3D` gradient, used sparingly (send button, active streaming glow, focus ring,
+  selection, the logo). Semantic: success `#3DDC97`, warning `#F5B84B`, danger `#FF5C6C`, info `#6CA8FF`.
+  All as CSS variables in `tokens.css`; accent is user-swappable (Ember, Violet, Cyan, Lime, Rose, Mono).
 - Typography: **Geist** (UI) + **Geist Mono** (code), bundled locally via `@fontsource-variable/*` or the
   `geist` package — never load from the network. Base 13.5px UI, 15px transcript body, generous line-height
   (1.65 for prose), tabular numbers for stats, tight letter-spacing on headings.
@@ -293,7 +366,8 @@ session) never offer a restart, and a project's config changes only concern that
 - Scrollbars: thin overlay-style custom scrollbars. No default browser focus outlines — custom accent focus
   ring on keyboard focus only (`:focus-visible`).
 - The Vengeance mark: a sharp, minimal geometric "V" glyph (SVG) with the ember gradient. Also used for the
-  window/app icon (generate `.ico`/`.png` from SVG at build time).
+  window/app icon: `npm run icons` renders the Windows `.ico`, the 1024px PNG electron-builder turns into
+  the macOS `.icns`, the Linux hicolor sizes and the window icon from `build/icon.svg` (outputs committed).
 
 ## 5. Tech stack
 
@@ -325,6 +399,13 @@ without spending tokens. **The real engine is the default and must always work.*
 4. Real-engine smoke (where relevant): launch with the real engine and verify the flow works
    (`npm run e2e:real` — sends one short prompt like "Reply with just: ok" in a temp folder; keep token usage
    tiny).
+
+CI (`.github/workflows/ci.yml`) runs gates 1–3 on every pull request and on `main`: typecheck, an app
+build and workflow lint on Linux, then `npm run build`, `npm run checks` and `npm run shots` on Windows x64,
+macOS arm64 and Linux x64 against engines built the way releases build them. Linux shots run under Xvfb
+(a 2560x1440 virtual screen). CI uploads each platform's PNGs; a green run is not a visual review, so
+inspect the images for the platforms a change affects. Screenshots capture the page only, not Mica, the
+macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of CI.
 
 ## 8. Working rules for agents
 
@@ -418,8 +499,9 @@ without spending tokens. **The real engine is the default and must always work.*
   snapshot does not include in-progress streamed message content and its public protocol does not replay
   old events. Text from an unfinished turn depends on a subsequent full native event or the turn settling;
   do not promise immediate replay of pre-disconnect partial text.
-- Vengeance daemon endpoints are keyed by the native executable, account directory and launch environment.
-  Registry metadata in `<Prime agent directory>/vengeance-daemons.json` lets the app find residents across
+- Vengeance daemon endpoints are keyed by the native executable, account directory and launch environment
+  (named pipes on Windows, private Unix sockets on macOS and Linux; §2.4). Registry metadata in
+  `<Prime agent directory>/vengeance-daemons.json` lets the app find residents across
   restarts and engine updates. Background enumeration only probes known endpoints and must not launch a
   daemon just to list them. Each attached session reports its live Engine version separately from the
   selected Engine version. A mismatch shows a persistent session notice with an explicit restart action;
@@ -483,18 +565,42 @@ without spending tokens. **The real engine is the default and must always work.*
   notices and completion status. Bound frames, expire idle flows, cancel pending prompts and terminate
   the helper on cancellation or app shutdown. Once atomic credential saving begins, finish that write.
 - `npm run build:auth` builds or reuses the fingerprinted helper; `predev` and `prebuild` invoke it.
-  End users need no Rust toolchain. Packaging stages its executable and third-party notices in
-  `<resources>/prime-auth`, outside ASAR. pi's bridge and external-node provider host also remain accessible
-  as real files. See `resources/prime-auth/README.md` for native APIs, protocol and update procedure.
+  It builds for the host's Rust target from `engines.lock.json` only, as `vengeance-prime-auth.exe` on
+  Windows and `vengeance-prime-auth` on macOS and Linux, with a `build.json` receipt beside it in
+  `resources/prime-auth/bin`. Reuse needs no checkout or toolchain: the receipt's source, engine, platform
+  and target fingerprint and executable hash must match, and off Windows the file must still be
+  executable. The helper passes Engine 2's runtime dependency checks (§10.4); on macOS it targets 13.0 and
+  is ad-hoc signed before its hash is recorded. End users need no Rust toolchain. Packaging stages the
+  host's executable and third-party notices in `<resources>/prime-auth`, outside ASAR. pi's bridge and
+  external-node provider host also remain accessible as real files. See `resources/prime-auth/README.md`
+  for native APIs, protocol and update procedure.
 
 ### 10.4 Bundled engines and release validation
 
-- `engines.lock.json` pins latest qualified stable tags, exact commits, Vengeance build versions and
-  ordered source patches. `npm run build:engines` builds both and stages complete runtimes under
-  `.engine-staging/bundled`; the installer carries them outside ASAR in `<resources>/engines`.
-  Release packaging refuses stale inputs or altered/incomplete payloads. Distribution versions include
-  `+vengeance.N`. pi's SDK `VERSION` and native package versions identify its upstream API release;
-  its CLI, distribution metadata and Vengeance engine descriptor identify the customized build.
+- `engines.lock.json` (schema version 2) pins latest qualified stable tags, exact commits, Vengeance build
+  versions and ordered source patches, and maps each supported platform (`win32-x64`, `darwin-arm64`,
+  `darwin-x64`, `linux-x64`, `linux-arm64`) to its Rust target. Every platform builds natively on its own
+  host; nothing is cross-compiled. `npm run build:engines` builds both engines for the host only, refuses
+  a host the lock does not list, and stages complete runtimes under `.engine-staging/bundled`. The staged
+  manifest records the build platform and Engine 2's resolved target and entry (`prime/prime-agent`, plus
+  `.exe` on Windows). Packages carry the runtimes outside ASAR in `<resources>/engines`
+  (`Vengeance.app/Contents/Resources/engines` on macOS). Release packaging refuses stale inputs,
+  altered/incomplete payloads and payloads staged for another platform or architecture. Distribution
+  versions include `+vengeance.N`. pi's SDK `VERSION` and native package versions identify its upstream
+  API release; its CLI, distribution metadata and Vengeance engine descriptor identify the customized
+  build.
+- Shipped native executables need nothing beyond the operating system. Windows PE imports exclude GNU
+  compiler runtime DLLs. Linux ELF files link only the C runtime and use no symbol newer than GLIBC 2.35:
+  release builds run in an Ubuntu 22.04 container, and the release workflow checks the packaged app again.
+  `VENGEANCE_GLIBC_BASELINE=host` accepts a newer glibc for a local build used only on that machine; such
+  builds never ship. macOS Mach-O files link only system libraries and frameworks, support macOS 13.0
+  (the app's minimum) and carry a valid ad-hoc signature. The engine builds ad-hoc sign Engine 2, the
+  helper and pi's prebuilt darwin addons before hashing them; packaging leaves those files untouched and
+  the app's own ad-hoc signature seals them. macOS builds have no Developer ID signature or notarization.
+- Payload hashes are per platform. Checkouts use LF line endings on every host, and inventories sort names
+  in code-unit order and record executable bits on macOS and Linux, so neither payload bytes nor hashes
+  depend on the builder's Git configuration or locale, and a lost executable bit fails verification. pi
+  installs its runtime without `node_modules/.bin` links; the CLI only runs through Electron's Node.
 - Both engines default to the bundled builds. Explicit custom locations remain available for development
   and testing; there is no implicit PATH or global-install fallback. Missing bundled files require an
   app repair. The Engine uses Electron's Node runtime, so users need no separate Node installation.
@@ -509,13 +615,30 @@ without spending tokens. **The real engine is the default and must always work.*
   boundaries with separate temporary account/session roots and local fake providers, native resident
   attachment/detachment, session provenance and configuration isolation. Live provider checks use tiny
   prompts and never write the user's real configuration during development.
-- For an unpacked release smoke, run `node scripts/dist-qa.mjs --dir` after the final build, then run
-  `scripts/qa/engines/packaged.qa.mjs` with `QA_PACKAGED_EXE` pointing at
-  `release/qa/win-unpacked/VengeanceQA.exe` and `QA_TMP_ROOT` outside the user's home and repository.
-  This exercises both native engines with local providers, pi bridge loading and native helper loading
-  through the public sign-in API. The helper also runs with a system-only PATH to expose missing DLLs.
-  Inspect the generated PNGs. No installer launch or modification of a user's Vengeance installation is
-  needed for this gate.
+- For an unpacked release smoke, run `node scripts/dist-qa.mjs --dir` after the final build on each
+  platform. It prints the QA executable (`QA executable: …`): `release/qa/win-unpacked/VengeanceQA.exe`
+  on Windows, `release/qa/mac-arm64/VengeanceQA.app/Contents/MacOS/VengeanceQA` on Apple silicon
+  (`release/qa/mac/…` on Intel) and `release/qa/linux-unpacked/vengeance-qa` on Linux
+  (`linux-arm64-unpacked` on arm64). Run `scripts/qa/engines/packaged.qa.mjs` with `QA_PACKAGED_EXE`
+  pointing at it and `QA_TMP_ROOT` outside the user's home and repository (the macOS and Linux defaults
+  already are), under Xvfb on a Linux host without a display. This exercises both native engines with
+  local providers, pi bridge loading and native helper loading through the public sign-in API. The helper
+  also runs with a system-only PATH (`System32`, or `/usr/bin:/bin`) to expose missing DLLs or shared
+  libraries. Inspect the generated PNGs. No installer launch or modification of a user's Vengeance
+  installation is needed for this gate.
+- Releases come from `.github/workflows/release.yml`. A tag `vX.Y.Z` (or `vX.Y.Z-rc.N`, a prerelease) must
+  match `package.json`. Each of the five platforms builds on its own clean runner without caches (Linux
+  inside the pinned Ubuntu 22.04 container): engines, helper, app and packages, then the baked update
+  feed check, the GLIBC gate on Linux and signature, zip and dmg verification on macOS, then the smoke
+  above. The deb is install-tested on x64 and arm64 and the pacman package on Arch. One publish job then
+  drafts the GitHub release with every package, the update files (the two `latest-mac.yml` merged),
+  `SHA256SUMS` and a build provenance attestation; a maintainer reviews and publishes it. Build jobs only
+  read the repository. Pull requests that touch engines, patches, the helper, packaging, toolchain pins,
+  the workflow or its QA inputs, and manual runs, are dry runs that stop before publishing.
+- Each platform is qualified by its own runs. CI and release dry runs are the qualification path for
+  macOS and Linux; a Windows result never stands in for them. Record per-platform runs, payload hashes
+  and package hashes in the release verification record. Transition and resident-upgrade suites need a
+  retained baseline package of the same platform (`UPSTREAM.md`).
 
 ### 10.5 Keeping pace with upstream
 

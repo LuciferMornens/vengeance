@@ -13,6 +13,21 @@ function closeButton(page, title) {
     .getByRole('button', { name: 'Close tab', exact: true })
 }
 
+/** Hover a session's close button until its tooltip shows; a re-render under the pointer can swallow one hover. */
+async function hoverCloseTooltip(page, title, text) {
+  const tooltip = page.getByRole('tooltip').getByText(text, { exact: true })
+  for (let attempt = 1; ; attempt++) {
+    await page.mouse.move(760, 300)
+    await closeButton(page, title).hover()
+    try {
+      await tooltip.waitFor({ timeout: 10_000 })
+      return
+    } catch (error) {
+      if (attempt === 3) throw error
+    }
+  }
+}
+
 export async function scenarios(page, { app, shot, test, MOCK_WORKSPACE }) {
   await test('setPrefs', {
     theme: 'dark',
@@ -24,8 +39,7 @@ export async function scenarios(page, { app, shot, test, MOCK_WORKSPACE }) {
     engine: 'prime',
     name: SAVED_SESSION_NAME
   })
-  await closeButton(page, SAVED_SESSION_NAME).hover()
-  await page.getByRole('tooltip').getByText(SAVED_CLOSE_TOOLTIP, { exact: true }).waitFor()
+  await hoverCloseTooltip(page, SAVED_SESSION_NAME, SAVED_CLOSE_TOOLTIP)
   await shot('session-close-keeps-running-dark')
   await page.mouse.move(760, 300)
   await page.getByRole('button', { name: 'Controls', exact: true }).click()
@@ -47,8 +61,7 @@ export async function scenarios(page, { app, shot, test, MOCK_WORKSPACE }) {
     name: TEMPORARY_SESSION_NAME,
     noSession: true
   })
-  await closeButton(page, TEMPORARY_SESSION_NAME).hover()
-  await page.getByRole('tooltip').getByText(TEMPORARY_CLOSE_TOOLTIP, { exact: true }).waitFor()
+  await hoverCloseTooltip(page, TEMPORARY_SESSION_NAME, TEMPORARY_CLOSE_TOOLTIP)
   await shot('session-close-temporary-dark')
   await page.mouse.move(760, 300)
   await page.getByRole('button', { name: 'Controls', exact: true }).click()

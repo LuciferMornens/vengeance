@@ -15,8 +15,8 @@ the approach before you put in the work.
 
 Every platform needs:
 
-- **Node 24.19.0** (the version in [`.node-version`](.node-version)) with **npm 11**. CI and release
-  builds use exactly that version.
+- **Node 24.19.0** (the version in [`.node-version`](.node-version)) with **npm 11.17** (the
+  `packageManager` in [`package.json`](package.json)). CI and release builds use exactly that Node.
 - **Git**.
 - **Python 3**. The engine build scripts use only its standard library.
 - **Rust 1.98.1** through rustup. [`rust-toolchain.toml`](rust-toolchain.toml) selects the version.
@@ -69,6 +69,8 @@ Every platform needs:
 - On Ubuntu 24.04 and newer, AppArmor blocks the user namespaces Chromium's sandbox uses. If the dev
   app will not start, allow them for the session with
   `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`.
+- To package with `npm run dist`, you also need `rpmbuild` for the rpm and `bsdtar` for the pacman
+  package: `rpm` and `libarchive-tools` on Debian and Ubuntu.
 
 ## Build and run
 
@@ -76,12 +78,15 @@ Every platform needs:
 git clone https://github.com/LuciferMornens/vengeance.git
 cd vengeance
 npm ci
+node node_modules/electron/install.js
 npm run dev
 ```
 
-The first run compiles both engines and the helper from source, which takes a while. On a smaller
-machine, set `VENGEANCE_NATIVE_BUILD_JOBS=1` to limit build concurrency (the default is four). If
-Electron's runtime is missing, run `node node_modules/electron/install.js`.
+Electron 44 has no install script, so `npm ci` does not download its runtime;
+`node node_modules/electron/install.js` does, and `npm run dev` stops with "Electron uninstall"
+without it. The first run compiles both engines and the helper from source, which takes a while. On
+a smaller machine, set `VENGEANCE_NATIVE_BUILD_JOBS=1` to limit build concurrency (the default is
+four).
 
 ## Gates
 
@@ -145,11 +150,13 @@ Releases are for maintainers.
 
 1. Set the new version in `package.json` and `package-lock.json`, and write
    `docs/RELEASE-<version>.md`.
-2. Merge that change to `main`, then push the tag `v<version>`. A prerelease uses
-   `v<version>-rc.N`. Its builds check the same update feed as stable ones (the newest stable
-   release), so they are offered the next stable release, never a newer prerelease.
+2. Merge that change to `main`, then push the tag `v<version>`. The workflow rejects a tag that
+   does not match `package.json`, so a prerelease sets `package.json` and `package-lock.json` to
+   `<version>-rc.N` and pushes the matching tag `v<version>-rc.N`. Its builds check the same
+   update feed as stable ones (the newest stable release), so they are offered the next stable
+   release, never a newer prerelease.
 3. The release workflow builds and smoke-tests all five platforms (the macOS apps are ad-hoc
-   signed) and install-tests the Linux packages. It then creates a **draft** release with every
-   package, `SHA256SUMS` and a provenance attestation.
+   signed) and install-tests the deb and pacman packages. It then creates a **draft** release with
+   every package, `SHA256SUMS` and a provenance attestation.
 4. Check the draft, then publish it. Anyone can verify a download with
    `gh attestation verify <file> --repo LuciferMornens/vengeance`.

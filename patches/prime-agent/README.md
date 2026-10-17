@@ -86,8 +86,8 @@ durable-history consistency and compaction. Re-run them and the public app suite
 
 Before shipping, run formatting, native regressions, clippy, app checks, both-engine integration,
 Stop/compaction, shell/queue, controls/restart, saved history, executable transition and packaged
-app QA. Exact release evidence belongs in the release verification record, with the manifest's
-payload hashes and the installer hash. Never substitute historical passing counts.
+app QA. Exact release evidence belongs in the release verification record, with each platform's
+manifest payload hashes and package hashes. Never substitute historical passing counts.
 
 When upstream incorporates a local fix, demonstrate the regression passing on that upstream base,
 then remove the redundant patch. Do not blindly carry patches or the helper across releases.

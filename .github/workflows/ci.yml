@@ -124,7 +124,7 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
         run: |
           rustup set default-host x86_64-pc-windows-gnu
-          echo 'C:\mingw64\bin' >> "$GITHUB_PATH"
+          printf '%s\n' 'C:\mingw64\bin' >> "$GITHUB_PATH"
           /c/mingw64/bin/gcc --version
           /c/mingw64/bin/objdump --version
       - if: steps.cache.outputs.cache-hit != 'true'
@@ -174,7 +174,7 @@ jobs:
           node-version-file: .node-version
           cache: npm
       - run: npm ci
-      # package.json allowScripts skips Electron's postinstall; the shots launch this binary.
+      # The electron package has no install script and downloads its binary on demand; the shots launch it.
       - name: Install the Electron binary
         run: node node_modules/electron/install.js
       - name: Restore the staged engines
