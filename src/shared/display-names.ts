@@ -4,8 +4,8 @@
  * secondary text/tooltips; use these as the primary label (SPEC §9.6: the UI never says "pi").
  */
 
-const ACRONYMS = new Set(['ai', 'api', 'cli', 'css', 'git', 'gh', 'html', 'http', 'id', 'json', 'lsp', 'mcp', 'pr', 'sdk', 'ui', 'url'])
-const BRANDS: Record<string, string> = { openai: 'OpenAI', github: 'GitHub', gitlab: 'GitLab', anthropic: 'Anthropic', google: 'Google', codex: 'Codex' }
+const ACRONYMS = new Set(['ai', 'api', 'cli', 'css', 'gh', 'html', 'http', 'id', 'json', 'lsp', 'mcp', 'pr', 'sdk', 'ui', 'url'])
+const BRANDS: Record<string, string> = { openai: 'OpenAI', git: 'Git', github: 'GitHub', gitlab: 'GitLab', anthropic: 'Anthropic', google: 'Google', codex: 'Codex' }
 
 function word(raw: string, first: boolean): string {
   const lower = raw.toLowerCase()

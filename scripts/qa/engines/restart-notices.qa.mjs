@@ -264,6 +264,26 @@ async function runEngine(engine, workspace) {
     )
   })
 
+  // Native runtime toggles apply live and then save the setting themselves.
+  for (const [type, label] of [
+    ['set_auto_compaction', 'auto-compaction'],
+    ['set_auto_retry', 'auto-retry']
+  ]) {
+    await check(`${engine}-${label}-toggle`, agentId, async () => {
+      await application.rpc({ type, enabled: false }, agentId)
+      await application.page.waitForTimeout(WATCHER_SETTLE_MS)
+      await application.rpc({ type, enabled: true }, agentId)
+    })
+  }
+  if (prime) {
+    await check('prime-global-subagent-depth', agentId, async () => {
+      await application.invoke('prime:command', agentId, 'set_rlm_max_depth', {
+        maxDepth: 3,
+        global: true
+      })
+    })
+  }
+
   const directory = prime ? fixture.primeDirectory : fixture.piDirectory.dir
   await check(`${engine}-identical-settings-rewrite`, agentId, async () => {
     const path = join(directory, 'settings.json')

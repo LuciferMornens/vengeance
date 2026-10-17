@@ -9,27 +9,36 @@ import type {
 import { SETTINGS, type SettingDef } from '@shared/api/settings-schema'
 import { PRIME_SETTINGS_GROUPS } from '../engines/prime-schema'
 
-type SettingChange = Pick<
+export type SettingChange = Pick<
   SettingDef,
-  'key' | 'alsoKeys' | 'section' | 'live' | 'gui' | 'alsoInSessions' | 'writtenBySessions'
+  'key' | 'alsoKeys' | 'label' | 'section' | 'live' | 'gui' | 'alsoInSessions' | 'writtenBySessions'
 > & { effect?: 'restart' | 'none' }
 
-// Native sessions save these defaults themselves; transport is read for each provider request.
+// Native sessions save these defaults themselves; transport is read for each provider request. A global
+// subagent depth is the starting depth of new sessions; open sessions keep their own.
 const PRIME_NONSTARTUP_KEYS = new Set([
   'defaultProvider',
   'defaultModel',
   'defaultThinkingLevel',
   'defaultServiceTier',
   'recentModels',
+  'rlmMaxDepth',
   'transport',
   'telemetry.noticeShown',
   'warnings.anthropicExtraUsage',
   'updateChannel'
 ])
+// Open sessions take these through native commands, which also save them to settings.json.
+const PRIME_LIVE: Partial<Record<string, NonNullable<SettingDef['live']>>> = {
+  'compaction.enabled': 'autoCompaction',
+  'retry.enabled': 'autoRetry'
+}
 const PRIME_SETTINGS: SettingChange[] = PRIME_SETTINGS_GROUPS.flatMap((group) =>
   group.fields.map((field) => ({
     key: field.key,
+    label: field.label,
     section: group.section,
+    live: PRIME_LIVE[field.key],
     effect: PRIME_NONSTARTUP_KEYS.has(field.key) ? 'none' : undefined
   }))
 )
@@ -101,8 +110,24 @@ export function changedSettings(
  * Whether an edit made outside Vengeance needs open engines restarted. Live settings apply over RPC instead, and keys
  * that sessions save themselves would otherwise ask for a restart after every model switch.
  */
-export function restartsAfterOutsideEdit(def: SettingChange): boolean {
-  return !def.live && !def.writtenBySessions && settingEffect(def) === 'restart'
+export function restartsAfterOutsideEdit(
+  def: SettingChange,
+  engine: EngineId = 'pi',
+  scope?: SettingsScope
+): boolean {
+  return !liveSetting(def, engine, scope) && !def.writtenBySessions && settingEffect(def) === 'restart'
+}
+
+/**
+ * The RPC that applies a setting change to open sessions, if any. Engine 2 saves each toggle it applies to its global
+ * settings.json, so a project's value takes a restart instead: sending it would make it every project's value.
+ */
+export function liveSetting(
+  def: SettingChange,
+  engine: EngineId,
+  scope?: SettingsScope
+): SettingChange['live'] {
+  return engine === 'prime' && scope === 'project' ? undefined : def.live
 }
 
 function equalSettingsValue(before: JsonValue | undefined, after: JsonValue | undefined): boolean {

@@ -2,6 +2,7 @@ import type { IpcContext } from './context'
 import { registerAppIpc } from './app'
 import { registerComposerIpc } from './composer'
 import { registerEngineIpc } from './engine'
+import { registerGalleryIpc } from './gallery'
 import { registerLaunchIpc } from './launch'
 import { registerSessionsIpc } from './sessions'
 import { registerSettingsIpc } from './settings'
@@ -18,4 +19,5 @@ export function registerIpc(context: IpcContext): void {
   registerSessionsIpc(context)
   registerLaunchIpc(context)
   registerUpdatesIpc(context)
+  registerGalleryIpc()
 }

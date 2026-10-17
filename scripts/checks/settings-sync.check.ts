@@ -16,6 +16,7 @@ import {
 } from '../../src/renderer/features/settings/sections/keybinding-conflicts'
 import {
   changedSettings,
+  liveSetting,
   restartsAfterOutsideEdit,
   settingEffect
 } from '../../src/renderer/features/settings/values'
@@ -156,7 +157,28 @@ await check(
       shellCommandPrefix: 'prefix'
     })
     const changed = changedSettings(before, after, 'prime', 'global')
-    assert.deepEqual(keysOf(changed.filter(restartsAfterOutsideEdit)), ['shellCommandPrefix'])
+    const restarts = changed.filter((def) => restartsAfterOutsideEdit(def, 'prime', 'global'))
+    assert.deepEqual(keysOf(restarts), ['shellCommandPrefix'])
+  }
+)
+
+await check(
+  'Prime runtime toggles it saves itself apply live globally, while a project value takes a restart',
+  () => {
+    const before = snapshot({}, { data: {}, trusted: true })
+    const toggled = { compaction: { enabled: false }, retry: { enabled: false }, rlmMaxDepth: 3 }
+    const after = snapshot(toggled, { data: {}, trusted: true })
+    const global = changedSettings(before, after, 'prime', 'global')
+    assert.deepEqual(keysOf(global).sort(), ['compaction.enabled', 'retry.enabled', 'rlmMaxDepth'])
+    assert.deepEqual(global.filter((def) => restartsAfterOutsideEdit(def, 'prime', 'global')), [])
+    const live = global.map((def) => liveSetting(def, 'prime', 'global')).filter(Boolean)
+    assert.deepEqual(live.sort(), ['autoCompaction', 'autoRetry'])
+    // Engine 2 saves an applied toggle as the global value, so a project's own value never goes over RPC.
+    const edited = snapshot({}, { data: toggled, trusted: true })
+    const project = changedSettings(before, edited, 'prime', 'project')
+    const restarts = project.filter((def) => restartsAfterOutsideEdit(def, 'prime', 'project'))
+    assert.deepEqual(keysOf(restarts).sort(), ['compaction.enabled', 'retry.enabled'])
+    assert.equal(liveSetting(def('compaction.enabled'), 'pi', 'project'), 'autoCompaction')
   }
 )
 

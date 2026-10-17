@@ -1,9 +1,10 @@
-// Settings lane scenarios: onboarding steps, every settings section, search, project scope, provider
-// dialogs, packages live log, raw JSON diff, MCP server editor + log, terminal keybindings, system prompt
-// files, saved trust decisions, model overrides, updates pill + full sheet, offline mode, the engine
-// changelog, the "Engine updated" toast (over the Updates sheet at full and narrow width, and over the
-// workbench), a settings error toast over the sheet and the light theme.
-// All config writes land in the mock engine's seeded temp agent dir (never the real ~/.pi/agent).
+// Settings lane scenarios: onboarding steps, every settings section, search, project scope,
+// provider dialogs, packages live log, the extension gallery (details, topic search, card install),
+// raw JSON diff, MCP server editor + log, terminal keybindings, system prompt files, saved trust
+// decisions, model overrides, updates pill + full sheet, offline mode, the engine changelog, the
+// "Engine updated" toast (over the Updates sheet at full and narrow width, and over the workbench),
+// a settings error toast over the sheet and the light theme. All config writes land in the mock
+// engine's seeded temp agent dir (never the real ~/.pi/agent).
 
 /** A window narrower than the Updates column plus a toast on either side (it clears both from ~1280px). */
 const UPDATES_NARROW_WIDTH = 1100
@@ -14,6 +15,7 @@ const SECTIONS = [
   'providers',
   'custom-models',
   'agent',
+  'extensions',
   'packages',
   'resources',
   'mcp',
@@ -145,7 +147,7 @@ export async function scenarios(page, { app, shot, test, wait, MOCK_WORKSPACE })
   for (const section of SECTIONS) {
     await test('openSettings', section)
     await shot(`settings-section-${section}`, {
-      settleMs: section === 'mcp' || section === 'providers' || section === 'packages' ? 1400 : 800
+      settleMs: ['mcp', 'providers', 'packages', 'extensions'].includes(section) ? 1400 : 800
     })
   }
 
@@ -199,6 +201,21 @@ export async function scenarios(page, { app, shot, test, wait, MOCK_WORKSPACE })
   await shot('settings-packages-live-log', { settleMs: 200 })
   await sheet.getByText(/^Done · /).waitFor({ timeout: 20_000 })
   await shot('settings-packages-installed', { settleMs: 600 })
+
+  // Extensions: a package's details, a topic search, then a one-click install from a card.
+  await test('openSettings', 'extensions')
+  await sheet.getByRole('button', { name: 'About Git guard' }).click()
+  await dialog.getByText('Extensions run with your permissions').waitFor()
+  await shot('settings-extensions-details', { settleMs: 900 })
+  await escape()
+  await sheet.getByRole('button', { name: 'Memory', exact: true }).click()
+  await sheet.getByText(/results? for “memory”/).waitFor()
+  await shot('settings-extensions-search', { settleMs: 600 })
+  await sheet.getByRole('button', { name: 'Popular', exact: true }).click()
+  await sheet.getByRole('button', { name: 'About MCP bridge' }).waitFor()
+  await sheet.getByRole('button', { name: 'Install', exact: true }).first().click()
+  await sheet.getByText(/^Done · /).waitFor({ timeout: 20_000 })
+  await shot('settings-extensions-installed', { settleMs: 600 })
 
   // Raw JSON: edit → review diff.
   await test('openSettings', 'raw')

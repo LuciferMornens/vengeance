@@ -611,6 +611,8 @@ export interface SettingsEventMap {
     external?: boolean
     /** Set when only one project's `.pi` changed; `trusted` says whether that folder's engines load it. */
     project?: { cwd: string; trusted: boolean }
+    /** settings.json was rewritten by an install or update Vengeance ran, which announces its own change. */
+    fromRun?: boolean
   }
   /** The models a subscription account offers changed (main hides the rest); pickers re-read their lists. */
   'settings:account-models': { providerId: string; engine?: EngineId }

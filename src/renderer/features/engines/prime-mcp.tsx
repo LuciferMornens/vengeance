@@ -466,7 +466,7 @@ export function PrimeMcpSection() {
     if (useSettings.getState().engine === 'prime') replaceSnapshot(snapshot)
     const affected =
       scope === 'project' ? { agentIds: agentsForEngine('prime', workspace), patch: {} } : undefined
-    afterEngineConfigChange('restart', affected, 'prime')
+    afterEngineConfigChange('restart', affected, 'prime', 'MCP servers changed.')
     await reload()
   }
 

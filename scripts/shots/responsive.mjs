@@ -1,8 +1,8 @@
 // Responsive scenarios: the shell at the minimum window size, laptop, desktop, wide and 4K-class
-// sizes, with the sidebar and inspector open or closed, an idle and a running composer
-// (GPT-6.1 Sol, High, Fast), the docked todo list expanded and collapsed, the empty session hero,
-// settings and the palette. A width sweep at the smallest and largest text sizes asserts that the
-// center pane and the composer footer never overflow.
+// sizes, with the sidebar and inspector open or closed, an idle and a running composer (GPT-6.1
+// Sol, High, Fast), the docked todo list expanded and collapsed, the empty session hero, settings,
+// the extension gallery and the palette. A width sweep at the smallest and largest text sizes
+// asserts that the center pane and the composer footer never overflow.
 
 const SIZES = [
   { name: 'min', width: 880, height: 560 },
@@ -204,6 +204,8 @@ export async function scenarios(page, { app, shot, test, wait, MOCK_WORKSPACE })
     await resize(app, page, size)
     await test('openSettings', 'general')
     await shot(`responsive-${size.name}-settings`, { settleMs: 700 })
+    await test('openSettings', 'extensions')
+    await shot(`responsive-${size.name}-extensions`, { settleMs: 1000 })
     await test('closeSettings')
     await test('setPalette', true)
     await shot(`responsive-${size.name}-palette`)

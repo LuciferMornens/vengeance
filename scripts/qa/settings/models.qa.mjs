@@ -57,7 +57,13 @@ await runSuite(
       await choose(app, 'defaultThinkingLevel', 'Low')
       const data = await waitForJsonValue(settingsPath, 'defaultThinkingLevel', 'low')
       assert.equal(data.defaultProvider, FAKE_PROVIDER, 'unrelated keys are preserved')
-      await toastWith(app, 'Restart to apply').waitFor()
+      // Saved sessions resume their own thinking level, so a restart would change nothing.
+      await app.page.waitForTimeout(800)
+      assert.equal(
+        await toastWith(app, 'Restart to apply').isVisible(),
+        false,
+        'a new default offers no restart'
+      )
     })
 
     await step('a new session starts at "low" and sends the low budget', async () => {

@@ -74,6 +74,8 @@ export interface StreamedRun {
 
 /** Cancel hooks of in-flight runs (real processes and mock simulations). */
 const cancellers = new Map<string, () => void>()
+/** When the last run ended: the OS can report its final file writes a moment after the process exits. */
+let lastRunEndedAt = 0
 
 /** Spawn a long-running pi subcommand and stream its output (colored, for the live log). */
 export async function streamPiCli(
@@ -101,6 +103,7 @@ export async function streamPiCli(
       if (settled) return
       settled = true
       cancellers.delete(runId)
+      lastRunEndedAt = Date.now()
       options.onDone(event)
       resolve(event)
     }
@@ -127,6 +130,11 @@ export function hasActiveRuns(): boolean {
   return cancellers.size > 0
 }
 
+/** True while a run is in flight or ended less than `withinMs` ago. */
+export function hadRecentRun(withinMs: number): boolean {
+  return hasActiveRuns() || Date.now() - lastRunEndedAt < withinMs
+}
+
 /**
  * Mock mode: replay a scripted CLI transcript with realistic pacing instead of touching the network.
  * `steps` are [delayMs, text] pairs; `onComplete` runs before the done event (e.g. to update settings).
@@ -143,6 +151,7 @@ export function simulatePiCli(
     let timer: NodeJS.Timeout | null = null
     const finish = (event: ProcessDoneEvent) => {
       cancellers.delete(runId)
+      lastRunEndedAt = Date.now()
       options.onDone(event)
       resolve(event)
     }

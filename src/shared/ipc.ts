@@ -9,6 +9,7 @@ import type { AppEventMap, AppInvokeMap } from './api/app'
 import type { ChatEventMap, ChatInvokeMap } from './api/chat'
 import type { ComposerEventMap, ComposerInvokeMap } from './api/composer'
 import type { EngineEventMap, EngineInvokeMap } from './api/engine'
+import type { GalleryInvokeMap } from './api/gallery'
 import type { LaunchEventMap, LaunchInvokeMap } from './api/launch'
 import type { SessionsEventMap, SessionsInvokeMap } from './api/sessions'
 import type {
@@ -34,7 +35,8 @@ export interface InvokeMap
     SessionsInvokeMap,
     LaunchInvokeMap,
     PrimeTracesInvokeMap,
-    UpdatesInvokeMap {}
+    UpdatesInvokeMap,
+    GalleryInvokeMap {}
 
 export interface EventMap
   extends

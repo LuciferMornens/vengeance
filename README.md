@@ -12,7 +12,11 @@ Engine includes all three Abliteration models. Connect in **Settings → Provide
 Abliteration**, or supply `ABLIT_KEY` in the launch environment. Abliterated Model Large V2 offers
 Minimal, Low, Medium, High, Extra high and Max reasoning effort.
 
-Latest local release: [Vengeance 0.2.14 — changes, checks and artifact hashes](docs/RELEASE-0.2.14.md).
+Find community extensions for Engine in **Settings → Extensions**: search or browse topics, read what a
+package adds, and install it for every project or only the open one. You can also add your own extension
+file or package folder there. Installed packages are managed in **Settings → Packages**.
+
+Latest local release: [Vengeance 0.2.15 — changes, checks and artifact hashes](docs/RELEASE-0.2.15.md).
 
 ## Current guides
 
@@ -41,6 +45,7 @@ These reports describe the exact versions, hashes and observations at their stat
 They are evidence, not current installation status or promises that local generated artifacts still
 exist. Use the lockfile and current guides for maintenance instructions.
 
+- [Release 0.2.14](docs/RELEASE-0.2.14.md): stable engine updates and Engine 2 subagent families.
 - [Release 0.2.13](docs/RELEASE-0.2.13.md): native conversation handoff between engines.
 - [Release 0.2.12](docs/RELEASE-0.2.12.md): conversation deletion, workspace navigation and long histories.
 - [Release 0.2.11](docs/RELEASE-0.2.11.md): native Abliteration models and full Large V2 reasoning.
