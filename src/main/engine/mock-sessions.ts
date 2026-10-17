@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
 import type { ForkPoint, SessionListItem } from '@shared/api/sessions'
 import type { AgentMessage, AssistantMessage, SessionEntry, Usage } from '@shared/engine-types'
+import { mockHomePath, mockVolumePath } from './mock-paths'
 
 /**
  * Mock-mode session listings (VENGEANCE_MOCK=1): a few workspaces with sessions spread over
@@ -8,7 +10,7 @@ import type { AgentMessage, AssistantMessage, SessionEntry, Usage } from '@share
  * Mutable so mock rename / trash / branch behave like the real thing.
  */
 
-export const MOCK_SESSIONS_ROOT = 'C:\\Users\\dev\\.pi\\agent\\sessions'
+export const MOCK_SESSIONS_ROOT = mockHomePath('.pi', 'agent', 'sessions')
 
 interface MockSessionSeed {
   cwd: string
@@ -22,10 +24,10 @@ interface MockSessionSeed {
   turns?: number
 }
 
-const AURORA = 'C:\\Users\\dev\\projects\\aurora'
-const TAKEDOWN = 'C:\\Users\\dev\\projects\\takedown'
-const RELAY = 'D:\\work\\relay'
-const DOTFILES = 'C:\\Users\\dev\\dotfiles'
+const AURORA = mockHomePath('projects', 'aurora')
+const TAKEDOWN = mockHomePath('projects', 'takedown')
+const RELAY = mockVolumePath('work', 'relay')
+const DOTFILES = mockHomePath('dotfiles')
 
 const HOUR = 60
 const DAY = 24 * HOUR
@@ -76,7 +78,7 @@ function encodeCwd(cwd: string): string {
 }
 
 function fileFor(cwd: string, at: number, id: string): string {
-  return `${MOCK_SESSIONS_ROOT}\\${encodeCwd(cwd)}\\${new Date(at).toISOString().replace(/[:.]/g, '-')}_${id}.jsonl`
+  return join(MOCK_SESSIONS_ROOT, encodeCwd(cwd), `${new Date(at).toISOString().replace(/[:.]/g, '-')}_${id}.jsonl`)
 }
 
 interface MockSessionRecord extends SessionListItem {

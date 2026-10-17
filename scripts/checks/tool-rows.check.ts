@@ -9,11 +9,14 @@ import type {
 import { SUBAGENT_WAKE_PREFIX, supervisorReplyPrompt } from '../../src/shared/subagents'
 import { summarizeCalls } from '../../src/renderer/features/chat/activity-summary'
 import { buildEntryItems, segmentItems } from '../../src/renderer/features/chat/transcript-items'
+import { relativeTo } from '../../src/renderer/features/inspector/activity'
 import {
   describeSubagentPeek,
+  displayPath,
   humanizeCommand,
   isBenignFailure,
   reasonLine,
+  shortPath,
   splitLensVerdict,
   stripCdPrefix,
   toolCallKind,
@@ -133,6 +136,28 @@ await check('humanizeCommand: run files become run references, outside paths …
   assert.deepEqual(humanizeCommand('curl https://example.com/a/b', undefined), [
     'curl https://example.com/a/b'
   ])
+})
+
+await check('humanizeCommand: POSIX sessions shorten POSIX paths, Windows sessions only drive paths', () => {
+  assert.deepEqual(humanizeCommand('cat /Users/me/proj/src/a.ts && rg foo /opt/other/deep/dir/x.ts', '/Users/me/proj'), ['cat src/a.ts && rg foo \u2026/dir/x.ts'])
+  const untouched = "cat /etc/hosts 2>/dev/null; sed -n '/^## /,/^## /p' $HOME/a/b/c"
+  assert.deepEqual(humanizeCommand(untouched, '/home/u/p'), [untouched])
+  assert.deepEqual(humanizeCommand('cat /c/Users/me/x', 'D:\\proj'), ['cat /c/Users/me/x'])
+})
+
+await check('shortPath and displayPath: POSIX roots stay whole, POSIX names compare exactly', () => {
+  assert.equal(shortPath('/etc/hosts'), '/etc/hosts')
+  assert.equal(shortPath('/a/b/c'), '\u2026/b/c')
+  assert.equal(shortPath('C:/a/b'), '\u2026/a/b')
+  assert.equal(displayPath('/home/u/Proj/x', '/home/u/proj'), '/home/u/Proj/x')
+  assert.equal(displayPath('/home/u/proj/a\\b.txt', '/home/u/proj'), 'a\\b.txt')
+  assert.equal(displayPath('D:\\proj\\src\\a.ts', 'D:\\proj'), 'src/a.ts')
+})
+
+await check('inspector relativeTo: POSIX paths compare exactly, Windows paths by drive-letter rules', () => {
+  assert.equal(relativeTo('/home/u/p', '/home/u/p/a.ts'), 'a.ts')
+  assert.equal(relativeTo('/home/u/p', '/home/u/P/a.ts'), '/home/u/P/a.ts')
+  assert.equal(relativeTo('D:\\proj', 'd:/PROJ/src/a.ts'), 'src/a.ts')
 })
 
 await check(

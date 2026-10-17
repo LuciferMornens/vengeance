@@ -38,6 +38,31 @@ export function areaOf(segments: string[]): SettingsChangeArea | null {
   return null
 }
 
+/** Folder levels of a resource folder that Linux watches (`extensions/<name>/src`). */
+const RESOURCE_WATCH_DEPTH = 3
+/** Folders inside resources that hold no config: installed dependencies and dot-folders such as `.git`. */
+const UNWATCHED_FOLDER = /^(node_modules|\..*)$/
+
+/**
+ * Whether Linux watches this subfolder of the agent dir or a project's `.pi` dir (segments relative to it), which it
+ * has to do folder by folder (watch-tree.ts): resource folders a few levels deep, `npm/` itself for its package files
+ * and the top of `git/`. Sessions, installed packages and caches are left out.
+ */
+export function watchedConfigFolder(segments: string[]): boolean {
+  const name = segments[0]!.toLowerCase()
+  if (RESOURCE_DIRS.has(name)) return isResourceFolder(segments)
+  if (name === 'npm') return segments.length === 1
+  return name === 'git' && segments.length <= 2
+}
+
+/** A folder below a resource folder that may hold resources (`skills/<name>`), not dependencies or VCS data. */
+export function isResourceFolder(segments: string[]): boolean {
+  return (
+    segments.length <= RESOURCE_WATCH_DEPTH &&
+    !segments.slice(1).some((segment) => UNWATCHED_FOLDER.test(segment))
+  )
+}
+
 /** Config area of a path relative to the agent dir (`auth.json` still needs its provider-set check). */
 export function agentDirArea(segments: string[]): SettingsChangeArea | null {
   if (segments.length === 1) {

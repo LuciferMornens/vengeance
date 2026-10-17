@@ -25,13 +25,14 @@ function sleepSync(ms: number): void {
 
 /**
  * Write temp + rename. On Windows the rename fails with EPERM/EBUSY while antivirus or the indexer
- * briefly holds the target, so it is retried; the temp file never outlives the call.
+ * briefly holds the target, so it is retried; the temp file never outlives the call. Only the user may read the
+ * file on macOS and Linux (it holds sealed env values).
  */
 function writeFileAtomicSync(target: string, content: string): void {
   mkdirSync(dirname(target), { recursive: true })
   const temp = `${target}.${process.pid}.tmp`
   try {
-    writeFileSync(temp, content, 'utf8')
+    writeFileSync(temp, content, { encoding: 'utf8', mode: 0o600 })
     for (let attempt = 1; ; attempt++) {
       try {
         renameSync(temp, target)
@@ -51,13 +52,36 @@ function writeFileAtomicSync(target: string, content: string): void {
   }
 }
 
+let secretStoreReported = false
+
+/**
+ * Linux: logs once which store Chromium chose (`basic_text` only obfuscates). Only after a value was really sealed or
+ * opened: asking opens the store, and a locked keyring then prompts to unlock it, so app start never asks.
+ */
+function reportSecretStore(): void {
+  if (process.platform !== 'linux' || secretStoreReported) return
+  secretStoreReported = true
+  console.info(`[vengeance] secret store: ${safeStorage.getSelectedStorageBackend()}`)
+}
+
 /** Electron safeStorage (DPAPI on Windows) for engine env values at rest; usable once the app is ready. */
 const safeStorageCipher: EnvCipher = {
-  encrypt: (plain) =>
-    safeStorage.isEncryptionAvailable()
-      ? safeStorage.encryptString(plain).toString('base64')
-      : null,
-  decrypt: (sealed) => safeStorage.decryptString(Buffer.from(sealed, 'base64'))
+  encrypt: (plain) => {
+    try {
+      return safeStorage.isEncryptionAvailable()
+        ? safeStorage.encryptString(plain).toString('base64')
+        : null
+    } finally {
+      reportSecretStore()
+    }
+  },
+  decrypt: (sealed) => {
+    try {
+      return safeStorage.decryptString(Buffer.from(sealed, 'base64'))
+    } finally {
+      reportSecretStore()
+    }
+  }
 }
 
 interface AppStateFile {

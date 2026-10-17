@@ -1,7 +1,7 @@
-// Chat: every built-in tool of the Engine (read, bash, edit, write, grep, find, ls, powershell)
-// driven by the fake LLM. Each call is checked end to end: the result the model gets back, the
-// effect on disk, and the tool row (verb, subject, expand, Copy, Raw, edit diff, read image
-// thumbnail, live bash output).
+// Chat: every built-in tool of the Engine (read, bash, edit, write, grep, find, ls and, on Windows,
+// powershell) driven by the fake LLM. Each call is checked end to end: the result the model gets
+// back, the effect on disk, and the tool row (verb, subject, expand, Copy, Raw, edit diff, read
+// image thumbnail, live bash output).
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -18,7 +18,18 @@ import {
   until
 } from './helpers.mjs'
 
-const BUILTIN_TOOLS = ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls', 'powershell']
+/** The Engine's powershell tool only runs on Windows. */
+const POWERSHELL = process.platform === 'win32'
+const BUILTIN_TOOLS = [
+  'read',
+  'bash',
+  'edit',
+  'write',
+  'grep',
+  'find',
+  'ls',
+  ...(POWERSHELL ? ['powershell'] : [])
+]
 
 const APP_TS = ['export function add(a: number, b: number) {', '  return a + b', '}', ''].join('\n')
 
@@ -311,18 +322,20 @@ await runSuite(
       assert.match(await (await lastRow(app)).innerText(), /^Listed/)
     })
 
-    await step('powershell: runs, output to the model, PS row', async () => {
-      const { result } = await runTool(app, server, {
-        id: 'toolu_ps',
-        name: 'powershell',
-        args: { command: 'Write-Output "hello-from-ps"' },
-        prompt: 'Run powershell'
+    if (POWERSHELL) {
+      await step('powershell: runs, output to the model, PS row', async () => {
+        const { result } = await runTool(app, server, {
+          id: 'toolu_ps',
+          name: 'powershell',
+          args: { command: 'Write-Output "hello-from-ps"' },
+          prompt: 'Run powershell'
+        })
+        assert.equal(result.isError, false, result.text)
+        assert.match(result.text, /hello-from-ps/)
+        const detail = await expand(await lastRow(app))
+        await detail.getByText('hello-from-ps').first().waitFor()
       })
-      assert.equal(result.isError, false, result.text)
-      assert.match(result.text, /hello-from-ps/)
-      const detail = await expand(await lastRow(app))
-      await detail.getByText('hello-from-ps').first().waitFor()
-    })
+    }
 
     await step('two calls in one turn: both results in the next request', async () => {
       const from = server.requests.length
@@ -358,12 +371,12 @@ await runSuite(
 
     await step('Ctrl+O expands every tool row', async () => {
       await app.page.getByRole('textbox', { name: 'Message' }).focus()
-      await app.page.keyboard.press('Control+o')
+      await app.page.keyboard.press('ControlOrMeta+o')
       await until(async () => (await app.page.locator('[data-row-detail]').count()) >= 10, {
         label: 'all rows expanded'
       })
       await app.screenshot('tools-expanded')
-      await app.page.keyboard.press('Control+o')
+      await app.page.keyboard.press('ControlOrMeta+o')
     })
 
     await checks.check('transcript copy is clean (no "pi", no raw JSON)', async () => {

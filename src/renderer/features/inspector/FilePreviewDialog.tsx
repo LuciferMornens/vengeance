@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { FileWarning, FolderSearch } from 'lucide-react'
 import type { ReadFileResult } from '@shared/api/system'
 import { invoke } from '../../lib/ipc'
+import { REVEAL_LABEL } from '../../lib/platform-copy'
 import { Button, Dialog, Skeleton } from '../../ui'
 
 /** Read-only, line-numbered preview of a workspace file (bounded read through sys:read-file). */
@@ -27,7 +28,7 @@ export function FilePreviewDialog({ path, display, cwd, onClose }: { path: strin
       description={file ? `${lines.length.toLocaleString()} lines · ${(file.size / 1024).toFixed(file.size < 10_240 ? 1 : 0)} KB${file.truncated ? ' · truncated preview' : ''}` : 'Loading…'}
       footer={
         <Button variant="ghost" size="sm" leading={<FolderSearch />} onClick={() => void invoke('sys:reveal', file?.path ?? path)}>
-          Show in Explorer
+          {REVEAL_LABEL}
         </Button>
       }
       className="h-[min(78vh,760px)]"

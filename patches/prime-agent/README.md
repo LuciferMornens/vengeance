@@ -3,7 +3,7 @@
 Follow [UPSTREAM.md](../../UPSTREAM.md) for reconstruction and qualification.
 
 Vengeance ships a source build of stable `v0.10.0`, upstream commit
-`763094e1b6a7c17450ee8399b06cda1853847ca5`, identified as `0.10.0+vengeance.9`.
+`763094e1b6a7c17450ee8399b06cda1853847ca5`, identified as `0.10.0+vengeance.10`.
 The exact source, catalog revision, toolchain and patch order live in
 [engines.lock.json](../../engines.lock.json). The native helper links this same stable base.
 
@@ -63,11 +63,17 @@ The builder checks the tag's commit, applies each patch with `git apply`, and re
 checkout unless its changes have been exported into the patch series. These patches include
 plain diffs, so `git am` is not the reconstruction command.
 
-Builds use Rust/Cargo 1.98.1, target `x86_64-pc-windows-gnu`, the upstream Cargo lock,
-and `VENGEANCE_ENGINE_BUILD` from the engine lock. The builder strips debug information,
-streams PE imports through GNU objdump, rejects external GNU runtime DLL imports, and invokes
-upstream's release packager. It ships the complete kernel package, skills, catalogs, Cargo lock
-and MIT license. An executable alone is not a deployable package.
+Each platform builds natively with Rust/Cargo 1.98.1 (`rust-toolchain.toml`), the host's Rust
+target from the engine lock, the upstream Cargo lock and `VENGEANCE_ENGINE_BUILD` from the engine
+lock. Checkouts use LF line endings on every host, so compiled-in prompts and shipped text match.
+Windows (`x86_64-pc-windows-gnu`) strips debug information with the toolchain's `rust-objcopy` and
+rejects external GNU runtime DLL imports found by GNU objdump. Linux uses upstream's
+`split_debug.py` and passes the decoder to the packer; the decoder never ships. Its executable may
+link only the C runtime and no symbol newer than GLIBC 2.35, so Linux builds run in Ubuntu 22.04.
+macOS builds target macOS 13.0, keep the linked Mach-O, may link only system libraries and
+frameworks, and receive a reproducible ad-hoc signature before packaging. Every platform then
+invokes upstream's release packager. It ships the complete kernel package, skills, catalogs,
+Cargo lock and MIT license. An executable alone is not a deployable package.
 
 The app copies this package to an immutable runtime directory keyed by the payload hash.
 Resident processes can survive app upgrades without locking installer resources. Engine files

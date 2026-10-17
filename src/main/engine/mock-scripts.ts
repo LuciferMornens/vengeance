@@ -3,6 +3,7 @@ import type { MockScriptName } from '@shared/api/engine'
 import type { AgentMessage, ExtensionUIDialogRequest, ToolResultMessage, UserMessage } from '@shared/engine-types'
 import { call, displayDiff, ScriptBuilder, text, uid, type MockStep, type ScriptContext } from './mock-builder'
 import { MOCK_FILES } from './mock-data'
+import { forwardSlashes, mockHomePath } from './mock-paths'
 import { subagents } from './mock-subagents'
 import { toolbelt } from './mock-toolbelt'
 
@@ -31,7 +32,7 @@ const NEW_PERSIST = `  private dirty = new Set<string>()
 
 const ESC = '\u001b['
 const VITEST_LINES = [
-  `\n${ESC}1m${ESC}46m RUN ${ESC}49m${ESC}22m ${ESC}36mv3.2.4 ${ESC}39m${ESC}90mC:/Users/dev/projects/aurora${ESC}39m\n\n`,
+  `\n${ESC}1m${ESC}46m RUN ${ESC}49m${ESC}22m ${ESC}36mv3.2.4 ${ESC}39m${ESC}90m${forwardSlashes(mockHomePath('projects', 'aurora'))}${ESC}39m\n\n`,
   ` ${ESC}32m✓${ESC}39m src/session/persist.test.ts ${ESC}2m(${ESC}22m${ESC}2m6 tests${ESC}22m${ESC}2m)${ESC}22m${ESC}32m 11${ESC}2mms${ESC}22m${ESC}39m\n`,
   ` ${ESC}32m✓${ESC}39m src/session/types.test.ts ${ESC}2m(${ESC}22m${ESC}2m3 tests${ESC}22m${ESC}2m)${ESC}22m${ESC}32m 4${ESC}2mms${ESC}22m${ESC}39m\n`,
   ` ${ESC}32m✓${ESC}39m src/session/store.test.ts ${ESC}2m(${ESC}22m${ESC}2m15 tests${ESC}22m${ESC}2m)${ESC}22m${ESC}32m 38${ESC}2mms${ESC}22m${ESC}39m\n`,
@@ -540,7 +541,7 @@ function gallery(ctx: ScriptContext): MockStep[] {
 }
 
 const PS_LISTING = `
-    Directory: C:\\Users\\dev\\projects\\aurora\\src\\session
+    Directory: ${mockHomePath('projects', 'aurora', 'src', 'session')}
 
 Mode                 LastWriteTime         Length Name
 ----                 -------------         ------ ----

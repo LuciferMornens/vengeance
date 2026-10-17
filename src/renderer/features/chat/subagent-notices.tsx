@@ -13,6 +13,7 @@ import {
 } from '@shared/subagents'
 import { cn } from '../../lib/cn'
 import { formatRelativeTime } from '../../lib/format'
+import { isImeComposing } from '../../lib/keybindings'
 import { useAgents } from '../../store/agents'
 import { Button, Textarea, toast } from '../../ui'
 import { Markdown } from '../../ui/Markdown'
@@ -194,7 +195,7 @@ function SupervisorCard({ agentId, request, receivedAt }: { agentId: string; req
     }
   }
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+    if (event.key === 'Enter' && !event.shiftKey && !isImeComposing(event)) {
       event.preventDefault()
       void send()
     }

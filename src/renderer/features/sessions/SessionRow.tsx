@@ -8,6 +8,7 @@ import {
   type ReactNode
 } from 'react'
 import { cn } from '../../lib/cn'
+import { isDeleteItemKey, isImeComposing } from '../../lib/keybindings'
 import { ContextMenu, listRowClass, Tooltip, type MenuItem } from '../../ui'
 import { useSessions } from './store'
 
@@ -78,7 +79,7 @@ function RenameField({
       }}
       onKeyDown={(e) => {
         e.stopPropagation()
-        if (e.key === 'Enter') finish(value)
+        if (e.key === 'Enter' && !isImeComposing(e)) finish(value)
         else if (e.key === 'Escape') finish(null)
       }}
       className="-mx-1.5 -my-px h-[21px] w-full min-w-0 rounded-sm bg-surface-2 px-1.5 text-ui text-fg shadow-focus outline-none focus-visible:outline-none"
@@ -161,7 +162,7 @@ export function SessionRow({
     if (event.key === 'F2') {
       event.preventDefault()
       setRenaming(rowKey)
-    } else if (event.key === 'Delete' && onDelete) {
+    } else if (onDelete && isDeleteItemKey(event)) {
       event.preventDefault()
       onDelete()
     }

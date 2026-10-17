@@ -5,6 +5,7 @@
 // "Engine updated" toast (over the Updates sheet at full and narrow width, and over the workbench),
 // a settings error toast over the sheet and the light theme. All config writes land in the mock
 // engine's seeded temp agent dir (never the real ~/.pi/agent).
+import { mockHomePath } from './lib/mock-paths.mjs'
 
 /** A window narrower than the Updates column plus a toast on either side (it clears both from ~1280px). */
 const UPDATES_NARROW_WIDTH = 1100
@@ -122,12 +123,12 @@ export async function scenarios(page, { app, shot, test, wait, MOCK_WORKSPACE })
   test('setPrefs', {
     workspaces: [
       {
-        path: 'C:\\Users\\dev\\projects\\nightshade',
+        path: mockHomePath('projects', 'nightshade'),
         name: 'nightshade',
         lastOpenedAt: Date.now() - 3_600_000
       },
       {
-        path: 'C:\\Users\\dev\\projects\\ember-api',
+        path: mockHomePath('projects', 'ember-api'),
         name: 'ember-api',
         lastOpenedAt: Date.now() - 86_400_000 * 2
       }

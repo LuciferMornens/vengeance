@@ -1,4 +1,4 @@
-import { comboLabel } from '../lib/keybindings'
+import { shortcutCaps } from '../lib/keybindings'
 import { cn } from '../lib/cn'
 
 export interface KbdProps {
@@ -12,7 +12,7 @@ export interface KbdProps {
 export function Kbd({ combo, size = 'sm', className }: KbdProps) {
   return (
     <span className={cn('inline-flex shrink-0 items-center gap-0.5', className)}>
-      {comboLabel(combo).map((key, i) => (
+      {shortcutCaps(combo).map((key, i) => (
         <kbd
           key={i}
           className={cn(

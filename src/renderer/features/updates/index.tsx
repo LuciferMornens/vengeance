@@ -294,6 +294,9 @@ export function UpdatesSheet() {
   const busy = !!state.running
   const engine = state.engine
   const app = state.app
+  /** macOS without signing and Linux packages other than AppImage: the release page installs, never the app. */
+  const manualInstall = app.installMode === 'manual'
+  const releasePage = manualInstall ? app.releaseUrl : undefined
   const nothing =
     !engine?.available &&
     state.packages.length === 0 &&
@@ -464,7 +467,12 @@ export function UpdatesSheet() {
                 {app.status === 'disabled' && (app.message ?? 'Self-updates are off.')}
                 {app.status === 'idle' && 'Up to date'}
                 {app.status === 'checking' && 'Checking…'}
-                {app.status === 'available' && 'A new version is available.'}
+                {app.status === 'available' &&
+                  (manualInstall
+                    ? app.packageType
+                      ? `A new version is available. Get the .${app.packageType} package from the release page.`
+                      : 'A new version is available on the release page.'
+                    : 'A new version is available.')}
                 {app.status === 'downloading' && `Downloading… ${Math.round(app.progress ?? 0)}%`}
                 {app.status === 'ready' && 'Ready — restart to finish updating.'}
                 {app.status === 'error' && <span className="text-danger">{app.message}</span>}
@@ -478,7 +486,17 @@ export function UpdatesSheet() {
                 </div>
               )}
             </div>
-            {app.status === 'available' && (
+            {app.status === 'available' && releasePage && (
+              <Button
+                size="sm"
+                variant="secondary"
+                leading={<ExternalLink />}
+                onClick={() => void invoke('sys:open-external', releasePage)}
+              >
+                Download
+              </Button>
+            )}
+            {app.status === 'available' && !manualInstall && (
               <Button
                 size="sm"
                 variant="secondary"
@@ -514,7 +532,9 @@ export function UpdatesSheet() {
             />
             <p className="mt-2 text-xs leading-relaxed text-fg-3">
               {(updatesPrefs.mode ?? 'notify') === 'automatic'
-                ? 'Packages update while no agent is running. Vengeance updates download automatically; restart when ready to update the app and both engines.'
+                ? manualInstall
+                  ? 'Packages update while no agent is running. New Vengeance versions show here; download them from the release page.'
+                  : 'Packages update while no agent is running. Vengeance updates download automatically; restart when ready to update the app and both engines.'
                 : (updatesPrefs.mode ?? 'notify') === 'notify'
                   ? 'A pill appears in the titlebar when something new is available.'
                   : 'No background checks. Use “Check now” or the command palette.'}

@@ -7,7 +7,7 @@ import { locateEngine, type EngineLocation } from '../../engine/locate'
 import { engineEnv } from '../../engine/runtime'
 import { sdkHostCall } from '../../engine/sdk-host/client'
 import { env } from '../../env'
-import { samePath } from '../../paths'
+import { comparablePath, samePath } from '../../paths'
 import { packageDisplayName } from '../settings/package-source'
 import { piConfig, type ResolvedResource } from '../settings/pi-modules'
 import { trustPreflight } from './trust'
@@ -225,7 +225,7 @@ export async function discoverExtensionFlags(override: string | null, request: E
   const projectSettings = join(cwd, '.pi', 'settings.json')
   const packages = [...readSettingsList(join(agentDir, 'settings.json'), 'packages'), ...(trusted ? readSettingsList(projectSettings, 'packages') : [])]
   const extensions = [...readSettingsList(join(agentDir, 'settings.json'), 'extensions'), ...(trusted ? readSettingsList(projectSettings, 'extensions') : [])]
-  const key = JSON.stringify([location.version, packages, extensions, cwd.toLowerCase(), trusted])
+  const key = JSON.stringify([location.version, packages, extensions, comparablePath(cwd), trusted])
 
   const cached = cache.get(key)
   if (cached && !request.refresh) return cached

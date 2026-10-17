@@ -3,7 +3,7 @@
 
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 @custom-variant light (&:where([data-theme='light'], [data-theme='light'] *));
-/* Window in the background (native Windows apps dim their chrome). */
+/* Window in the background (native apps dim their chrome; AppShell sets it). */
 @custom-variant window-blurred (&:where([data-window-blurred] *));
 /* A short window (laptop height, half-height snap): heroes drop secondary content and tighten. */
 @custom-variant short (@media (max-height: 760px));

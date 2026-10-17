@@ -6,9 +6,16 @@ import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { executableName } from '../qa/lib/platform.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
-const executable = join(root, 'resources', 'prime-auth', 'bin', 'vengeance-prime-auth.exe')
+const executable = join(
+  root,
+  'resources',
+  'prime-auth',
+  'bin',
+  executableName('vengeance-prime-auth')
+)
 const tempRoot = await mkdtemp(join(tmpdir(), 'vengeance-prime-restart-'))
 const agentDir = join(tempRoot, 'agent')
 const socketPath = join(tempRoot, 'supervisor.sock')

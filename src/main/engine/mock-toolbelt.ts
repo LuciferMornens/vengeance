@@ -1,6 +1,7 @@
 import type { AgentMessage } from '@shared/engine-types'
 import { supervisorReplyPrompt } from '@shared/subagents'
 import { call, displayDiff, ScriptBuilder, text, type MockStep, type ScriptContext } from './mock-builder'
+import { forwardSlashes, mockVolumePath } from './mock-paths'
 import {
   asyncDir,
   controlNotice,
@@ -47,7 +48,7 @@ const LENS_STOP = `\u{1F534} STOP \u2014 3 issue(s) must be fixed:
       \u2192 const label = node.label
   L140: Not all code paths return a value.
       \u2192 function anchorFor(node: TreeNode) {`
-const LANE = 'D:/coding/vengeance-lanes/s-platform'
+const LANE = forwardSlashes(mockVolumePath('coding', 'vengeance-lanes', 's-platform'))
 
 const TYPECHECK_OUT = `> vengeance@0.1.0 typecheck
 > tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit

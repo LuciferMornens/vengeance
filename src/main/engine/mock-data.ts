@@ -1,5 +1,7 @@
+import { join } from 'node:path'
 import { BRIDGE_COMMANDS, type BridgeToolInfo } from '@shared/api/engine'
 import type { Model, RpcSlashCommand, ThinkingLevel } from '@shared/engine-types'
+import { mockHomePath, mockResourcesPath } from './mock-paths'
 
 /** Static fixtures for the mock engine (VENGEANCE_MOCK=1). */
 
@@ -157,7 +159,8 @@ function source(
     : { path, source: src, scope, origin: 'top-level' }
 }
 
-const HOME = 'C:\\Users\\dev\\.pi\\agent'
+const AGENT_DIR = mockHomePath('.pi', 'agent')
+const agentPath = (...segments: string[]): string => join(AGENT_DIR, ...segments)
 
 export const MOCK_COMMANDS: RpcSlashCommand[] = [
   {
@@ -165,10 +168,10 @@ export const MOCK_COMMANDS: RpcSlashCommand[] = [
     description: 'Show all todos on the current branch',
     source: 'extension',
     sourceInfo: source(
-      `${HOME}\\npm\\node_modules\\pi-todos\\dist\\index.js`,
+      agentPath('npm', 'node_modules', 'pi-todos', 'dist', 'index.js'),
       'npm:pi-todos',
       'user',
-      `${HOME}\\npm\\node_modules\\pi-todos`
+      agentPath('npm', 'node_modules', 'pi-todos')
     )
   },
   {
@@ -176,10 +179,10 @@ export const MOCK_COMMANDS: RpcSlashCommand[] = [
     description: 'Open web search curator',
     source: 'extension',
     sourceInfo: source(
-      `${HOME}\\npm\\node_modules\\pi-web-access\\dist\\index.js`,
+      agentPath('npm', 'node_modules', 'pi-web-access', 'dist', 'index.js'),
       'npm:pi-web-access',
       'user',
-      `${HOME}\\npm\\node_modules\\pi-web-access`
+      agentPath('npm', 'node_modules', 'pi-web-access')
     )
   },
   {
@@ -187,44 +190,44 @@ export const MOCK_COMMANDS: RpcSlashCommand[] = [
     description: 'Show code-health dashboard for the workspace',
     source: 'extension',
     sourceInfo: source(
-      `${HOME}\\npm\\node_modules\\pi-lens\\dist\\index.js`,
+      agentPath('npm', 'node_modules', 'pi-lens', 'dist', 'index.js'),
       'npm:pi-lens',
       'user',
-      `${HOME}\\npm\\node_modules\\pi-lens`
+      agentPath('npm', 'node_modules', 'pi-lens')
     )
   },
   {
     name: 'review',
     description: 'Review the working tree diff and summarize risks',
     source: 'prompt',
-    sourceInfo: source(`${HOME}\\prompts\\review.md`, 'local', 'user')
+    sourceInfo: source(agentPath('prompts', 'review.md'), 'local', 'user')
   },
   {
     name: 'fix-tests',
     description: 'Run the test suite and fix failing tests',
     source: 'prompt',
-    sourceInfo: source('.pi\\prompts\\fix-tests.md', 'local', 'project')
+    sourceInfo: source(join('.pi', 'prompts', 'fix-tests.md'), 'local', 'project')
   },
   {
     name: 'skill:code-deslop',
     description:
       'Remove AI-generated slop from code: redundant comments, dead branches, over-abstraction',
     source: 'skill',
-    sourceInfo: source(`${HOME}\\skills\\code-deslop\\SKILL.md`, 'local', 'user')
+    sourceInfo: source(agentPath('skills', 'code-deslop', 'SKILL.md'), 'local', 'user')
   },
   {
     name: 'skill:release-notes',
     description: 'Draft release notes from merged commits since the last tag',
     source: 'skill',
-    sourceInfo: source('.pi\\skills\\release-notes\\SKILL.md', 'local', 'project')
+    sourceInfo: source(join('.pi', 'skills', 'release-notes', 'SKILL.md'), 'local', 'project')
   }
 ]
 
 const subagentsPkg = source(
-  `${HOME}\\npm\\node_modules\\pi-subagents\\index.js`,
+  agentPath('npm', 'node_modules', 'pi-subagents', 'index.js'),
   'npm:pi-subagents',
   'user',
-  `${HOME}\\npm\\node_modules\\pi-subagents`
+  agentPath('npm', 'node_modules', 'pi-subagents')
 )
 
 /** pi-subagents' host-facing commands (`subagents-inspect-rpc` is hidden from the UI). */
@@ -262,7 +265,7 @@ export const MOCK_BRIDGE_COMMANDS: RpcSlashCommand[] = BRIDGE_COMMANDS.map((name
   description: 'Vengeance desktop bridge (internal)',
   source: 'extension',
   sourceInfo: source(
-    'C:\\Program Files\\Vengeance\\resources\\bridge\\vengeance-bridge.ts',
+    mockResourcesPath('bridge', 'vengeance-bridge.ts'),
     'cli',
     'temporary'
   )
@@ -279,16 +282,16 @@ function tool(
 
 const builtin = (name: string) => source(`builtin:${name}`, 'builtin', 'user')
 const todosPkg = source(
-  `${HOME}\\npm\\node_modules\\pi-todos\\dist\\index.js`,
+  agentPath('npm', 'node_modules', 'pi-todos', 'dist', 'index.js'),
   'npm:pi-todos',
   'user',
-  `${HOME}\\npm\\node_modules\\pi-todos`
+  agentPath('npm', 'node_modules', 'pi-todos')
 )
 const webPkg = source(
-  `${HOME}\\npm\\node_modules\\pi-web-access\\dist\\index.js`,
+  agentPath('npm', 'node_modules', 'pi-web-access', 'dist', 'index.js'),
   'npm:pi-web-access',
   'user',
-  `${HOME}\\npm\\node_modules\\pi-web-access`
+  agentPath('npm', 'node_modules', 'pi-web-access')
 )
 const mcp = source('builtin:mcp', 'builtin', 'user')
 
@@ -323,7 +326,7 @@ export const MOCK_TOOLS: BridgeToolInfo[] = [
   tool(
     'ask_user_question',
     'Ask the user a multiple-choice question.',
-    source(`${HOME}\\extensions\\ask-user.ts`, 'local', 'user'),
+    source(agentPath('extensions', 'ask-user.ts'), 'local', 'user'),
     { exposure: 'model-only' }
   ),
   tool('mcp__linear__search_issues', 'Search Linear issues.', mcp, {

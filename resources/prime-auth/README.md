@@ -24,15 +24,20 @@ identity, parent session, history, and metadata.
 ## Build and packaging
 
 Run `node scripts/build-prime-auth.mjs` from the repository root. The first build
-requires a Rust toolchain and its platform linker; subsequent builds reuse the
-staged helper when its source and native engine fingerprints match. Cargo uses the checked-in
-lockfile and stages the Windows binary in `resources/prime-auth/bin`. Native schema additions,
-including Ultrafast session entries, therefore reach both the engine and helper. Build
-objects live in the ignored `.cache/prime-auth/target` directory.
+requires Rust 1.98.1 (selected by `rust-toolchain.toml`) and the platform linker. It builds for
+the host's Rust target from `engines.lock.json` and stages `vengeance-prime-auth`
+(`vengeance-prime-auth.exe` on Windows) with its `build.json` receipt in
+`resources/prime-auth/bin`. A later build reuses that helper, without a checkout or toolchain,
+while its source, native engine, platform and target fingerprint and its recorded hash match.
+Cargo uses the checked-in lockfile, so native schema additions, including Ultrafast session
+entries, reach both the engine and helper. Build objects live in the ignored
+`.cache/prime-auth/target` directory.
 
 Packaging places the binary and `THIRD-PARTY-NOTICES.txt` in
 `<resources>/prime-auth`. End users need neither Rust nor the other engine.
-The linked helper has no non-system Windows DLL dependency.
+The build applies Engine 2's runtime dependency checks: no non-system Windows DLL; on Linux only
+the C runtime and no symbol newer than GLIBC 2.35; on macOS only system libraries, a macOS 13.0
+minimum and a reproducible ad-hoc signature.
 
 ## Protocol and lifecycle
 

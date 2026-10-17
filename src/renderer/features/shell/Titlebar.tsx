@@ -4,7 +4,6 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useShallow } from 'zustand/react/shallow'
 import { cn } from '../../lib/cn'
 import { basename, pluralize } from '../../lib/format'
-import { platform } from '../../lib/ipc'
 import { spring } from '../../lib/motion'
 import { useAgents } from '../../store/agents'
 import { selectActiveWorkspace, useApp } from '../../store/app'
@@ -68,12 +67,14 @@ function BackgroundActivity() {
 }
 
 /**
- * Custom 40px titlebar (drag region): mark · sidebar toggle · workspace crumb | search pill | activity + updates;
- * native caption buttons sit on the right (titleBarOverlay). The session title lives in the session header and the
- * inspector toggle beside the pane it opens. Owns the full-width hairline under the chrome (sheets and the workbench
- * draw no top edge of their own). The first run shows neither the sidebar toggle nor the search pill. Dims while the
- * window is in the background. The mark opens About. The titlebar also hosts window-level effects: the one-time
- * crash-recovery notice and the native theme preference.
+ * Custom 40px titlebar (drag region): mark · sidebar toggle · workspace crumb | search pill | activity + updates.
+ * The native window controls keep their room (tokens.css `--titlebar-inset-*`): caption buttons on the right
+ * (Windows, floating Linux), traffic lights on the left (macOS), where the mark sits as far from them as they sit
+ * from the window edge. The session title lives in the session header and the inspector toggle beside the pane it
+ * opens. Owns the full-width hairline under the chrome (sheets and the workbench draw no top edge of their own). The
+ * first run shows neither the sidebar toggle nor the search pill. Dims while the window is in the background. The
+ * mark opens About. The titlebar also hosts window-level effects: the one-time crash-recovery notice and the native
+ * theme preference.
  */
 export function Titlebar() {
   const workspace = useApp(selectActiveWorkspace)
@@ -89,8 +90,7 @@ export function Titlebar() {
 
   return (
     <header
-      className="drag relative z-[var(--z-titlebar)] grid h-[var(--titlebar-h)] shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b border-hairline-soft pl-3"
-      style={{ paddingRight: platform.captionButtonsWidth + 8 }}
+      className="drag relative z-[var(--z-titlebar)] grid h-[var(--titlebar-h)] shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 border-b border-hairline-soft pr-[calc(var(--titlebar-inset-end)+8px)] pl-[max(12px,var(--titlebar-inset-start))]"
     >
       <div className="flex min-w-0 items-center gap-1.5 transition-opacity duration-[var(--dur-panel)] window-blurred:opacity-50">
         <IconButton label="About Vengeance" size="sm" onClick={openAbout} className="-ml-1.5">
@@ -109,6 +109,7 @@ export function Titlebar() {
       {hasWorkspace ? (
         <button
           type="button"
+          data-titlebar-search
           onClick={() => setPaletteOpen(true)}
           className={cn(
             'no-drag group flex h-7 w-[min(440px,36vw)] items-center gap-2 rounded-md pr-1.5 pl-2.5 text-sm text-fg-3',

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from
 import { AnimatePresence, motion } from 'motion/react'
 import { CornerDownLeft } from 'lucide-react'
 import type { SubagentSupervisorRequest } from '@shared/subagents'
+import { isImeComposing } from '../../lib/keybindings'
 import { spring } from '../../lib/motion'
 import { Button, SegmentedControl, Textarea, toast } from '../../ui'
 import { subagentActions } from './actions'
@@ -89,7 +90,7 @@ export function SteerBox({
     if (event.key === 'Escape') {
       event.preventDefault()
       onClose()
-    } else if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+    } else if (event.key === 'Enter' && !event.shiftKey && !isImeComposing(event)) {
       event.preventDefault()
       void send()
     }

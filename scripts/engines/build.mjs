@@ -7,7 +7,9 @@ import {
   bundleRoot,
   engineLock,
   fingerprint,
+  hostPlatform,
   inventory,
+  platformFields,
   prepareSource,
   removeStaged,
   root,
@@ -16,24 +18,23 @@ import {
   writeJson
 } from './common.mjs'
 
-if (`${process.platform}-${process.arch}` !== engineLock.platform) {
-  throw new Error(`Engine payloads currently target ${engineLock.platform}`)
-}
+const host = hostPlatform()
 const requested = process.argv.find((argument) => argument.startsWith('--engine='))?.split('=')[1]
 if (requested && !['pi', 'prime'].includes(requested))
   throw new Error(`Unknown engine: ${requested}`)
 const prepareOnly = process.argv.includes('--prepare')
 const manifestPath = join(bundleRoot, 'manifest.json')
-const manifest = existsSync(manifestPath)
-  ? JSON.parse(await readFile(manifestPath, 'utf8'))
-  : { schemaVersion: 1, platform: engineLock.platform, engines: {} }
+const staged = existsSync(manifestPath) ? JSON.parse(await readFile(manifestPath, 'utf8')) : null
+// Payloads staged for another platform, such as a foreign cache, are rebuilt rather than reused.
+const manifest =
+  staged?.platform === host.key ? staged : { schemaVersion: 1, platform: host.key, engines: {} }
 
 for (const identity of requested ? [requested] : ['pi', 'prime']) {
   const engine = engineLock[identity]
   const inputHash = await fingerprint(engine)
   const destination = join(bundleRoot, identity)
   const previous = manifest.engines[identity]
-  const source = await prepareSource(identity, engine)
+  // Reuse reads only the lock, the build scripts and the staged payload: no checkout or network.
   if (!prepareOnly && previous?.inputHash === inputHash && existsSync(destination)) {
     const actual = await inventory(destination)
     if (sha256(JSON.stringify(actual)) === previous.payloadHash) {
@@ -44,12 +45,13 @@ for (const identity of requested ? [requested] : ['pi', 'prime']) {
       `${identity} payload changed. Inspect it and remove its manifest entry to rebuild.`
     )
   }
+  const source = await prepareSource(identity, engine)
   console.log(`${identity}: source ready at ${source}`)
   if (prepareOnly) continue
   const candidate = join(staging, `candidate-${identity}`)
   await removeStaged(candidate)
   if (identity === 'pi') await buildPi(source, candidate, engine)
-  else await buildPrime(source, candidate, engine)
+  else await buildPrime(source, candidate, engine, host)
   await mkdir(bundleRoot, { recursive: true })
   await removeStaged(destination)
   await rename(candidate, destination)
@@ -59,6 +61,7 @@ for (const identity of requested ? [requested] : ['pi', 'prime']) {
   )
   manifest.engines[identity] = {
     ...engine,
+    ...platformFields(identity, host.key),
     patches,
     inputHash,
     payloadHash: sha256(JSON.stringify(files)),

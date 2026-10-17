@@ -83,7 +83,7 @@ export async function openSettings(app, section) {
   if (!(await settingsOpen(app))) {
     const gear = app.page.getByRole('button', { name: 'Settings', exact: true })
     if (await gear.isVisible().catch(() => false)) await gear.click()
-    else await app.page.keyboard.press('Control+Comma')
+    else await app.page.keyboard.press('ControlOrMeta+Comma')
     await app.page.locator('input[aria-label="Search settings"]').waitFor()
   }
   if (section) {

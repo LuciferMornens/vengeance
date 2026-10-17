@@ -18,6 +18,7 @@ import { friendlyExtensionName } from '@shared/display-names'
 import { isTarballSource, TARBALL_HINT } from '@shared/package-sources'
 import { runAction } from '../../../lib/actions'
 import { cn } from '../../../lib/cn'
+import { isImeComposing } from '../../../lib/keybindings'
 import { useApp } from '../../../store/app'
 import { useEngineCapabilities } from '../../engines/registry'
 import { invoke, on } from '../ipc'
@@ -280,7 +281,7 @@ export function PackagesSection() {
         <Input
           value={source}
           onChange={(e) => setSource(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && install()}
+          onKeyDown={(e) => e.key === 'Enter' && !isImeComposing(e) && install()}
           placeholder="npm:@scope/pkg, git:github.com/user/repo, or a local path"
           spellCheck={false}
           className="h-8 flex-1 bg-transparent font-mono text-sm shadow-none focus:shadow-none"

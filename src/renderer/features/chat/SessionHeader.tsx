@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { FileDown, GitBranchPlus, PanelRight } from 'lucide-react'
 import { runAction } from '../../lib/actions'
 import { cn } from '../../lib/cn'
+import { isImeComposing } from '../../lib/keybindings'
 import { useAgents } from '../../store/agents'
 import { useApp } from '../../store/app'
 import { IconButton, Shimmer, Tooltip } from '../../ui'
@@ -55,7 +56,7 @@ function SessionTitle({ agentId }: { agentId: string }) {
           onChange={(e) => setDraft(e.target.value)}
           onBlur={() => void commit()}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') void commit()
+            if (e.key === 'Enter' && !isImeComposing(e)) void commit()
             else if (e.key === 'Escape') setEditing(false)
           }}
           aria-label="Session name"

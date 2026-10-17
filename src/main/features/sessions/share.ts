@@ -1,15 +1,17 @@
 import { execFile } from 'node:child_process'
 import type { ShareReadiness, ShareSessionResult } from '@shared/api/sessions'
+import { childBaseEnv, shellEnvironmentReady } from '../../shell-env'
 
 /** Engine 2 shares its native HTML export through the GitHub CLI. */
 
-function run(
+async function run(
   command: string,
   args: string[],
   timeout: number
 ): Promise<{ code: number; stdout: string; stderr: string; missing: boolean }> {
+  await shellEnvironmentReady()
   return new Promise((resolve) => {
-    execFile(command, args, { windowsHide: true, timeout }, (error, stdout, stderr) => {
+    execFile(command, args, { windowsHide: true, timeout, env: childBaseEnv() }, (error, stdout, stderr) => {
       const err = error as (NodeJS.ErrnoException & { code?: string | number }) | null
       resolve({
         code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,

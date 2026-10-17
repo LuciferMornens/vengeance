@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import { FolderOpen, Plus, X } from 'lucide-react'
 import type { ChoiceOption } from '@shared/api/settings-schema'
 import { cn } from '../../lib/cn'
+import { isImeComposing } from '../../lib/keybindings'
 import { invoke } from './ipc'
 import { IconButton, Input, SegmentedControl, Select } from '../../ui'
 
@@ -111,7 +112,7 @@ export function NumberField({
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+            if (e.key === 'Enter' && !isImeComposing(e)) (e.target as HTMLInputElement).blur()
             if (e.key === 'Escape') {
               e.stopPropagation()
               setDraft(value === undefined ? '' : String(value))
@@ -186,7 +187,7 @@ export function TextField({
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => commit()}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+          if (e.key === 'Enter' && !isImeComposing(e)) (e.target as HTMLInputElement).blur()
           if (e.key === 'Escape') {
             e.stopPropagation()
             setDraft(value ?? '')
@@ -295,7 +296,7 @@ export function ListEditor({
     setDraft('')
   }
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !isImeComposing(e)) {
       e.preventDefault()
       add(draft)
     } else if (e.key === 'Backspace' && draft === '' && value.length > 0) {

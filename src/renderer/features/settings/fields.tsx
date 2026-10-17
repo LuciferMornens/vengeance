@@ -10,6 +10,7 @@ import {
   type SettingsSectionId
 } from '@shared/api/settings-schema'
 import { invoke, on } from './ipc'
+import { platform } from '../../lib/ipc'
 import { useAgents } from '../../store/agents'
 import { Badge, Switch, Tooltip } from '../../ui'
 import { AutoNumberField, ChoiceField, ListEditor, NumberField, TextField } from './controls'
@@ -263,7 +264,9 @@ function Below({
     return (
       <TextField
         value={typeof resolved.value === 'string' ? resolved.value : undefined}
-        placeholder={control.placeholder ?? def.defaultLabel}
+        placeholder={
+          control.placeholderByOs?.[platform.os] ?? control.placeholder ?? def.defaultLabel
+        }
         mono={control.mono}
         browse={control.path}
         disabled={disabled}

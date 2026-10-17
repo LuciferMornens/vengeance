@@ -200,7 +200,7 @@ await runSuite(
         const live = await app.rpc({ type: 'export_html', outputPath: join(cwd, 'live.html') })
         const liveUsesTheme = /#123456/i.test(await readFile(live.path, 'utf8'))
         const before = await app.activeAgentId()
-        await page.keyboard.press('Control+n')
+        await page.keyboard.press('ControlOrMeta+n')
         await until(
           async () => {
             const id = await app.activeAgentId()

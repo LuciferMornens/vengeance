@@ -37,6 +37,13 @@ export interface PackageUpdateInfo {
 export type AppUpdateStatus =
   'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error'
 
+/**
+ * How a Vengeance update is installed. `self`: the Windows installer and a Linux AppImage download and replace
+ * themselves. `manual`: macOS and Linux deb, rpm, pacman and tar.gz installs only announce it; the release page
+ * (`releaseUrl`) has the downloads.
+ */
+export type AppInstallMode = 'self' | 'manual'
+
 export interface AppUpdateInfo {
   status: AppUpdateStatus
   current: string
@@ -45,6 +52,11 @@ export interface AppUpdateInfo {
   progress?: number
   /** Why updates are disabled, or the last error. */
   message?: string
+  installMode: AppInstallMode
+  /** The Linux package this install came from, so a manual update can name the matching download. */
+  packageType?: 'deb' | 'rpm' | 'pacman'
+  /** GitHub release page of `latest`. */
+  releaseUrl?: string
 }
 
 /** `models` = refresh the engine's model catalogs (`pi update --models`). */

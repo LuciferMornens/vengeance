@@ -3,6 +3,7 @@ import { Plus, Sparkles, Trash2 } from 'lucide-react'
 import type { JsonObject, JsonValue, ModelInfo } from '@shared/api/settings'
 import { THINKING_LEVEL_OPTIONS } from '@shared/api/settings-schema'
 import { cn } from '../../lib/cn'
+import { platform } from '../../lib/ipc'
 import { Badge, Button, IconButton, SegmentedControl, Select } from '../../ui'
 import { ListEditor, NumberField } from './controls'
 import { modelKey, ModelLabel, ModelPicker, useCatalog } from './model-picker'
@@ -271,7 +272,7 @@ export function EnabledModelsEditor({
 // ─── Default tools ─────────────────────────────────────────────────────────
 
 const DEFAULT_TOOLS = ['read', 'bash', 'edit', 'write']
-const TOOLS: Array<{ name: string; description: string }> = [
+const TOOLS: Array<{ name: string; description: string; windowsOnly?: true }> = [
   { name: 'read', description: 'Read files and images' },
   { name: 'bash', description: 'Run shell commands' },
   { name: 'edit', description: 'Exact text replacements' },
@@ -279,7 +280,7 @@ const TOOLS: Array<{ name: string; description: string }> = [
   { name: 'grep', description: 'Search file contents' },
   { name: 'find', description: 'Find paths by glob' },
   { name: 'ls', description: 'List directories' },
-  { name: 'powershell', description: 'Run PowerShell (Windows)' },
+  { name: 'powershell', description: 'Run PowerShell (Windows)', windowsOnly: true },
   { name: 'codemode', description: 'Scripts that call other tools' },
   { name: 'tool_search', description: 'Load deferred tools on demand' }
 ]
@@ -328,10 +329,12 @@ export function DefaultToolsEditor({
     if (replaceMode) void set('defaultTools', next)
     else writeAdjust(next)
   }
-  const extras =
-    own
-      ?.map((e) => (isModifier(e) ? e.slice(1) : e))
-      .filter((n) => !TOOLS.some((t) => t.name === n)) ?? []
+  const named = own?.map((e) => (isModifier(e) ? e.slice(1) : e)) ?? []
+  const extras = named.filter((n) => !TOOLS.some((t) => t.name === n))
+  // Windows-only tools fail on other systems: there they show only while a saved selection names them.
+  const offered = TOOLS.filter(
+    (t) => !t.windowsOnly || platform.os === 'win32' || named.includes(t.name) || base.includes(t.name)
+  )
   return (
     <div className={cn('space-y-3', disabled && 'pointer-events-none opacity-60')}>
       <div className="flex items-center gap-3">
@@ -351,7 +354,7 @@ export function DefaultToolsEditor({
         </code>
       </div>
       <div className="grid grid-cols-2 gap-1.5">
-        {[...TOOLS, ...extras.map((name) => ({ name, description: 'Extension tool' }))].map(
+        {[...offered, ...extras.map((name) => ({ name, description: 'Extension tool' }))].map(
           (tool) => {
             const on = active.includes(tool.name)
             return (

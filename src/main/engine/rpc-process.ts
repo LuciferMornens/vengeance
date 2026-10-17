@@ -9,7 +9,7 @@ import type {
 } from '@shared/engine-types'
 import { Emitter, defaultTimeout, type EngineHandle, type EngineHandleEvents, type SendOptions } from './handle'
 import type { EngineLocation } from './locate'
-import { engineEnv, killProcessTree } from './runtime'
+import { engineEnv, killProcessTree, OWN_PROCESS_GROUP } from './runtime'
 import { flattenTreeResponse, type EngineTreeResponse } from './session-tree'
 
 /**
@@ -105,7 +105,7 @@ export interface EngineProcessOptions {
   cwd: string
   /** CLI args after `--mode rpc`. */
   args: string[]
-  /** Extra environment (merged over process.env). */
+  /** Extra environment (merged over the children's base env, shell-env.ts). */
   env?: Record<string, string>
   /** Time allowed for pi to start and answer the initial get_state. */
   startupTimeoutMs?: number
@@ -160,6 +160,7 @@ export class EngineProcess implements EngineHandle {
       cwd,
       env: engineEnv(location, this.options.env),
       windowsHide: true,
+      detached: OWN_PROCESS_GROUP,
       stdio: ['pipe', 'pipe', 'pipe']
     })
     this.child = child

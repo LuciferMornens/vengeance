@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { PrimeEngineLocation } from './locate'
 import { primeEnvironmentHash, sealPrimeDaemonEnvironment } from './daemon-environment'
+import { ownedDaemonEndpoint } from './daemon-socket'
 import { asRecords, stringValue, type PrimeRecord, type PrimeTransport } from './transport'
 
 const REGISTRY_FILE = 'vengeance-daemons.json'
@@ -14,7 +14,7 @@ let registryWrite = Promise.resolve()
 export async function rememberedDaemons(agentDir: string): Promise<PrimeRecord[]> {
   try {
     return asRecords(JSON.parse(await readFile(join(agentDir, REGISTRY_FILE), 'utf8'))).filter(
-      (entry) => typeof entry.socketPath === 'string' && ownedDaemonSocket(entry.socketPath)
+      (entry) => typeof entry.socketPath === 'string' && ownedDaemonEndpoint(entry.socketPath)
     )
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
@@ -108,15 +108,4 @@ async function writeDaemonRegistry(agentDir: string, entries: PrimeRecord[]): Pr
       if (error.code !== 'ENOENT') throw error
     })
   }
-}
-
-function ownedDaemonSocket(socketPath: string): boolean {
-  const prefix =
-    process.platform === 'win32'
-      ? '\\\\.\\pipe\\vengeance-engine2-'
-      : join(tmpdir(), 'vengeance-engine2-')
-  const suffix = process.platform === 'win32' ? '' : '.sock'
-  if (!socketPath.startsWith(prefix) || !socketPath.endsWith(suffix)) return false
-  const identity = socketPath.slice(prefix.length, suffix ? -suffix.length : undefined)
-  return /^[a-f0-9]{20}$/.test(identity)
 }

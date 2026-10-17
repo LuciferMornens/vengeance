@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module'
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import type { JsonObject } from '@shared/api/settings'
 import { locateEngine } from '../../engine/locate'
@@ -96,22 +96,49 @@ export function lastWrittenText(path: string): string | undefined {
   return writtenTexts.get(writtenKey(path))
 }
 
+export interface ReplaceFileOptions {
+  /** The file holds credentials (models.json API keys): when new, only the user may read it on macOS and Linux. */
+  private?: boolean
+}
+
 /** Write a config file atomically (`replaceFile`) and remember the text for the config watcher. */
-export async function writeFileAtomic(path: string, text: string): Promise<void> {
+export async function writeFileAtomic(
+  path: string,
+  text: string,
+  options: ReplaceFileOptions = {}
+): Promise<void> {
   // Recorded before the rename: the watcher's event for it can only arrive afterwards.
   writtenTexts.set(writtenKey(path), text)
-  await replaceFile(path, text)
+  await replaceFile(path, text, options)
+}
+
+/**
+ * Permissions for a replacement file on macOS and Linux: the file's own, so one only the user may read stays that
+ * way. A new file gets the umask's default like any editor's, or owner-only when it is private. Windows files keep
+ * their default ACLs.
+ */
+function replacementMode(path: string, options: ReplaceFileOptions): number | undefined {
+  if (process.platform === 'win32') return undefined
+  try {
+    return statSync(path).mode & 0o777
+  } catch {
+    return options.private ? 0o600 : undefined
+  }
 }
 
 /**
  * Write temp + rename, so readers never see a half-written file; retries transient rename failures, and the temp
  * file never outlives the call.
  */
-export async function replaceFile(path: string, text: string): Promise<void> {
+export async function replaceFile(
+  path: string,
+  text: string,
+  options: ReplaceFileOptions = {}
+): Promise<void> {
   mkdirSync(dirname(path), { recursive: true })
   const temp = `${path}.${process.pid}.${Date.now()}.tmp`
   try {
-    writeFileSync(temp, text, 'utf8')
+    writeFileSync(temp, text, { encoding: 'utf8', mode: replacementMode(path, options) })
     for (let attempt = 1; ; attempt++) {
       try {
         renameSync(temp, path)
@@ -131,14 +158,19 @@ export async function replaceFile(path: string, text: string): Promise<void> {
  * Read-modify-write under the engine's lock. `mutate` receives the current object (throws when the existing
  * file is corrupt) and returns the next object.
  */
-export async function updateJsonFile(path: string, override: string | null, mutate: (current: JsonObject) => JsonObject): Promise<void> {
+export async function updateJsonFile(
+  path: string,
+  override: string | null,
+  mutate: (current: JsonObject) => JsonObject,
+  options: ReplaceFileOptions = {}
+): Promise<void> {
   const lock = await engineLockfile(override)
   mkdirSync(dirname(path), { recursive: true })
   const release = lock ? lockWithRetry(lock, path) : null
   try {
     const current = readJsonFile(path)
     if (current.error && current.text.trim()) throw new Error(`${basename(path)} is not valid JSON (${current.error}). Fix it in Raw JSON first.`)
-    await writeFileAtomic(path, serializeJson(mutate(current.data)))
+    await writeFileAtomic(path, serializeJson(mutate(current.data)), options)
   } finally {
     release?.()
   }

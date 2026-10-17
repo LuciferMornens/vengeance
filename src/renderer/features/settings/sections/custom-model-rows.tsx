@@ -3,6 +3,7 @@ import { SlidersHorizontal, Trash2 } from 'lucide-react'
 import type { JsonObject, JsonValue } from '@shared/api/settings'
 import type { EngineId } from '@shared/api/engine'
 import { cn } from '../../../lib/cn'
+import { isImeComposing } from '../../../lib/keybindings'
 import { Button, IconButton, Input, Switch } from '../../../ui'
 import { Collapse } from '../../../ui/Collapse'
 import { NumberField, TextField } from '../controls'
@@ -334,7 +335,7 @@ export function ModelOverrides({
           list={listId}
           value={newId}
           onChange={(e) => setNewId(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && add()}
+          onKeyDown={(e) => e.key === 'Enter' && !isImeComposing(e) && add()}
           placeholder="Model id to override"
           spellCheck={false}
           className="h-7 w-64 bg-surface-1 font-mono text-xs"

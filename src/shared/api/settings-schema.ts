@@ -50,7 +50,14 @@ export type SettingControl =
       integer?: boolean
       slider?: boolean
     }
-  | { kind: 'text'; placeholder?: string; mono?: boolean; path?: 'file' | 'folder' }
+  | {
+      kind: 'text'
+      placeholder?: string
+      /** Replaces `placeholder` on these systems (`PlatformInfo.os`), for examples that differ by OS. */
+      placeholderByOs?: Partial<Record<'win32' | 'darwin' | 'linux', string>>
+      mono?: boolean
+      path?: 'file' | 'folder'
+    }
   | { kind: 'list'; placeholder?: string; mono?: boolean }
   /** `"auto"` or a number. */
   | { kind: 'auto-number'; min: number; max: number }
@@ -260,7 +267,7 @@ export const SETTINGS: SettingDef[] = [
     section: 'agent',
     group: 'Queued messages',
     label: 'Follow-up delivery',
-    description: 'How follow-up messages (Alt+Enter) are delivered after the agent finishes.',
+    description: 'How queued follow-up messages are delivered after the agent finishes.',
     control: { kind: 'choice', options: QUEUE, segmented: true },
     default: 'one-at-a-time',
     live: 'followUpMode',
@@ -445,7 +452,8 @@ export const SETTINGS: SettingDef[] = [
       kind: 'text',
       path: 'file',
       mono: true,
-      placeholder: 'C:\\Program Files\\Git\\bin\\bash.exe'
+      placeholder: 'C:\\Program Files\\Git\\bin\\bash.exe',
+      placeholderByOs: { darwin: '/bin/zsh', linux: '/bin/bash' }
     },
     defaultLabel: 'Platform default'
   },

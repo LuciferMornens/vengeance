@@ -3,14 +3,14 @@ import { mkdir, realpath, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { launchApp, ROOT } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
-import { isAlive } from '../lib/processes.mjs'
+import { executableName } from '../lib/platform.mjs'
+import { isAlive, processIdentity } from '../lib/processes.mjs'
 import { waitFor } from '../settings/settings-ui.mjs'
 import {
   createEngineFixture,
   executableHash,
   PRIME_MODELS,
-  PRIME_PROVIDER,
-  processIdentity
+  PRIME_PROVIDER
 } from './integration-fixture.mjs'
 
 const SESSION_NAME = 'Engine 2 executable transition'
@@ -62,7 +62,7 @@ async function setExecutable(executable) {
 try {
   const officialExecutable = await realpath(
     process.env.QA_PRIME_BASELINE_EXECUTABLE ??
-      join(ROOT, '.engine-staging', 'prime', 'release', 'prime-agent.exe')
+      join(ROOT, '.engine-staging', 'prime', 'release', executableName('prime-agent'))
   )
   const officialHash = await executableHash(officialExecutable)
   assert.ok(!samePath(officialExecutable, fixture.candidate.executablePath))

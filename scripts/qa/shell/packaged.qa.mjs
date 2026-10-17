@@ -1,18 +1,20 @@
 // Packaged app identity, native engine and bridge loading, local transport and version UI.
-// QA_PACKAGED_EXE selects an unpacked build; QA_PACKAGED_NAME sets its expected Electron app name.
+// QA_PACKAGED_EXE selects an unpacked build (macOS: the .app's Contents/MacOS/<name>; default: this
+// platform's release/ build); QA_PACKAGED_NAME sets its expected Electron app name.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { FAKE_MODELS, FAKE_PROVIDER } from '../lib/agent-dir.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
 import { reportShotsDir, ROOT } from '../lib/app.mjs'
+import { resourcesDirOf } from '../lib/platform.mjs'
 import { runSuite } from '../lib/suite.mjs'
 import { PACKAGED_EXE as DEFAULT_PACKAGED_EXE, processTable, shot, softSteps } from './lib/kit.mjs'
 
 const PACKAGED_EXE = resolve(process.env.QA_PACKAGED_EXE || DEFAULT_PACKAGED_EXE)
 const EXPECTED_PRODUCT_NAME = process.env.QA_PACKAGED_NAME ?? 'Vengeance'
 const EXPECTED_VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version
-const resourcesDir = join(dirname(PACKAGED_EXE), 'resources')
+const resourcesDir = resourcesDirOf(PACKAGED_EXE)
 const engineManifest = JSON.parse(
   readFileSync(join(resourcesDir, 'engines', 'manifest.json'), 'utf8')
 )
@@ -53,8 +55,19 @@ await runSuite(
       assert.ok(existsSync(join(resourcesDir, 'app.asar')))
       const chrome = await app.app.evaluate(({ BrowserWindow, Menu }) => {
         const win = BrowserWindow.getAllWindows()[0]
+        const roles = []
+        const collectRoles = (menu) => {
+          for (const item of menu?.items ?? []) {
+            if (item.role) roles.push(item.role.toLowerCase())
+            collectRoles(item.submenu)
+          }
+        }
+        collectRoles(Menu.getApplicationMenu())
         return {
           menu: Menu.getApplicationMenu() !== null,
+          devMenuItems: roles.filter((role) =>
+            ['reload', 'forcereload', 'toggledevtools'].includes(role)
+          ),
           devTools: win.webContents.isDevToolsOpened(),
           canOpenDevTools: (() => {
             win.webContents.openDevTools()
@@ -64,7 +77,14 @@ await runSuite(
           })()
         }
       })
-      assert.deepEqual(chrome, { menu: false, devTools: false, canOpenDevTools: false })
+      // macOS keeps an application menu for its App, Edit and Window roles (quit, copy, paste);
+      // no platform has a reload or devtools item.
+      assert.deepEqual(chrome, {
+        menu: process.platform === 'darwin',
+        devMenuItems: [],
+        devTools: false,
+        canOpenDevTools: false
+      })
     })
 
     await step(
@@ -139,7 +159,7 @@ await runSuite(
     await step(
       `version display: Updates sheet shows "Vengeance ${EXPECTED_VERSION}" and the engine version`,
       async () => {
-        await app.page.keyboard.press('Control+k')
+        await app.page.keyboard.press('ControlOrMeta+k')
         await app.page.getByRole('combobox').fill('Check for updates')
         await app.page.keyboard.press('Enter')
         await app.page.getByRole('heading', { name: 'Updates', exact: true }).last().waitFor()
@@ -160,7 +180,7 @@ await runSuite(
     )
 
     await step('About (palette and titlebar mark) shows the app and Engine versions', async () => {
-      await app.page.keyboard.press('Control+k')
+      await app.page.keyboard.press('ControlOrMeta+k')
       await app.page.getByRole('combobox').fill('About')
       await app.page.getByRole('option', { name: /About Vengeance/ }).waitFor()
       await app.page.keyboard.press('Enter')

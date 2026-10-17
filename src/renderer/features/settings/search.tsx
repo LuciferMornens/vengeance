@@ -4,6 +4,7 @@ import { SETTINGS, type SettingDef, type SettingsSectionId } from '@shared/api/s
 import type { EngineId } from '@shared/api/engine'
 import { PrimeSettingsSearch, primeSettingsMatchCount } from '../engines/prime-settings'
 import { useEngineCapabilities } from '../engines/registry'
+import { SYSTEM_NAME } from '../../lib/platform-copy'
 import { useApp } from '../../store/app'
 import { SettingField } from './fields'
 import { Group, Highlight, SearchQueryContext } from './layout'
@@ -26,7 +27,7 @@ const JUMPS: JumpEntry[] = [
     key: 'app.theme',
     section: 'general',
     label: 'Theme',
-    description: 'Obsidian (dark), Bone (light) or follow Windows.',
+    description: `Obsidian (dark), Bone (light) or follow ${SYSTEM_NAME}.`,
     keywords: ['dark', 'light', 'appearance']
   },
   {

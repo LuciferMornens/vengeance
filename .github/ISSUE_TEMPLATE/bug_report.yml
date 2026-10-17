@@ -1,0 +1,103 @@
+name: Bug report
+description: Something in Vengeance does not work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please search the existing issues first.
+        Security problems go through a [private report](https://github.com/LuciferMornens/vengeance/security/advisories/new), never an issue.
+  - type: input
+    id: version
+    attributes:
+      label: Vengeance version
+      description: Settings → General → About Vengeance shows it. For a source build, the commit.
+      placeholder: 0.3.0
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows x64
+        - macOS Apple silicon
+        - macOS Intel
+        - Linux x64
+        - Linux arm64
+    validations:
+      required: true
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package
+      options:
+        - Windows installer (NSIS)
+        - macOS DMG
+        - macOS ZIP
+        - Linux AppImage
+        - Linux deb
+        - Linux rpm
+        - Linux pacman
+        - Linux tar.gz
+        - Built from source
+    validations:
+      required: true
+  - type: input
+    id: os-details
+    attributes:
+      label: Operating system details
+      description: >-
+        The OS version. On Linux, also the distribution, the desktop or compositor, and whether the
+        session is Wayland or X11.
+      placeholder: Arch Linux, Hyprland 0.51, Wayland
+    validations:
+      required: true
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Engine
+      options:
+        - Engine
+        - Engine 2
+        - Both
+        - Not engine-specific
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a workspace
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead. Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or error messages
+      description: >-
+        Paste any error text the app showed or printed. Remove API keys, tokens and private paths
+        first.
+      render: text
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Before you submit
+      options:
+        - label: I removed API keys, tokens, passwords and other secrets from everything above.
+          required: true

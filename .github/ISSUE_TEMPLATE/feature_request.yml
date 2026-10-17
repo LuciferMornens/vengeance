@@ -1,0 +1,45 @@
+name: Feature request
+description: Suggest a change or a new capability.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for the suggestion. Please search the existing issues first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you are trying to do, and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: The change you would like. Sketches or screenshots are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Workarounds or other approaches you considered.
+  - type: dropdown
+    id: platforms
+    attributes:
+      label: Platforms
+      description: Where it matters, if it is platform-specific.
+      multiple: true
+      options:
+        - Windows
+        - macOS
+        - Linux
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Engine
+      options:
+        - Engine
+        - Engine 2
+        - Both
+        - Not engine-specific

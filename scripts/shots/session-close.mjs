@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { TRASH_NAME } from '../qa/lib/platform.mjs'
 
 const SAVED_SESSION_NAME = 'Release follow-up'
 const TEMPORARY_SESSION_NAME = 'Temporary review'
@@ -86,7 +87,7 @@ export async function scenarios(page, { app, shot, test, MOCK_WORKSPACE }) {
       return { ok: true }
     })
   })
-  await deleteDialog.getByRole('button', { name: 'Move to Recycle Bin', exact: true }).click()
+  await deleteDialog.getByRole('button', { name: `Move to ${TRASH_NAME}`, exact: true }).click()
   await deleteDialog
     .getByRole('alert')
     .getByText(/temporarily locked/)

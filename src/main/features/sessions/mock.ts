@@ -1,5 +1,7 @@
+import { dirname, join } from 'node:path'
 import type { ImportCandidate } from '@shared/api/sessions'
 import type { AssistantMessage, FlatSessionTree, SessionEntry, Usage } from '@shared/engine-types'
+import { mockHome, mockHomePath } from '../../engine/mock-paths'
 import { mockLongSessionEntries, mockSessionHistory, type MockSessionHistory } from '../../engine/mock-sessions'
 
 /**
@@ -60,10 +62,11 @@ export function setMockSessionLabel(path: string, entryId: string, label: string
 /** What the import review shows in screenshots (the mock never opens a file dialog). */
 export function mockImportCandidate(): ImportCandidate {
   return {
-    sourcePath: 'C:\\Users\\dev\\Downloads\\2025-09-28T14-02-11_8f2c1d.jsonl',
+    sourcePath: mockHomePath('Downloads', '2025-09-28T14-02-11_8f2c1d.jsonl'),
     fileName: '2025-09-28T14-02-11_8f2c1d.jsonl',
     sessionId: '8f2c1d40-5b7e-4f61-9a3e-2c7d9e1b0a55',
-    cwd: 'C:\\Users\\sam\\code\\aurora',
+    // Another account's home: the session was exported on a different machine.
+    cwd: join(dirname(mockHome()), 'sam', 'code', 'aurora'),
     cwdExists: false,
     name: 'Offline sync design review',
     firstMessage: 'Review the offline sync design doc and list the riskiest assumptions',

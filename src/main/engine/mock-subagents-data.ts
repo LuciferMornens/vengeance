@@ -1,12 +1,22 @@
 /**
- * Fixtures for the mock `subagents` script, copied from real pi-subagents 0.77 sessions (paths rewritten to
- * C:\Users\dev\…, run ids kept). Model-facing text is reproduced verbatim on purpose: the UI must never show it.
+ * Fixtures for the mock `subagents` script, copied from real pi-subagents 0.77 sessions (paths rewritten to the
+ * mock home, mock-paths.ts; run ids kept). Model-facing text is reproduced verbatim on purpose: the UI must never
+ * show it.
  */
+import { join } from 'node:path'
 import type { SubagentInspectMessage } from '@shared/subagents'
+import { mockHomePath, mockTempPath } from './mock-paths'
 
-export const WORKSPACE = 'C:\\Users\\dev\\projects\\aurora'
-const TEMP_RUNS = 'C:\\Users\\dev\\AppData\\Local\\Temp\\pi-subagents-user-dev\\async-subagent-runs'
-const SESSIONS = 'C:\\Users\\dev\\.pi\\agent\\sessions\\--C--Users--dev--projects--aurora--'
+export const WORKSPACE = mockHomePath('projects', 'aurora')
+const TEMP_RUNS = mockTempPath('pi-subagents-user-dev', 'async-subagent-runs')
+const SESSIONS = mockHomePath(
+  '.pi',
+  'agent',
+  'sessions',
+  `--${WORKSPACE.split(/[\\/]/).filter(Boolean).map((part) => part.replace(':', '')).join('--')}--`
+)
+/** The resumed worker's session file. */
+const CHILD_SESSION = join(SESSIONS, 'f39cacf6-d26f-4845-833e-3d425c194616', 'run-0', 'session.jsonl')
 
 export const RUN_IDS = {
   worker: '967ce01c-715d-4775-925f-e95093f91615',
@@ -48,10 +58,10 @@ export const REVIEWER_SUMMARY = `The tool rows hold up: every settled group fold
 2. **Lens footers stay in edit output.** \`splitLensVerdict\` misses the \`Post-apply analysis:\` header when it is the only footer.
 3. **\`in <dir>\` chip shows for the session cwd** when the path uses forward slashes.`
 
-export const REVIEWER_OUTPUT_PATH = `${SESSIONS}\\subagent-artifacts\\${RUN_IDS.reviewer}_reviewer_output.md`
+export const REVIEWER_OUTPUT_PATH = join(SESSIONS, 'subagent-artifacts', `${RUN_IDS.reviewer}_reviewer_output.md`)
 
 export function asyncDir(runId: string): string {
-  return `${TEMP_RUNS}\\${runId}`
+  return join(TEMP_RUNS, runId)
 }
 
 /** The parent peeking at children's live output logs with bash, as models write it (forward slashes, quoted). */
@@ -97,7 +107,7 @@ export function launchDetails(runId: string, toolCallId: string, timeoutMs: numb
     deadlineAt,
     runFanoutBudget: { used: 1, limit: 64, remaining: 63 },
     missionId: MISSION_ID,
-    missionPath: `C:\\Users\\dev\\.pi\\agent\\missions\\projects\\77784cf595e2fe2c\\${MISSION_ID}.json`
+    missionPath: mockHomePath('.pi', 'agent', 'missions', 'projects', '77784cf595e2fe2c', `${MISSION_ID}.json`)
   }
 }
 
@@ -117,18 +127,18 @@ Mode: single
 Run fan-out: 1/64 used, 63 remaining
 Progress: step 1/1
 Dir: ${asyncDir(runId)}
-Output: ${asyncDir(runId)}\\output-0.log
+Output: ${join(asyncDir(runId), 'output-0.log')}
 Step 1: worker: Fix the session-tree jump on fork. When the user forks from... running (anthropic/claude-opus-5-5 · thinking high), active now
   Intercom target: subagent-worker-${runId}-1 (if registered)
   Steer: subagent({ action: "steer", id: "${runId}", message: "...", options: { index: 0 } })
-Events: ${asyncDir(runId)}\\events.jsonl`
+Events: ${join(asyncDir(runId), 'events.jsonl')}`
 }
 
 export function resumeText(source: string, runId: string): string {
   return `Revived async subagent from ${source}.
 Revived run: ${runId}
 Agent: worker
-Session: ${SESSIONS}\\f39cacf6-d26f-4845-833e-3d425c194616\\run-0\\session.jsonl
+Session: ${CHILD_SESSION}
 Async dir: ${asyncDir(runId)}
 Intercom target: subagent-worker-${runId}-1 (if registered)
 Status if needed: subagent({ action: "status", id: "${runId}" })
@@ -213,7 +223,7 @@ Full output: ${outputPath} (4.0 KB, 55 lines). Read it if needed.
 
 Retention-managed async directory: ${asyncDir(runId)}
 
-Session file: ${SESSIONS}\\f39cacf6-d26f-4845-833e-3d425c194616\\run-0\\session.jsonl
+Session file: ${CHILD_SESSION}
 
 ${PARENT_ACTION}`
 }
@@ -225,14 +235,14 @@ Subagent timed out after ${timeoutMs}ms.
 
 Retention-managed async directory: ${asyncDir(runId)}
 
-Session file: ${SESSIONS}\\f39cacf6-d26f-4845-833e-3d425c194616\\run-0\\session.jsonl
+Session file: ${CHILD_SESSION}
 
 ${PARENT_ACTION}`
 }
 
 export function notifyDetails(agent: string, runId: string, status: 'completed' | 'failed', durationMs: number): Record<string, unknown> {
   return {
-    runs: [{ agent, status, asyncDir: asyncDir(runId), durationMs, runId, sessionLabel: 'Session file', sessionValue: `${SESSIONS}\\run-0\\session.jsonl` }]
+    runs: [{ agent, status, asyncDir: asyncDir(runId), durationMs, runId, sessionLabel: 'Session file', sessionValue: join(SESSIONS, 'run-0', 'session.jsonl') }]
   }
 }
 

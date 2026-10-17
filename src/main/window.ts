@@ -1,4 +1,4 @@
-import { BrowserWindow, nativeTheme, screen, shell } from 'electron'
+import { BrowserWindow, nativeTheme, screen, shell, type BrowserWindowConstructorOptions } from 'electron'
 import { release } from 'node:os'
 import { join } from 'node:path'
 import type { PlatformInfo, ThemePref } from '@shared/api/app'
@@ -9,8 +9,17 @@ import { env } from './env'
 import { broadcast } from './ipc/handle'
 
 export const TITLEBAR_HEIGHT = 40
-/** Windows 11 caption buttons (min/max/close) are 46px each at 100% scale. */
+/**
+ * Windows 11 caption buttons (min/max/close) are 46px each at 100% scale. Electron's Linux overlay draws its own
+ * buttons; the same width reserves enough until the overlay reports its geometry.
+ */
 const CAPTION_BUTTONS_WIDTH = 138
+/** macOS traffic lights (14px tall, 54px as a group), centred in the titlebar with a matching left margin. */
+const TRAFFIC_LIGHTS = { x: 14, y: (TITLEBAR_HEIGHT - 14) / 2 }
+/** Where Electron's overlay starts (`titlebar-area-x`): the right edge of the group with its margin on both sides. */
+const TRAFFIC_LIGHTS_INSET = 2 * TRAFFIC_LIGHTS.x + 54
+/** Tiling compositors and window managers place, size and close windows themselves (XDG desktop names). */
+const TILING_DESKTOP = /hyprland|sway|niri|river|i3|bspwm|dwm|qtile|awesome|xmonad|wayfire/i
 
 const THEME_COLORS: Record<WindowTheme, { background: string; symbols: string; overlay: string }> = {
   dark: { background: '#0B0B0E', symbols: '#C9C9D3', overlay: '#00000000' },
@@ -35,7 +44,44 @@ function visibleBounds(saved: WindowBounds | undefined): WindowBounds {
   return onScreen ? saved : { ...fallback, width: saved.width, height: saved.height, maximized: saved.maximized }
 }
 
+/**
+ * Native window controls: Windows caption buttons and macOS traffic lights; on Linux, Electron's caption buttons on
+ * floating desktops and none under a tiling compositor, unless `VENGEANCE_WINDOW_CONTROLS` says otherwise.
+ */
+function windowControls(): PlatformInfo['windowControls'] {
+  if (process.platform === 'win32') return 'right'
+  if (process.platform === 'darwin') return 'left'
+  if (env.windowControls === 'native') return 'right'
+  if (env.windowControls === 'none') return 'none'
+  // Electron replaces XDG_CURRENT_DESKTOP on some desktops and keeps the session's value in ORIGINAL_XDG_CURRENT_DESKTOP.
+  const desktop = [
+    process.env.ORIGINAL_XDG_CURRENT_DESKTOP ?? process.env.XDG_CURRENT_DESKTOP,
+    process.env.XDG_SESSION_DESKTOP,
+    process.env.DESKTOP_SESSION
+  ].join(':')
+  return TILING_DESKTOP.test(desktop) ? 'none' : 'right'
+}
+
+/** Titlebar options: everything is drawn by the page except the native controls laid over it. */
+function titlebarOptions(colors: { symbols: string; overlay: string }): BrowserWindowConstructorOptions {
+  const controls = windowControls()
+  if (controls === 'left') {
+    // The overlay only exposes the traffic lights' geometry to the page (it reports none in full screen).
+    return {
+      titleBarStyle: 'hidden',
+      titleBarOverlay: { height: TITLEBAR_HEIGHT },
+      trafficLightPosition: TRAFFIC_LIGHTS
+    }
+  }
+  if (controls === 'none') return { titleBarStyle: 'hidden' }
+  return {
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: colors.overlay, symbolColor: colors.symbols, height: TITLEBAR_HEIGHT }
+  }
+}
+
 export function platformInfo(material: PlatformInfo['material'], appVersion: string): PlatformInfo {
+  const controls = windowControls()
   return {
     os: process.platform === 'win32' || process.platform === 'darwin' ? process.platform : 'linux',
     arch: process.arch,
@@ -44,7 +90,9 @@ export function platformInfo(material: PlatformInfo['material'], appVersion: str
     mock: env.mock,
     test: env.test,
     material,
-    captionButtonsWidth: process.platform === 'darwin' ? 0 : CAPTION_BUTTONS_WIDTH,
+    windowControls: controls,
+    captionButtonsWidth: controls === 'right' ? CAPTION_BUTTONS_WIDTH : 0,
+    titlebarInsetLeft: controls === 'left' ? TRAFFIC_LIGHTS_INSET : 0,
     titlebarHeight: TITLEBAR_HEIGHT
   }
 }
@@ -96,8 +144,7 @@ export function createMainWindow(appVersion: string): BrowserWindow {
     show: false,
     title: 'Vengeance',
     icon,
-    titleBarStyle: 'hidden',
-    titleBarOverlay: { color: colors.overlay, symbolColor: colors.symbols, height: TITLEBAR_HEIGHT },
+    ...titlebarOptions(colors),
     backgroundColor: mica ? '#00000000' : colors.background,
     ...(mica ? { backgroundMaterial: 'mica' as const } : {}),
     webPreferences: {
@@ -150,7 +197,8 @@ export function createMainWindow(appVersion: string): BrowserWindow {
 export function applyWindowTheme(window: BrowserWindow, theme: WindowTheme): void {
   const colors = THEME_COLORS[theme]
   applyNativeThemeSource(theme)
-  if (process.platform !== 'darwin') {
+  // Caption buttons Electron draws (Windows, floating Linux); macOS traffic lights follow the system appearance.
+  if (windowControls() === 'right') {
     window.setTitleBarOverlay({ color: colors.overlay, symbolColor: colors.symbols, height: TITLEBAR_HEIGHT })
   }
   if (!micaSupported()) window.setBackgroundColor(colors.background)

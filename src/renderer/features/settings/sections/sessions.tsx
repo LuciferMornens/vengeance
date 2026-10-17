@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import type { ContextOverview, TrustEntry } from '@shared/api/settings'
 import type { EngineId } from '@shared/api/engine'
+import { REVEAL_LABEL } from '../../../lib/platform-copy'
 import { invoke, on } from '../ipc'
 import { Badge, Button, DropdownMenu, IconButton, Skeleton, toast } from '../../../ui'
 import { afterEngineConfigChange, agentsForEngine } from '../engines'
@@ -236,7 +237,7 @@ function SavedTrustGroup() {
                     onSelect: () => void decide(entry.path, true)
                   },
               {
-                label: 'Show in Explorer',
+                label: REVEAL_LABEL,
                 icon: <FolderOpen />,
                 onSelect: () => void invoke('settings:open-path', entry.path).catch(() => undefined)
               },

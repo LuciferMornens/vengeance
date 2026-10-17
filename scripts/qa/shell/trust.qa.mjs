@@ -87,7 +87,7 @@ await runSuite('shell-trust', async ({ server, agentDir, app, step: hardStep }) 
   /** New session in the active workspace; returns whether the Trust dialog came up. */
   const newSessionAsks = async () => {
     const before = await app.activeAgentId()
-    await page.keyboard.press('Control+n')
+    await page.keyboard.press('ControlOrMeta+n')
     const dialog = page.getByRole('dialog', { name: /^Trust “/ })
     const asked = await Promise.race([
       dialog.waitFor({ timeout: 8000 }).then(() => true),

@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { FAKE_MODELS, FAKE_PROVIDER } from '../lib/agent-dir.mjs'
 import { launchApp, reportShotsDir } from '../lib/app.mjs'
 import { turn } from '../lib/fake-llm.mjs'
+import { executableName } from '../lib/platform.mjs'
 import { isAlive, killTree, processTable } from '../lib/processes.mjs'
 import { isInside } from '../lib/tmp.mjs'
 import { answerOpenDialog } from '../sessions/lib/main-stubs.mjs'
@@ -221,7 +222,7 @@ async function recoverHistory(engine) {
   if (engine === 'prime') {
     await check('prime: failed initial resume retains its tab and Restart retries it', async () => {
       await closeSavedSession(name, engine)
-      await setOverride(engine, fixture.root.path('unavailable-prime.exe'))
+      await setOverride(engine, fixture.root.path(executableName('unavailable-prime')))
       await sessionRow(name).click()
       await application.page.getByRole('button', { name: 'Restart engine', exact: true }).waitFor()
       const failed = await application.agentState()

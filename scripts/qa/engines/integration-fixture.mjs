@@ -1,13 +1,12 @@
-import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { readFile, realpath } from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
-import { promisify } from 'node:util'
 import { createAgentDir } from '../lib/agent-dir.mjs'
 import { ROOT, shutdownOwnedPrimeDaemons } from '../lib/app.mjs'
 import { API, startFakeLlm } from '../lib/fake-llm.mjs'
-import { processTable } from '../lib/processes.mjs'
+import { executableName } from '../lib/platform.mjs'
+import { processIdentity, processTable } from '../lib/processes.mjs'
 import { tempRoot } from '../lib/tmp.mjs'
 
 export const PRIME_PROVIDER = 'qa-prime'
@@ -21,8 +20,9 @@ const PRIME_OUTPUT_LIMIT = 4096
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
 const SECRET_VARIABLE = /(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/i
 const PRIME_VARIABLE = /^PRIME_AGENT_/
-const executeFile = promisify(execFile)
-const PROCESS_INSPECTION_TIMEOUT_MS = 10_000
+const PRIME_EXECUTABLE = executableName('prime-agent')
+/** Windows candidates must be `.exe` files; POSIX executables have no suffix. */
+const PRIME_EXECUTABLE_SUFFIX = executableName('')
 
 export async function executableHash(executable) {
   const hash = createHash('sha256')
@@ -40,7 +40,7 @@ async function fixtureExecutable() {
   if (candidatePath === undefined) {
     return {
       executable: await realpath(
-        join(ROOT, '.engine-staging', 'bundled', 'prime', 'prime-agent.exe')
+        join(ROOT, '.engine-staging', 'bundled', 'prime', PRIME_EXECUTABLE)
       ),
       candidate: null
     }
@@ -48,9 +48,10 @@ async function fixtureExecutable() {
   if (
     !candidatePath ||
     !isAbsolute(candidatePath) ||
-    !candidatePath.toLowerCase().endsWith('.exe')
+    !candidatePath.toLowerCase().endsWith(PRIME_EXECUTABLE_SUFFIX)
   ) {
-    throw new Error('QA_PRIME_EXECUTABLE must be an absolute path to the candidate .exe')
+    const candidate = PRIME_EXECUTABLE_SUFFIX || 'executable'
+    throw new Error(`QA_PRIME_EXECUTABLE must be an absolute path to the candidate ${candidate}`)
   }
   const expectedHash = process.env.QA_PRIME_SHA256?.toLowerCase()
   if (!expectedHash || !/^[a-f0-9]{64}$/.test(expectedHash)) {
@@ -68,26 +69,6 @@ async function fixtureExecutable() {
 
 function sameExecutable(actual, expected) {
   return typeof actual === 'string' && resolve(actual).toLowerCase() === expected.toLowerCase()
-}
-
-export async function processIdentity(pid) {
-  if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('The native worker has no valid PID')
-  const script = [
-    `Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'`,
-    'Select-Object ProcessId,ParentProcessId,ExecutablePath',
-    'ConvertTo-Json -Compress'
-  ].join(' | ')
-  const { stdout } = await executeFile('powershell.exe', ['-NoProfile', '-Command', script], {
-    windowsHide: true,
-    timeout: PROCESS_INSPECTION_TIMEOUT_MS
-  })
-  const record = JSON.parse(stdout)
-  if (record?.ProcessId !== pid) throw new Error(`Native process ${pid} could not be inspected`)
-  return {
-    pid: record.ProcessId,
-    parentPid: record.ParentProcessId,
-    executablePath: record.ExecutablePath
-  }
 }
 
 async function verifyCandidate(application, agentId, candidate, agentDirectory, foreignPids) {

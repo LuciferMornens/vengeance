@@ -173,7 +173,7 @@ await runSuite(
       const seen = []
       for (let press = 0; press < 3; press++) {
         const before = (await app.rpc({ type: 'get_state' }, agentId)).model.id
-        await page.keyboard.press('Control+p')
+        await page.keyboard.press('ControlOrMeta+p')
         const after = await waitUntil(
           async () => {
             const id = (await app.rpc({ type: 'get_state' }, agentId)).model.id
@@ -216,7 +216,7 @@ await runSuite(
         await app.test('closeSettings')
         const agentId = await openAnotherWorkspace(app, { model: key(FAKE_MODELS.reasoning) })
         for (const expected of [FAKE_MODELS.small, FAKE_MODELS.openai]) {
-          await page.keyboard.press('Control+p')
+          await page.keyboard.press('ControlOrMeta+p')
           await waitUntil(
             async () => (await app.rpc({ type: 'get_state' }, agentId)).model.id === expected,
             { label: `cycle to ${expected}` }

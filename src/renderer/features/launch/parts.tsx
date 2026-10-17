@@ -4,6 +4,7 @@ import type { EngineId } from '@shared/api/engine'
 import type { PrimeLaunchOptions } from '@shared/api/launch'
 import { cn } from '../../lib/cn'
 import { invoke } from '../../lib/ipc'
+import { isImeComposing } from '../../lib/keybindings'
 import { Button, Dialog, Input, Kbd, Tooltip } from '../../ui'
 import { Collapse } from '../../ui/Collapse'
 import { CopyButton } from '../../ui/CopyButton'
@@ -313,7 +314,7 @@ export function TagInput({
           }
           onBlur={() => draft.trim() && add(draft)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && draft.trim()) {
+            if (e.key === 'Enter' && draft.trim() && !isImeComposing(e)) {
               e.preventDefault()
               e.stopPropagation()
               add(draft)
@@ -406,7 +407,7 @@ export function PathList({
           placeholder={placeholder}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && draft.trim()) {
+            if (e.key === 'Enter' && draft.trim() && !isImeComposing(e)) {
               e.preventDefault()
               e.stopPropagation()
               add([draft])

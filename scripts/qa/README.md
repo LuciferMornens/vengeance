@@ -18,9 +18,11 @@ node scripts/qa/settings/thinking.qa.mjs   # one suite directly
   `PI_CODING_AGENT_DIR` from `createAgentDir()` and a separate `PRIME_AGENT_CODING_AGENT_DIR` with
   temporary session/kernel roots. The harness refuses account paths outside the QA temp root.
 - **Temp folders live outside the user's profile and outside any git repo** (`lib/tmp.mjs`,
-  `QA_TMP_ROOT`, default `<repo>/../.vengeance-qa-tmp`). The engine treats `.agents/skills` in any
-  ancestor of a workspace as project resources (Trust dialog), so workspaces never sit below the
-  profile; a git-ignored folder would hide workspace files from `git ls-files` (@-mentions).
+  `QA_TMP_ROOT`, default `<repo>/../.vengeance-qa-tmp` on Windows, `/private/tmp/vq` on macOS and
+  `/tmp/vq` on Linux, short enough for Engine 2's Unix sockets). The engine treats
+  `.agents/skills` in any ancestor of a workspace as project resources (Trust dialog), so
+  workspaces never sit below the profile; a git-ignored folder would hide workspace files from
+  `git ls-files` (@-mentions).
 - **Fake mode runs the app with a temp `HOME`**, so the user's own `~/.agents/skills` never load
   (Electron's `app.getPath('home')` still follows USERPROFILE). Real mode keeps the real HOME.
   `scripts/qa/shell/harness-isolation.qa.mjs` checks both.
@@ -30,6 +32,12 @@ node scripts/qa/settings/thinking.qa.mjs   # one suite directly
   openai-codex) and refresh tokens rotate.
 - **Suites live in `scripts/qa/<domain>/<name>.qa.mjs`**. Shared helpers only in `scripts/qa/lib/`.
 - The user may have their own Vengeance open. The harness never touches processes it did not start.
+- Every harness launch adds the host's Chromium switches from `lib/platform.mjs`: Linux uses the
+  basic password store (and `--no-sandbox` only when CI runs as root), macOS the mock Keychain.
+  Without OS encryption Linux keeps launch env values plain at rest, so the sealing assertions in
+  `settings/launch-options.qa.mjs` and `settings/app-prefs-restart.qa.mjs` check that fallback.
+  App shortcuts are pressed as `ControlOrMeta+…` (⌘ on macOS); Linux CI runs under a 2560x1440
+  virtual display so the largest responsive shots fit.
 - Run native Rust qualification and package builds serially on memory-constrained machines.
   `QA_NATIVE_JOBS=1` limits the native workspace runner; `VENGEANCE_NATIVE_BUILD_JOBS=1` limits
   Engine 2 and helper package builds. Both accept 1–32 jobs and default to four. For native tests,
@@ -181,7 +189,7 @@ REAL_AGENT_DIR         // ~/.pi/agent
 ### `lib/tmp.mjs`
 
 ```ts
-QA_TMP_ROOT                          // env QA_TMP_ROOT, default <repo>/../.vengeance-qa-tmp
+QA_TMP_ROOT                          // env QA_TMP_ROOT, default per OS (see Rules)
 REAL_HOME                            // os.homedir() of the harness process
 qaTempDir(prefix): Promise<string>   // <QA_TMP_ROOT>/<prefix>XXXXXX
 tempRoot(prefix?): Promise<{ dir, path(...parts), folder(name, files?), cleanup() }>
@@ -375,10 +383,12 @@ node scripts/qa/run.mjs --only packaged.qa.mjs --only model-isolation.qa.mjs \
   --only bundled-extensions.qa.mjs
 ```
 
-Adjust the absolute paths to your checkout. The basename filter `packaged.qa.mjs` matches both
-the engine and shell suites, so this command runs four suites. `QA_PI_PACKAGE_ROOT` optionally
-points at an installed pi agent directory to copy compatibility extensions and their dependencies
-into temporary QA storage; it does not authorize copying credentials or modifying that source.
+Adjust the absolute paths to your checkout. On macOS `QA_PACKAGED_EXE` is the app bundle's
+`Contents/MacOS/<name>` executable, on Linux the unpacked folder's lowercase executable. The
+basename filter `packaged.qa.mjs` matches both the engine and shell suites, so this command runs
+four suites. `QA_PI_PACKAGE_ROOT` optionally points at an installed pi agent directory to copy
+compatibility extensions and their dependencies into temporary QA storage; it does not authorize
+copying credentials or modifying that source.
 The shell suite checks the packaged version against `package.json`, including About and Updates.
 The native suite checks both engines, the external bridge and helper loading with a system-only PATH.
 

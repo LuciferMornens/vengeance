@@ -20,7 +20,6 @@ import {
 import type { RpcSlashCommand } from '@shared/engine-types'
 import { runAction, useActions, type AppAction } from '../../lib/actions'
 import { cn } from '../../lib/cn'
-import { platform } from '../../lib/ipc'
 import { useHotkey } from '../../lib/keybindings'
 import { lazyWithPreload } from '../../lib/lazy-with-preload'
 import { spring } from '../../lib/motion'
@@ -254,11 +253,10 @@ function EmptyResults({ search }: { search: string }) {
   )
 }
 
-/** Horizontal center of the titlebar search pill (the titlebar grid centers it between its paddings). */
+/** Horizontal center of the titlebar search pill; the window's center on a first run, which has none. */
 function pillCenterX(): number {
-  const left = 12
-  const right = platform.captionButtonsWidth + 8
-  return left + (window.innerWidth - left - right) / 2
+  const pill = document.querySelector('[data-titlebar-search]')?.getBoundingClientRect()
+  return pill ? pill.left + pill.width / 2 : window.innerWidth / 2
 }
 
 const PALETTE_W = 640

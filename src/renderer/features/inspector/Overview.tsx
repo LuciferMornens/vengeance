@@ -11,6 +11,7 @@ import {
   pluralize
 } from '../../lib/format'
 import { invoke } from '../../lib/ipc'
+import { REVEAL_LABEL } from '../../lib/platform-copy'
 import type { AgentState } from '../../store/agent-state'
 import { IconButton } from '../../ui'
 import { ContextRing, providerLabel, ThinkingMeter } from '../chat'
@@ -280,7 +281,7 @@ export function Overview({ agent }: { agent: AgentState }) {
                   <Copy />
                 </IconButton>
                 <IconButton
-                  label="Show in Explorer"
+                  label={REVEAL_LABEL}
                   size="xs"
                   onClick={() => void invoke('sys:reveal', sessionFile)}
                 >

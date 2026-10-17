@@ -1,0 +1,22 @@
+diff --git a/packages/coding-agent/test/tools.test.ts b/packages/coding-agent/test/tools.test.ts
+index d89f45c..61a531a 100644
+--- a/packages/coding-agent/test/tools.test.ts
++++ b/packages/coding-agent/test/tools.test.ts
+@@ -1,5 +1,5 @@
+ import { applyPatch } from "diff";
+-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
++import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "fs";
+ import * as fileOperations from "fs/promises";
+ import { tmpdir } from "os";
+ import { join } from "path";
+@@ -1114,7 +1114,9 @@ describe("tool cwd resolution", () => {
+ 		);
+ 		const output = getTextOutput(result);
+ 		const nativePath = process.platform === "win32" ? normalizeWindowsShellPath(output.trim()) : output.trim();
+-		expect(nativePath.replaceAll("\\", "/").toLowerCase()).toBe(testDir.replaceAll("\\", "/").toLowerCase());
++		// POSIX shells report the physical directory; macOS keeps tmpdir() behind the /var symlink.
++		const expected = process.platform === "win32" ? testDir : realpathSync(testDir);
++		expect(nativePath.replaceAll("\\", "/").toLowerCase()).toBe(expected.replaceAll("\\", "/").toLowerCase());
+ 	});
+ });
+ 

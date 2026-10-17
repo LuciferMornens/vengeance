@@ -7,6 +7,7 @@ import type {
   SettingsScope
 } from '@shared/api/settings'
 import { cn } from '../../../lib/cn'
+import { TRASH_NAME } from '../../../lib/platform-copy'
 import { invoke, on } from '../ipc'
 import { Button, Dialog, toast } from '../../../ui'
 import { FOCUS_RING } from '../controls'
@@ -65,7 +66,7 @@ function InstructionEditor({
         level: 'success',
         title:
           next === null
-            ? `${fileName(target.path)} moved to the Recycle Bin`
+            ? `${fileName(target.path)} moved to the ${TRASH_NAME}`
             : `${fileName(target.path)} saved`,
         description: 'New sessions use it right away.'
       })

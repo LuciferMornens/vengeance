@@ -107,8 +107,15 @@ export interface PlatformInfo {
   test: boolean
   /** Window material actually in use: Mica (translucent) or a solid background. */
   material: 'mica' | 'solid'
-  /** Width reserved on the right of the titlebar for native caption buttons (px). */
+  /** Where native window controls sit: right (Windows, floating Linux), left (macOS traffic lights), none (tiling Linux). */
+  windowControls: 'right' | 'left' | 'none'
+  /**
+   * Width reserved on the right of the titlebar for native caption buttons (px): 138 on Windows, an estimate on
+   * floating Linux, 0 on macOS and tiling Linux. The Window Controls Overlay geometry is exact where it reports one.
+   */
   captionButtonsWidth: number
+  /** Width (px) the titlebar must leave free at its left edge (macOS traffic lights); 0 elsewhere. */
+  titlebarInsetLeft: number
   titlebarHeight: number
 }
 

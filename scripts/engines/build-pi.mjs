@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { download, npm, removeStaged, run, staging, writeJson } from './common.mjs'
+import { signMachOFiles } from './native.mjs'
 
 export async function buildPi(source, output, engine) {
   npm(['ci', '--ignore-scripts', '--no-audit', '--no-fund'], source)
@@ -47,8 +48,17 @@ export async function buildPi(source, output, engine) {
   await mkdir(output, { recursive: true })
   await copyFile(join(installRoot, 'package.json'), join(output, 'package.json'))
   await writeJson(join(output, 'package-lock.json'), lock)
+  // Vengeance runs the CLI with Electron's Node, never through .bin shims, which are links on POSIX.
   npm(
-    ['ci', '--ignore-scripts', '--omit=dev', '--include=optional', '--no-audit', '--no-fund'],
+    [
+      'ci',
+      '--ignore-scripts',
+      '--no-bin-links',
+      '--omit=dev',
+      '--include=optional',
+      '--no-audit',
+      '--no-fund'
+    ],
     output
   )
   const packagePath = join(output, 'node_modules/@earendil-works/pi-coding-agent/package.json')
@@ -59,6 +69,8 @@ export async function buildPi(source, output, engine) {
     updates: 'application'
   }
   await writeJson(packagePath, metadata)
+  // pi-tui's prebuilt darwin addons arrive linker-signed (arm64) or unsigned (x64); macOS needs a valid signature.
+  if (process.platform === 'darwin') await signMachOFiles(output)
   await copyFile(join(source, 'LICENSE'), join(output, 'LICENSE'))
   await writeFile(
     join(output, 'BUILD-NOTICE.txt'),

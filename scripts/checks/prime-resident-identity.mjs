@@ -8,6 +8,7 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
+import { executableName } from '../qa/lib/platform.mjs'
 import { runConflictingIdentityFixture } from './prime-native-id-conflicts.mjs'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -47,6 +48,7 @@ async function loadAdapter() {
         "export { PrimeEngineProcess } from './src/main/engine/prime/process'",
         "export { attachPrimeResident, connectPrimeDaemon, connectPrimeResident, listPrimeBackground, stopPrimeBackground, probePrimeDaemon } from './src/main/engine/prime/daemon'",
         "export { PrimeTransport } from './src/main/engine/prime/transport'",
+        "export { primeDaemonEndpoint } from './src/main/engine/prime/daemon-socket'",
         nativeMode ? '' : "export { savedIdentityReads } from 'vengeance-fixture-identity'"
       ].join('\n'),
       resolveDir: repositoryRoot,
@@ -128,12 +130,9 @@ function readFrames(socket, receive) {
   })
 }
 
-async function endpoint(accept) {
-  const identity = randomBytes(daemonIdentityBytes).toString('hex')
-  const socketPath =
-    process.platform === 'win32'
-      ? `\\\\.\\pipe\\vengeance-engine2-${identity}`
-      : join(tmpdir(), `vengeance-engine2-${identity}.sock`)
+/** A test-owned daemon in the app's own endpoint folder, so the app's registry accepts it. */
+async function endpoint(primeDaemonEndpoint, accept) {
+  const socketPath = primeDaemonEndpoint(randomBytes(daemonIdentityBytes).toString('hex'))
   const connections = new Set()
   const server = createServer((socket) => {
     connections.add(socket)
@@ -184,7 +183,7 @@ async function assertIdentitySelection(connectPrimeResident, currentId, original
   saved.client.close()
 }
 
-async function runProtocolFixture({ EngineManager, connectPrimeResident }) {
+async function runProtocolFixture({ EngineManager, connectPrimeResident, primeDaemonEndpoint }) {
   const originalPath = join(temporaryRoot, 'original.jsonl')
   const switchedPath = join(temporaryRoot, 'switched.jsonl')
   const currentId = 'current-resident'
@@ -198,7 +197,7 @@ async function runProtocolFixture({ EngineManager, connectPrimeResident }) {
   let attachedSocket
   const endpoints = await Promise.all(
     rosters.map(async (roster) =>
-      endpoint((socket) => {
+      endpoint(primeDaemonEndpoint, (socket) => {
         socket.write(
           `${JSON.stringify({
             type: 'daemon_hello',
@@ -322,7 +321,7 @@ async function runProtocolFixture({ EngineManager, connectPrimeResident }) {
   }
 }
 
-async function runBackgroundLineageFixture({ listPrimeBackground }) {
+async function runBackgroundLineageFixture({ listPrimeBackground, primeDaemonEndpoint }) {
   const parentPath = join(temporaryRoot, 'parent.jsonl')
   const childPath = join(temporaryRoot, 'child.jsonl')
   const parent = {
@@ -354,7 +353,7 @@ async function runBackgroundLineageFixture({ listPrimeBackground }) {
   ]
   const endpoints = await Promise.all(
     rosters.map((sessions) =>
-      endpoint((socket) => {
+      endpoint(primeDaemonEndpoint, (socket) => {
         socket.write(
           `${JSON.stringify({ type: 'daemon_hello', protocol, clientId: randomUUID() })}\n`
         )
@@ -404,11 +403,11 @@ async function runBackgroundLineageFixture({ listPrimeBackground }) {
   }
 }
 
-async function runRecoveryFixture({ attachPrimeResident, PrimeTransport }) {
+async function runRecoveryFixture({ attachPrimeResident, PrimeTransport, primeDaemonEndpoint }) {
   const recoveringId = 'recovering-resident'
   const adoptionRequests = 3
   const attempts = new Map()
-  const server = await endpoint((socket) => {
+  const server = await endpoint(primeDaemonEndpoint, (socket) => {
     socket.write(`${JSON.stringify({ type: 'daemon_hello', protocol, clientId: randomUUID() })}\n`)
     readFrames(socket, (frame) => {
       const command = frame.command
@@ -471,9 +470,9 @@ async function runRecoveryFixture({ attachPrimeResident, PrimeTransport }) {
   }
 }
 
-async function proxyEndpoint(target) {
+async function proxyEndpoint(primeDaemonEndpoint, target) {
   const attached = new Map()
-  const server = await endpoint((socket) => {
+  const server = await endpoint(primeDaemonEndpoint, (socket) => {
     const upstream = createConnection(target)
     upstream.on('error', () => socket.destroy())
     upstream.on('close', () => socket.destroy())
@@ -494,10 +493,15 @@ async function proxyEndpoint(target) {
   }
 }
 
-async function runNative({ PrimeEngineProcess, connectPrimeDaemon, connectPrimeResident }) {
+async function runNative({
+  PrimeEngineProcess,
+  connectPrimeDaemon,
+  connectPrimeResident,
+  primeDaemonEndpoint
+}) {
   const executablePath = resolve(
     process.env.VENGEANCE_PRIME_EXECUTABLE ??
-      join(repositoryRoot, '.engine-staging', 'prime', 'release', 'prime-agent.exe')
+      join(repositoryRoot, '.engine-staging', 'prime', 'release', executableName('prime-agent'))
   )
   const environment = {
     PRIME_AGENT_SESSION_DIR: join(temporaryRoot, 'sessions'),
@@ -548,7 +552,7 @@ async function runNative({ PrimeEngineProcess, connectPrimeDaemon, connectPrimeR
   try {
     const control = await connectPrimeDaemon(options)
     controls.push(control)
-    proxy = await proxyEndpoint(control.socketPath)
+    proxy = await proxyEndpoint(primeDaemonEndpoint, control.socketPath)
     const registryPath = join(agentDirectory, 'vengeance-daemons.json')
     const records = JSON.parse(await readFile(registryPath, 'utf8'))
     await writeRegistry(records.map((record) => ({ ...record, socketPath: proxy.socketPath })))
@@ -634,7 +638,7 @@ async function runManagerRestart({ EngineManager, connectPrimeDaemon, probePrime
   )
   const executablePath = resolve(
     process.env.VENGEANCE_PRIME_EXECUTABLE ??
-      join(repositoryRoot, '.engine-staging', 'prime', 'release', 'prime-agent.exe')
+      join(repositoryRoot, '.engine-staging', 'prime', 'release', executableName('prime-agent'))
   )
   const environment = {
     PRIME_AGENT_SESSION_DIR: join(temporaryRoot, 'managed-sessions'),

@@ -307,9 +307,9 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
 
   // Ctrl+T hides thinking blocks (pi's hideThinkingBlock); Ctrl+T again shows them.
   await scrollTranscript(page, 0)
-  await page.keyboard.press('Control+t')
+  await page.keyboard.press('ControlOrMeta+t')
   await shot('chat-thinking-hidden', { settleMs: 600 })
-  await page.keyboard.press('Control+t')
+  await page.keyboard.press('ControlOrMeta+t')
   await wait(300)
 
   await expandAll(page)
@@ -396,7 +396,7 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   await scrollTranscript(page, 1)
   await shot('chat-parity-mermaid', { settleMs: 1500 })
   // Ctrl+O expands every tool card (pi's app.tools.expand); again restores the per-card defaults.
-  await page.keyboard.press('Control+o')
+  await page.keyboard.press('ControlOrMeta+o')
   await scrollTranscript(page, 0)
   await shot('chat-parity-tools-expanded', { settleMs: 700 })
   await scrollTranscript(page, 0.5)
@@ -406,7 +406,7 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   await shot('chat-json-record-list', { settleMs: 500 })
   await scrollToText(page, '3 stores')
   await shot('chat-json-script-output', { settleMs: 500 })
-  await page.keyboard.press('Control+o')
+  await page.keyboard.press('ControlOrMeta+o')
   await scrollTranscript(page, 0)
   await shot('chat-parity-tools-collapsed', { settleMs: 700 })
   await test('setPrefs', { theme: 'light' })

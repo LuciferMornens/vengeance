@@ -1,59 +1,76 @@
-import { spawn } from 'node:child_process'
 import { copyFile, cp, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createInterface } from 'node:readline'
-import { cargoPath, download, removeStaged, root, run, staging } from './common.mjs'
+import {
+  download,
+  executableName,
+  removeStaged,
+  root,
+  run,
+  rustToolchain,
+  staging
+} from './common.mjs'
+import { nativeBuildEnvironment, signAdHoc, verifyNativeExecutable } from './native.mjs'
 
-async function verifyRuntimeLibraries(executable) {
-  const child = spawn(process.env.OBJDUMP ?? 'objdump', ['-p', executable], {
-    windowsHide: true,
-    stdio: ['ignore', 'pipe', 'inherit']
-  })
-  const completed = new Promise((resolve, reject) => {
-    child.once('error', reject)
-    child.once('close', (code) => {
-      if (code === 0) resolve()
-      else reject(new Error(`objdump exited with ${code}`))
-    })
-  })
-  const libraries = []
-  const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })
-  // PE unwind tables can exceed pipe capture limits; only import names need to stay in memory.
-  await Promise.all([
-    completed,
-    (async () => {
-      for await (const line of lines) {
-        const match = /DLL Name:\s*(\S+)/.exec(line)
-        if (match) libraries.push(match[1])
-      }
-    })()
-  ])
-  if (!libraries.length || libraries.some((name) => /libgcc|libstdc|libwinpthread/i.test(name))) {
-    throw new Error(
-      `Engine 2 has unexpected compiler runtime dependencies: ${libraries.join(', ')}`
+/**
+ * Produces the executable the release packer ships, plus Linux's separate split-debug decoder.
+ * Only Windows strips after linking; rewriting a Mach-O would invalidate its signature.
+ */
+async function shippedExecutable({ source, built, packageOutput, engine, platform, toolchain }) {
+  const name = executableName('prime-agent', platform.key)
+  if (process.platform === 'linux') {
+    // Upstream's release split: one linked image yields the shipped ELF and its decoder.
+    const dist = join(packageOutput, 'dist')
+    run(
+      toolchain.python,
+      [
+        'scripts/release/split_debug.py',
+        '--binary',
+        built,
+        '--shipped',
+        join(dist, name),
+        '--out',
+        dist,
+        '--version',
+        engine.version,
+        '--target',
+        platform.rustTarget
+      ],
+      { cwd: source }
     )
+    return {
+      executable: join(dist, name),
+      decoder: join(dist, `prime-agent-${engine.version}-${platform.key}.debug.gz`)
+    }
   }
+  const executable = join(packageOutput, name)
+  await copyFile(built, executable)
+  if (process.platform === 'win32') {
+    // GNU's bundled linker tools avoid a build-machine-only compiler DLL dependency.
+    const sysroot = run(toolchain.rustc, ['--print', 'sysroot'], { stdio: 'pipe' })
+    const tools = join(sysroot, 'lib', 'rustlib', toolchain.host, 'bin')
+    run(join(tools, 'rust-objcopy.exe'), ['--strip-debug', executable])
+  }
+  return { executable }
 }
 
-export async function buildPrime(source, output, engine) {
+export async function buildPrime(source, output, engine, platform) {
   const buildJobs = Number(process.env.VENGEANCE_NATIVE_BUILD_JOBS ?? 4)
   if (!Number.isSafeInteger(buildJobs) || buildJobs < 1 || buildJobs > 32) {
     throw new Error('VENGEANCE_NATIVE_BUILD_JOBS must be an integer between 1 and 32')
   }
-  const cargo = cargoPath()
-  const version = run(cargo, ['--version'], { stdio: 'pipe' })
-  if (!version.startsWith(`cargo ${engine.rustVersion} `)) {
-    throw new Error(`Engine 2 requires Rust ${engine.rustVersion}; found ${version}`)
+  const toolchain = {
+    ...rustToolchain(engine.rustVersion),
+    python: process.env.PYTHON ?? (process.platform === 'win32' ? 'python' : 'python3')
   }
   const targetDir = join(root, '.cache/prime-auth/target')
   run(
-    cargo,
+    toolchain.cargo,
     [
       'build',
       '--release',
       '--locked',
       '--target',
-      engine.target,
+      platform.rustTarget,
       '--target-dir',
       targetDir,
       `-j${buildJobs}`,
@@ -64,10 +81,15 @@ export async function buildPrime(source, output, engine) {
     ],
     {
       cwd: source,
-      env: { ...process.env, VENGEANCE_ENGINE_BUILD: engine.version }
+      env: { ...nativeBuildEnvironment(), VENGEANCE_ENGINE_BUILD: engine.version }
     }
   )
-  const executable = join(targetDir, engine.target, 'release/prime-agent.exe')
+  const built = join(
+    targetDir,
+    platform.rustTarget,
+    'release',
+    executableName('prime-agent', platform.key)
+  )
   const catalogs = join(staging, 'catalogs', engine.catalogRevision)
   const catalogBase = `https://raw.githubusercontent.com/PrimeIntellect-ai/prime-agent-catalog/${engine.catalogRevision}`
   await download(`${catalogBase}/models/catalog.v1.json`, join(catalogs, 'models.bundled.json'))
@@ -78,25 +100,28 @@ export async function buildPrime(source, output, engine) {
   const packageOutput = join(staging, 'prime-package')
   await removeStaged(packageOutput)
   await mkdir(packageOutput, { recursive: true })
-  const strippedExecutable = join(packageOutput, 'prime-agent.exe')
-  await copyFile(executable, strippedExecutable)
-  // GNU's bundled linker tools avoid a build-machine-only compiler DLL dependency.
-  const sysroot = run(cargo.replace(/cargo(?:\.exe)?$/, 'rustc.exe'), ['--print', 'sysroot'], {
-    stdio: 'pipe'
+  const shipped = await shippedExecutable({
+    source,
+    built,
+    packageOutput,
+    engine,
+    platform,
+    toolchain
   })
-  const toolDir = join(sysroot, 'lib/rustlib', engine.target, 'bin')
-  run(join(toolDir, 'rust-objcopy.exe'), ['--strip-debug', strippedExecutable])
-  await verifyRuntimeLibraries(strippedExecutable)
+  // Sign before packaging so every staged copy and recorded hash carries the final bytes.
+  if (process.platform === 'darwin') signAdHoc(shipped.executable)
+  await verifyNativeExecutable(shipped.executable, platform.key)
   run(
-    process.env.PYTHON ?? 'python',
+    toolchain.python,
     [
       'scripts/package_release.py',
       '--binary',
-      strippedExecutable,
+      shipped.executable,
+      ...(shipped.decoder ? ['--decoder', shipped.decoder] : []),
       '--out-dir',
       packageOutput,
       '--platform',
-      'win32-x64',
+      platform.key,
       '--version',
       engine.version,
       '--catalog-assets',
@@ -104,7 +129,7 @@ export async function buildPrime(source, output, engine) {
     ],
     { cwd: source }
   )
-  await cp(join(packageOutput, `prime-agent-${engine.version}-win32-x64`), output, {
+  await cp(join(packageOutput, `prime-agent-${engine.version}-${platform.key}`), output, {
     recursive: true
   })
   await copyFile(join(source, 'Cargo.lock'), join(output, 'Cargo.lock'))

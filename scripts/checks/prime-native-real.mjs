@@ -7,6 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { startFakeLlm, turn } from '../qa/lib/fake-llm.mjs'
+import { executableName } from '../qa/lib/platform.mjs'
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const repositoryRoot = path.resolve(scriptDirectory, '..', '..')
@@ -15,7 +16,7 @@ const stagedBinary = path.join(
   '.engine-staging',
   'prime',
   'release',
-  'prime-agent.exe'
+  executableName('prime-agent')
 )
 const binaryPath = path.resolve(process.argv[2] ?? stagedBinary)
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'vengeance-prime-native-'))
@@ -24,7 +25,11 @@ const workspaceDirectory = path.join(temporaryRoot, 'workspace')
 const sessionDirectory = path.join(agentDirectory, 'sessions')
 const scriptPath = path.join(temporaryRoot, 'script.json')
 const wireFixturePath = path.join(repositoryRoot, '.engine-staging', 'prime', 'wire-fixture.json')
-const pipePath = String.raw`\\.\pipe\vengeance-prime-native-${process.pid}-${Date.now()}`
+/** The daemon endpoint: a named pipe on Windows, a Unix socket in the temp root elsewhere. */
+const pipePath =
+  process.platform === 'win32'
+    ? String.raw`\\.\pipe\vengeance-prime-native-${process.pid}-${Date.now()}`
+    : path.join(temporaryRoot, 'daemon.sock')
 const timeoutMilliseconds = 30_000
 const retryMilliseconds = 100
 const protocolName = 'prime-agent.daemon'

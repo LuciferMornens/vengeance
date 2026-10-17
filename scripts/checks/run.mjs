@@ -1,4 +1,5 @@
 // Fast offline checks (npm run checks): no Electron, no engine process, no tokens.
+//   0. the engines staged for this host (npm run build:engines), or stop with what is missing
 //   1. typecheck scripts/checks/*.ts
 //   2. typecheck resources/bridge/vengeance-bridge.ts against the bundled engine's .d.ts
 //   3. bundle scripts/checks/*.check.ts with esbuild (alias @shared) and run them
@@ -14,6 +15,8 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..', '..')
 const cache = join(root, 'node_modules', '.cache', 'vengeance-checks')
 const tsc = join(root, 'node_modules', 'typescript', 'bin', 'tsc')
+const installRoot = join(root, '.engine-staging', 'bundled')
+const host = `${process.platform}-${process.arch}`
 let failed = 0
 
 function runTsc(project, label) {
@@ -26,25 +29,41 @@ function runTsc(project, label) {
   }
 }
 
-/** The bridge must typecheck against the SDK included in the installer. */
-function bundledPiPackage() {
-  const installRoot = join(root, '.engine-staging', 'bundled')
-  try {
-    const manifest = JSON.parse(readFileSync(join(installRoot, 'manifest.json'), 'utf8'))
-    const dir = join(installRoot, manifest.engines.pi.packageDir)
-    return existsSync(join(dir, 'dist', 'index.d.ts')) ? dir : null
-  } catch {
+/** The staged engines' manifest if they were built for this host, else null (after saying why). */
+function stagedManifest() {
+  const manifestPath = join(installRoot, 'manifest.json')
+  if (!existsSync(manifestPath)) {
+    console.error(`✗ no engines are staged in ${installRoot}: run npm run build:engines`)
     return null
   }
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  if (manifest.platform !== host) {
+    console.error(
+      `✗ the engines are staged for ${manifest.platform}, not ${host}: run npm run build:engines`
+    )
+    return null
+  }
+  return manifest
 }
+
+/** The bridge must typecheck against the SDK included in the installer. */
+function bundledPiPackage(manifest) {
+  const packageDir = manifest.engines.pi?.packageDir
+  if (!packageDir) return null
+  const dir = join(installRoot, packageDir)
+  return existsSync(join(dir, 'dist', 'index.d.ts')) ? dir : null
+}
+
+const manifest = stagedManifest()
+if (!manifest) process.exit(1)
 
 await rm(cache, { recursive: true, force: true })
 await mkdir(cache, { recursive: true })
 
 console.log('▶ typecheck')
 runTsc(join(here, 'tsconfig.json'), 'scripts/checks/*.ts')
-const pi = bundledPiPackage()
-process.env.VENGEANCE_BUNDLED_ENGINES = join(root, '.engine-staging', 'bundled')
+const pi = bundledPiPackage(manifest)
+process.env.VENGEANCE_BUNDLED_ENGINES = installRoot
 if (pi) {
   const bridgeProject = join(cache, 'tsconfig.bridge.json')
   await writeFile(

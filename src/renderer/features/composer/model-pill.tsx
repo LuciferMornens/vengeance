@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
+import { shortcutText } from '../../lib/keybindings'
 import { useAgents } from '../../store/agents'
 import { Spinner } from '../../ui'
 import { ModelPicker, ProviderTile } from '../chat/ModelPicker'
@@ -37,7 +38,7 @@ export function ModelPill({ agentId }: { agentId: string }) {
         aria-label={`Model: ${model.name}`}
         aria-busy={changing}
         disabled={!ready}
-        title="Change model (Ctrl+L)"
+        title={`Change model (${shortcutText('mod+l')})`}
         className="no-drag pressable inline-flex h-7 max-w-[220px] min-w-0 items-center gap-2 rounded-md px-2 text-xs font-medium whitespace-nowrap text-fg-2 @max-[40em]/composer:max-w-[136px] transition-colors duration-[var(--dur-instant)] hover:bg-hover hover:text-fg data-[state=open]:bg-active data-[state=open]:text-fg"
       >
         {changing ? (

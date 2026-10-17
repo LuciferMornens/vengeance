@@ -94,7 +94,7 @@ await runSuite(
     })
 
     await step('inspector: Extensions and Tools tabs', async () => {
-      await page.keyboard.press('Control+i')
+      await page.keyboard.press('ControlOrMeta+i')
       await page.locator('[data-tab="extensions"]').click()
       await page.waitForTimeout(500)
       await reportShot(app, 'ext-real-inspector-extensions')
@@ -103,7 +103,7 @@ await runSuite(
         label: 'tools loaded'
       })
       await reportShot(app, 'ext-real-inspector-tools')
-      await page.keyboard.press('Control+i')
+      await page.keyboard.press('ControlOrMeta+i')
     })
 
     await step('Settings → Packages lists the configured packages (read-only)', async () => {
