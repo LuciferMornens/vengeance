@@ -92,7 +92,8 @@ every command. Check a download against `SHA256SUMS`, or confirm the release wor
 
 - **CI** on the release commit: typecheck, build and workflow lint, then the app's contract checks
   and every screenshot scenario on Windows x64, macOS arm64 and Linux x64, against engines built the
-  way releases build them. The screenshots from all three platforms were reviewed by eye.
+  way releases build them. Every screenshot from all three platforms was reviewed, and each change
+  between runs was compared before and after.
 - **The release workflow** builds each of the five platforms on its own runner and, before anything
   is uploaded, checks:
   - that each package carries the update feed and the `latest` channel;
@@ -102,5 +103,6 @@ every command. Check a download against `SHA256SUMS`, or confirm the release wor
     providers: both engines stream a reply, and Engine 2 sign-in loads the bundled helper;
   - the deb, installed with apt on Ubuntu x64 and arm64, and the pacman package, installed on Arch
     Linux: the app and native executables resolve every library, and the launcher entry exists.
-- **On Windows x64**, the full screenshot suite and the application QA suites ran against the
-  release tree in temporary profiles with the mock engine and no real account.
+- **On Windows x64**, the full screenshot suite and 93 application QA suites passed against the
+  release tree, in temporary profiles with the mock engine or local stand-in providers and no real
+  account.
