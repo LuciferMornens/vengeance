@@ -144,8 +144,11 @@ Your own agent accounts and sessions are never test fixtures.
    needs a pull request with every review thread resolved, a passing typecheck job and passing
    checks-and-shots jobs on all three platforms.
 
-Vengeance has no open-source license yet (see the [README](README.md#license)). If that matters for
-your contribution, ask in an issue before you start.
+Vengeance uses the [Vengeance License](LICENSE.md). By opening a pull request you license your
+contribution under its section 5: the Licensor, LuciferMornens, may use, license and sublicense it
+on any terms, including commercial ones. Only contribute work you have the right to give, and name
+any third-party code in it. Changes in `patches/` are under the MIT license of the engine they
+change.
 
 ## Releases
 

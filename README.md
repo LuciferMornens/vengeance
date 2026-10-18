@@ -18,7 +18,7 @@
   <img alt="Electron 44" src="https://img.shields.io/badge/Electron-44-47848F?style=flat-square&amp;logo=electron&amp;logoColor=white">
   <img alt="React 19" src="https://img.shields.io/badge/React-19-20232A?style=flat-square&amp;logo=react&amp;logoColor=61DAFB">
   <img alt="TypeScript 5.9" src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&amp;logo=typescript&amp;logoColor=white">
-  <a href="#license"><img alt="License: not selected" src="https://img.shields.io/badge/license-not%20selected-lightgrey?style=flat-square"></a>
+  <a href="LICENSE.md"><img alt="License: Vengeance License 1.0" src="https://img.shields.io/badge/license-Vengeance%201.0-lightgrey?style=flat-square"></a>
 </p>
 
 <p align="center">
@@ -571,11 +571,25 @@ local Windows x64 builds only.
 
 ## License
 
-No license has been selected for Vengeance, so all rights are reserved. [package.json](package.json)
-declares `"license": "UNLICENSED"` and marks the package private, and there is no `LICENSE` file at
-the repository root. [patches/prime-agent/LICENSE](patches/prime-agent/LICENSE) is the upstream MIT
-license that ships with the Engine 2 patch series. The bundled engines and their dependencies keep
-their own licenses, which travel with each runtime (see [UPSTREAM.md](UPSTREAM.md)).
+Vengeance is free to use, copy, change and share under the [Vengeance License](LICENSE.md), a
+source-available license. In short:
+
+- What you make with Vengeance, such as the code its agents write, is yours and owes no royalty. So
+  is using it as a tool at work or for client projects.
+- When you share Vengeance, keep the copyright notice, the license and the third-party notices with
+  it. A modified version, or anything else built from Vengeance's code, that you share also shows
+  "Based on Vengeance by LuciferMornens" with a link to this repository where its users can see it,
+  marks what you changed, and has its own name and logo. A build that only packages Vengeance for a
+  platform or fixes bugs may keep its name and logo (LICENSE.md section 3.5).
+- If you receive money or other value for Vengeance itself, a modified version of it, or a product
+  that builds its code in, for example by selling, hosting or bundling it, or through ads,
+  sponsorships or donations for it, and that revenue, before costs and across your whole company
+  group, is more than USD 10,000 in a month, you pay 15% of the part above USD 10,000.
+
+[LICENSE.md](LICENSE.md) has the full terms; the summary above does not replace them. It is not an
+OSI-approved open-source license. The bundled engines, the patches to them in [patches/](patches)
+and their dependencies keep their own MIT and other licenses, which travel with each runtime (see
+[UPSTREAM.md](UPSTREAM.md)).
 
 ## Acknowledgements
 
