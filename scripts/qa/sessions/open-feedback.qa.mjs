@@ -287,7 +287,12 @@ await runSuite(
         assert.ok(
           !(await app.invoke('engine:list')).some((entry) => entry.args.sessionPath === path)
         )
-        assert.notEqual(await row('F2 rename').getAttribute('aria-busy'), 'true')
+        assert.notEqual(
+          await field
+            .locator('xpath=ancestor::button[@data-session-row]')
+            .getAttribute('aria-busy'),
+          'true'
+        )
         await field.press('Escape')
       })
 
