@@ -1,4 +1,4 @@
-import { net } from 'electron'
+import { app, net } from 'electron'
 import { existsSync, readFileSync, watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import {
@@ -193,7 +193,7 @@ export class UpdatesService {
     private readonly override: () => string | null,
     private readonly hooks: UpdatesServiceHooks
   ) {
-    this.app = new AppUpdates(() => this.publish({ app: this.app.info }))
+    this.app = new AppUpdates(app, () => this.publish({ app: this.app.info }))
     this.state = {
       engineId: 'pi',
       checking: false,

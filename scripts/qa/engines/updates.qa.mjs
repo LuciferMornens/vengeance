@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { launchApp, reportShotsDir } from '../lib/app.mjs'
 import { turn } from '../lib/fake-llm.mjs'
@@ -191,6 +192,60 @@ try {
   })
 
   await step(
+    'packaged app self-update resolves electron-updater and checks a generic feed',
+    async () => {
+      let feedVersion = await application.app.evaluate(({ app }) => app.getVersion())
+      const feedServer = createServer((req, res) => {
+        if (req.url?.includes('.yml')) {
+          res.writeHead(200, { 'content-type': 'text/yaml' })
+          res.end(
+            [
+              `version: ${feedVersion}`,
+              'files:',
+              '  - url: Vengeance-Setup.exe',
+              '    sha512: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==',
+              '    size: 1024',
+              'path: Vengeance-Setup.exe',
+              'sha512: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==',
+              "releaseDate: '2026-10-18T00:00:00.000Z'",
+              ''
+            ].join('\n')
+          )
+          return
+        }
+        res.writeHead(404).end()
+      })
+      await new Promise((resolve) => feedServer.listen(0, '127.0.0.1', resolve))
+      const { port } = feedServer.address()
+      try {
+        await application.app.evaluate(({ app }) => {
+          Object.defineProperty(app, 'isPackaged', { value: true, configurable: true })
+        })
+        await application.invoke('app:set-state', {
+          features: { updates: { mode: 'notify', feedUrl: `http://127.0.0.1:${port}` } }
+        })
+        const upToDate = await application.invoke('updates:check', 'pi')
+        assert.equal(upToDate.app.status, 'idle', upToDate.app.message)
+        assert.equal(upToDate.app.message, undefined)
+
+        feedVersion = '99.0.0'
+        const available = await application.invoke('updates:check', 'pi')
+        assert.equal(available.app.status, 'available', available.app.message)
+        assert.equal(available.app.latest, '99.0.0')
+        assert.match(available.app.releaseUrl ?? '', /\/releases\/tag\/v99\.0\.0$/)
+      } finally {
+        await application.app.evaluate(({ app }) => {
+          Object.defineProperty(app, 'isPackaged', { value: false, configurable: true })
+        })
+        await application.invoke('app:set-state', {
+          features: { updates: { mode: 'off', feedUrl: undefined } }
+        })
+        await new Promise((resolve) => feedServer.close(resolve))
+      }
+    }
+  )
+
+  await step(
     'offline update state keeps both bundled versions and refuses package downloads',
     async () => {
       await application.invoke('updates:set-offline', true)
@@ -223,7 +278,7 @@ try {
     }
   })
   application.assertNoErrors()
-  console.log('✓ engine-updates passed (6 checks)')
+  console.log('✓ engine-updates passed (7 checks)')
 } finally {
   try {
     await application?.close({ beforeCleanup: fixture.stopNativeDaemon })
