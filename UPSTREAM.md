@@ -465,5 +465,10 @@ Five isolated stable-fixture failures confirmed repeated reacquisition can exhau
 bounded lock wait. The correction races two fresh writers per round, retaining the 80-update check;
 it changes no runtime lock or timeout and excludes the unrelated abort-test change. Retire it when
 the stable candidate includes that hunk and passes repeated isolated and full-workspace checks.
-The final 22-patch reconstruction succeeded; its clean full native run is pending. Record final
-results with the release evidence rather than inferring them from reconstruction or focused passes.
+The reconstructed 22-patch series completed 4,477 passing tests and 14 ignored tests across 216
+suites, with all nine packages and 211 formatting targets checked. The subsequent Clippy finding
+required only an equivalent branch inversion in `0020`'s append fixture. After re-export and fresh
+reconstruction, all eight append cases and full-workspace, all-target Clippy with `-D warnings` pass;
+both real-account guards pass. The complete test log precedes that assertion-preserving style edit.
+Final engine/helper rebuilds, app integration and packaged qualification remain separate gates.
+Record those results and per-platform artifact identities with the release evidence.

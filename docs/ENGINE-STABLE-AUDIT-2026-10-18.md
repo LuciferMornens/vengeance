@@ -13,7 +13,7 @@ backport described below; its build identity changes while the upstream revision
 | Prime Agent | `v0.10.0`     | 9 October 2026, 21:28:57  | `763094e1b6a7c17450ee8399b06cda1853847ca5` | `0.10.0+vengeance.11` |
 
 The Vengeance identities above are the current lock entries. Prime's complete 22-patch series has
-been reconstructed; its clean full native run and final runtime qualification are pending.
+been reconstructed and its native checks passed; engine/helper builds and app qualification remain.
 
 The official GitHub `releases/latest` responses identify these releases as non-prereleases.
 Independent `git ls-remote --tags` checks, sorting numbered stable tags as versions, find the
@@ -87,7 +87,7 @@ file. SYSTEM and APPEND selection are independent. An empty project or explicit 
 fallback; whitespace, Markdown and repeated bullets remain raw text. The appendix follows the native
 dynamic tail and survives live model changes. The patch changes neither the daemon JSON contract nor
 saved-session format, credential storage or helper protocol. Its SHA-256 is
-`dd5a9f05521870175845393f6b71f60abc1fbe3f20e6b0a3d5baae2d15f8bb08`.
+`0db58a84c6f8b771041c43d62d8e4e26067ec027e8ae4703c1f6e5f8ddfcd5f7`.
 
 The exported patch was reviewed against the authoring source: three files, 223 additions and four
 deletions. The source owner reports eight focused actual-provider unit tests passing, covering
@@ -130,21 +130,34 @@ full native run.
 
 Patch SHA-256 values are `3ec4e10dd800cd438de6af187272564c5445b3ff48460a54c19ee37a6314464c`
 for `0021` and `51d3e0483882c6abd4aa58d45fd2d0e474395a743eb4a8ab5450c332da855566` for `0022`.
-The fresh source is `prime-763094e1-927fe293`; its receipt records patch hash
-`927fe2934cf44bb6fb2719b7e4a9e47592ffbf6b0c8636fcf339b339e7f6c767` and source hash
-`492a542aecb87ef7c8d3e13393934b8f13195b1b573eddbaac41779f188806fd`.
-The reconstructed full run is underway with debug symbols disabled, four test threads and an isolated
-kernel. No final pass is claimed here; its results belong in the final qualification record.
+The final source is `prime-763094e1-fc924d12`; its receipt records patch hash
+`fc924d1298f41b9715c9b69f8fe0622e1f132e3b24b47f2ff9c339f3847212f7` and source hash
+`29fae788e3271b41e2399ffc28029316b8a93bd10659d2a0544c57f34550e5a1`.
+Its engine input fingerprint is
+`ddc7335e5f42fad308e6f5465e2497cfa07bc3d8686f816150bcaedd9e37135f`.
+
+The clean reconstructed native run, with debug symbols disabled, four test threads and an isolated
+kernel, completed 4,477 passing tests and 14 ignored tests across 216 suites. Formatting checked all
+nine packages and 211 targets. The subsequent Clippy run found one test-only `if_not_else` issue in
+the new append fixture. The branch was inverted without changing its assertions, then patch `0020`
+was re-exported against the first nineteen patches and the complete series reconstructed again.
+The three append-related files and both qualification-fixture files match the authoring source
+byte-for-byte; `0021` and `0022` patch bytes are unchanged. All eight append tests pass after the style
+correction. Final full-workspace, all-target Clippy passed with `-D warnings` in 23.99 seconds.
+The retained full test log is `.cache/prime-workspace-clean.log`; the focused rerun is
+`.cache/prime-append-style-final.log`, and Clippy is `.cache/prime-clippy-style-final.log`.
+Both isolated account guards passed. These native results do not qualify final app packages or
+another platform.
 
 ## Qualification scope
 
-The release audit and independent patch review were read-only; this audit worker performed no native
-build, account write, provider request or migration. The focused source-owner results above are
-separate from that review. Neither establishes final release qualification or qualifies an unreleased
+The initial release audit and independent patch review were read-only. Later native fixture work and
+the focused test and Clippy reruns are recorded separately above. Those isolated checks passed both
+real-account guards. They do not establish final release qualification or qualify an unreleased
 upstream head.
 
-The reconstructed series needs its clean full native result, an engine/helper rebuild,
-native regressions and the public app provider test in
+The reconstructed series needs an engine/helper rebuild, the applicable app/native integration
+regressions and the public app provider test in
 `scripts/qa/settings/system-prompts.qa.mjs`. Verify a real saved-worker PID transition, held-stream
 save behavior, model-switch retention, mixed-version resident notices and the helper's static-only
 default foundation. Repeat the applicable restart, image-capability, bundled-identity, packaged

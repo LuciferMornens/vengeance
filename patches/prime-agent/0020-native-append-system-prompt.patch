@@ -77,7 +77,7 @@ index 3a59c31..9a9e484 100644
 +mod append_system_tests;
 diff --git a/crates/pa-core/src/session_engine/engine/append_system_tests.rs b/crates/pa-core/src/session_engine/engine/append_system_tests.rs
 new file mode 100644
-index 0000000..b8f9bf5
+index 0000000..df35806
 --- /dev/null
 +++ b/crates/pa-core/src/session_engine/engine/append_system_tests.rs
 @@ -0,0 +1,204 @@
@@ -157,12 +157,12 @@ index 0000000..b8f9bf5
 +            );
 +        }
 +    }
-+    if !case.expected.is_empty() {
-+        assert!(initial_prompt.ends_with(case.expected));
-+        assert_eq!(initial_prompt.matches(case.expected).count(), 1);
-+    } else {
++    if case.expected.is_empty() {
 +        assert!(!initial_prompt.contains(GLOBAL_APPEND));
 +        assert!(!initial_prompt.contains(PROJECT_APPEND));
++    } else {
++        assert!(initial_prompt.ends_with(case.expected));
++        assert_eq!(initial_prompt.matches(case.expected).count(), 1);
 +    }
 +
 +    let mut selected = model;
