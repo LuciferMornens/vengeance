@@ -345,6 +345,7 @@ const COMPONENTS: Components = {
 }
 
 const STANDALONE_FENCE_OPEN = /^(`{3,}|~{3,})([\w+#.-]*)[ \t]*$/
+const STANDALONE_FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/
 
 function parseStandaloneFence(
   source: string
@@ -364,30 +365,12 @@ function parseStandaloneFence(
   const prefix = lastNl === -1 ? '' : body.slice(0, lastNl)
   // If any earlier line could close the fence, let ReactMarkdown parse it.
   if (prefix.includes(fence)) return null
-  const trimmedLast = lastLine.trim()
-  const isClosed =
-    trimmedLast.length >= fence.length &&
-    trimmedLast[0] === fenceChar &&
-     lastLine.startsWith(trimmedLast) &&
-    /^(`+|~+)$/.test(trimmedLast)
-  if (isClosed) {
+  // A closing fence may be indented up to three spaces (CommonMark, and MarkdownBlockSplitter's FENCE).
+  const close = STANDALONE_FENCE_CLOSE.exec(lastLine)
+  if (close && close[1]![0] === fenceChar && close[1]!.length >= fence.length) {
     return { code: prefix.replace(/\n$/, ''), lang, closed: true }
   }
   return { code: body.replace(/\n$/, ''), lang, closed: false }
-}
-
-const MAX_RENDERED_BLOCKS = 500
-const settledRenderCache = new Map<string, ReactNode>()
-
-function putSettledRender(source: string, node: ReactNode): ReactNode {
-  if (settledRenderCache.has(source)) {
-    settledRenderCache.delete(source)
-  } else if (settledRenderCache.size >= MAX_RENDERED_BLOCKS) {
-    const oldest = settledRenderCache.keys().next().value
-    if (oldest !== undefined) settledRenderCache.delete(oldest)
-  }
-  settledRenderCache.set(source, node)
-  return node
 }
 
 function renderMarkdownAst(source: string): ReactNode {
@@ -414,7 +397,11 @@ const Block = memo(function Block({
     () => ({ live, messageLive, closed, mermaid }),
     [live, messageLive, closed, mermaid]
   )
-  const lastRef = useRef<{ source: string; node: ReactNode } | null>(null)
+  // Parsed once per source: a block that stops streaming (or whose fence closes) keeps its rendered tree.
+  const content = useMemo(
+    () => (standalone ? null : renderMarkdownAst(source)),
+    [standalone, source]
+  )
   if (standalone) {
     const diagram =
       standalone.lang === 'mermaid' &&
@@ -425,49 +412,12 @@ const Block = memo(function Block({
       <CodeBlock code={standalone.code} lang={standalone.lang} live={live} />
     )
   }
-  let content: ReactNode
-  if (!live) {
-    const cached = settledRenderCache.get(source)
-    if (cached !== undefined) {
-      settledRenderCache.delete(source)
-      settledRenderCache.set(source, cached)
-      content = cached
-    } else if (lastRef.current?.source === source) {
-      content = putSettledRender(source, lastRef.current.node)
-    } else {
-      content = putSettledRender(source, renderMarkdownAst(source))
-    }
-  } else if (lastRef.current?.source === source) {
-    content = lastRef.current.node
-  } else {
-    content = renderMarkdownAst(source)
-    lastRef.current = { source, node: content }
-  }
   return (
     <MarkdownRenderContext.Provider value={renderState}>
       {content}
     </MarkdownRenderContext.Provider>
   )
 })
-
-const MAX_CACHED_SPLITS = 250
-const settledBlockCache = new Map<string, string[]>()
-
-function getSettledBlocks(text: string, splitter: MarkdownBlockSplitter): string[] {
-  const cached = settledBlockCache.get(text)
-  if (cached !== undefined) {
-    settledBlockCache.delete(text)
-    settledBlockCache.set(text, cached)
-    return cached
-  }
-  const blocks = splitter.split(text)
-  if (settledBlockCache.size >= MAX_CACHED_SPLITS) {
-    const oldest = settledBlockCache.keys().next().value
-    if (oldest !== undefined) settledBlockCache.delete(oldest)
-  }
-  settledBlockCache.set(text, blocks)
-  return blocks
-}
 
 /**
  * While `live`, reveal streamed text at a steady per-frame pace instead of in network-sized chunks.
@@ -530,10 +480,7 @@ export const Markdown = memo(function Markdown({
 }: MarkdownProps) {
   const shown = useSmoothText(text, live)
   const [splitter] = useState(() => new MarkdownBlockSplitter())
-  const blocks = useMemo(
-    () => (live ? splitter.split(shown) : getSettledBlocks(shown, splitter)),
-    [live, shown, splitter]
-  )
+  const blocks = useMemo(() => splitter.split(shown), [shown, splitter])
   return (
     <div
       className={cn(

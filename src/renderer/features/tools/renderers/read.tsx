@@ -1,25 +1,12 @@
 import { useMemo } from 'react'
-import { cn } from '../../../lib/cn'
 import { useAgents } from '../../../store/agents'
-import { CodeView } from '../../../ui/CodeView'
 import { languageFromPath } from '../../../ui/highlight'
-import { useDisclosure, useToolsExpanded } from '../disclosure'
 import { PathChip, useDisplayPath } from '../PathChip'
 import { registerToolRenderer, type ToolRendererProps } from '../registry'
-import { DetailNote, RowDetail, ShowMore, ToolRow, usePreviewExpanded } from '../ToolRow'
-import { fileErrorReason, isActive, num, payloadImages, payloadText, resultPayload, splitTrailingNotes, str, toolPhase } from '../tool-utils'
+import { DetailNote, PreviewCode, RowDetail, ShowMore, ToolRow, usePreviewExpanded } from '../ToolRow'
+import { fileErrorReason, isActive, lineCount, num, payloadImages, payloadText, resultPayload, splitTrailingNotes, str, toolPhase } from '../tool-utils'
 
 const PREVIEW_LINES = 60
-
-function countLines(text: string): number {
-  if (!text) return 0
-  const end = text.endsWith('\n') ? text.length - 1 : text.length
-  let lines = 1
-  for (let i = 0; i < end; i++) {
-    if (text.charCodeAt(i) === 10) lines++
-  }
-  return lines
-}
 
 /** "L12–80" from offset/limit and the returned content (or the engine's "Showing lines" note). */
 function lineRange(offset: number | undefined, returned: number, notes: string[]): string | null {
@@ -48,16 +35,10 @@ function ReadRow({ agentId, call, execution }: ToolRendererProps) {
   const images = useMemo(() => payloadImages(payload), [payload])
   const failed = phase === 'error'
   const imageOnly = images.length > 0 && /^Read image file/.test(body.trim())
-  const returned = useMemo(() => (failed || imageOnly ? 0 : countLines(body)), [failed, imageOnly, body])
+  const returned = useMemo(() => (failed || imageOnly ? 0 : lineCount(body)), [failed, imageOnly, body])
   const range = useMemo(() => lineRange(offset, returned, notes), [offset, returned, notes])
-  const toolsExpanded = useToolsExpanded()
-  const [open] = useDisclosure(`tool:${call.id}`, toolsExpanded)
   const [expanded, setExpanded] = usePreviewExpanded('content')
   const folded = !expanded && returned > PREVIEW_LINES + 10
-  const shown = useMemo(() => {
-    if (!open) return ''
-    return folded ? body.split('\n').slice(0, PREVIEW_LINES).join('\n') : body
-  }, [open, folded, body])
   const thumb = images[0]
   return (
     <ToolRow
@@ -93,15 +74,7 @@ function ReadRow({ agentId, call, execution }: ToolRendererProps) {
               </div>
             ))}
             {returned > 0 && (
-              <div className="overflow-x-auto bg-[var(--code-bg)] px-3 py-2.5">
-                <CodeView
-                  code={shown}
-                  lang={languageFromPath(path)}
-                  lineNumbers
-                  startLine={offset ?? 1}
-                  className={cn(folded && '[mask-image:linear-gradient(to_bottom,black_calc(100%-44px),transparent)]')}
-                />
-              </div>
+              <PreviewCode code={body} folded={folded} previewLines={PREVIEW_LINES} lang={languageFromPath(path)} lineNumbers startLine={offset ?? 1} />
             )}
             {returned > PREVIEW_LINES + 10 && <ShowMore expanded={expanded} onToggle={() => setExpanded(!expanded)} hidden={returned - PREVIEW_LINES} />}
             {notes.map((note) => (

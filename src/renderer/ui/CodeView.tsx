@@ -55,15 +55,17 @@ export const CodeView = memo(function CodeView({
   const trimmed = useMemo(() => code.replace(/\n$/, ''), [code])
   const flat = useMemo(() => {
     if (!simple || !tokens) return null
+    // Shiki tokenizes a trailing newline as one more, empty line; the plain rendering drops it (`trimmed`).
+    const rows = code.endsWith('\n') ? tokens.length - 1 : tokens.length
     const runs: CodeToken[] = []
-    for (let i = 0; i < tokens.length; i++) {
+    for (let i = 0; i < rows; i++) {
       if (i > 0) {
         const last = runs[runs.length - 1]
         if (last && !last.className) last.content += '\n'
         else runs.push({ content: '\n' })
       }
       const line = tokens[i]!
-      if (line.length === 0 && i === tokens.length - 1) {
+      if (line.length === 0 && i === rows - 1) {
         const last = runs[runs.length - 1]
         if (last && !last.className) last.content += '\u200b'
         else runs.push({ content: '\u200b' })
@@ -78,7 +80,7 @@ export const CodeView = memo(function CodeView({
       }
     }
     return runs
-  }, [simple, tokens])
+  }, [simple, tokens, code])
   const lines = useMemo(() => (simple ? [] : trimmed.split('\n')), [simple, trimmed])
   const gutterWidth = simple ? undefined : `${String(startLine + lines.length - 1).length + 1}ch`
   return (

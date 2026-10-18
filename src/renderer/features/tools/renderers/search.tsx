@@ -1,7 +1,6 @@
 import { useMemo, type ReactNode } from 'react'
 import { cn } from '../../../lib/cn'
 import { useAgents } from '../../../store/agents'
-import { useDisclosure, useToolsExpanded } from '../disclosure'
 import { FileGlyph, PathChip, useDisplayPath } from '../PathChip'
 import { registerToolRenderer, type ToolRendererProps } from '../registry'
 import { DetailEmpty, DetailNote, MonoSubject, RowDetail, ShowMore, ToolRow, usePreviewExpanded } from '../ToolRow'
@@ -166,23 +165,39 @@ function GrepFiles({ files, re }: { files: Array<{ file: string; lines: GrepLine
   )
 }
 
+/** The grep detail (mounted only while open): parses the matches into file groups and highlights them. */
+function GrepDetail({ phase, body, notes, empty, pattern, literal, ignoreCase }: { phase: ToolPhase; body: string; notes: string[]; empty: boolean; pattern: string; literal: boolean; ignoreCase: boolean }) {
+  const failed = phase === 'error'
+  const re = useMemo(() => matcher(pattern, literal, ignoreCase), [pattern, literal, ignoreCase])
+  const files = useMemo(() => (failed || empty ? [] : parseGrep(body)), [failed, empty, body])
+  return (
+    <RowDetail copy={body}>
+      {failed ? (
+        <DetailNote tone="danger">{body || 'Search failed'}</DetailNote>
+      ) : empty ? (
+        <DetailEmpty>No matches for “{pattern}”.</DetailEmpty>
+      ) : files.length > 0 ? (
+        <GrepFiles files={files} re={re} />
+      ) : (
+        body && <pre className="selectable px-3.5 py-2.5 font-mono text-[12px] whitespace-pre-wrap text-fg-2">{body}</pre>
+      )}
+      {notes.map((note) => (
+        <DetailNote key={note}>{note}</DetailNote>
+      ))}
+    </RowDetail>
+  )
+}
+
 function GrepRow(props: ToolRendererProps) {
   const { agentId, call, execution } = props
   const { phase, body, notes, empty } = useSearchResult(agentId, props)
   const pattern = str(call.arguments.pattern) ?? ''
   const glob = str(call.arguments.glob)
   const where = useDisplayPath(agentId, str(call.arguments.path))
-  const toolsExpanded = useToolsExpanded()
-  const [open] = useDisclosure(`tool:${call.id}`, toolsExpanded)
-  const re = useMemo(
-    () => (open ? matcher(pattern, bool(call.arguments.literal) ?? false, bool(call.arguments.ignoreCase) ?? false) : null),
-    [open, call.arguments, pattern]
-  )
   const counts = useMemo(
     () => (phase === 'error' || empty ? { matches: 0, files: 0 } : countGrep(body)),
     [body, phase, empty]
   )
-  const files = useMemo(() => (!open || phase === 'error' || empty ? [] : parseGrep(body)), [open, body, phase, empty])
   const failed = phase === 'error'
   return (
     <ToolRow
@@ -201,20 +216,15 @@ function GrepRow(props: ToolRendererProps) {
       sublineTone="danger"
       detail={
         isActive(phase) ? undefined : (
-          <RowDetail copy={body}>
-            {failed ? (
-              <DetailNote tone="danger">{body || 'Search failed'}</DetailNote>
-            ) : empty ? (
-              <DetailEmpty>No matches for “{pattern}”.</DetailEmpty>
-            ) : files.length > 0 ? (
-              <GrepFiles files={files} re={re} />
-            ) : (
-              body && <pre className="selectable px-3.5 py-2.5 font-mono text-[12px] whitespace-pre-wrap text-fg-2">{body}</pre>
-            )}
-            {notes.map((note) => (
-              <DetailNote key={note}>{note}</DetailNote>
-            ))}
-          </RowDetail>
+          <GrepDetail
+            phase={phase}
+            body={body}
+            notes={notes}
+            empty={empty}
+            pattern={pattern}
+            literal={bool(call.arguments.literal) ?? false}
+            ignoreCase={bool(call.arguments.ignoreCase) ?? false}
+          />
         )
       }
     />
@@ -245,7 +255,9 @@ function PathRows({ paths }: { paths: string[] }) {
   )
 }
 
-function PathListDetail({ phase, body, notes, empty, paths, emptyText }: { phase: ToolPhase; body: string; notes: string[]; empty: boolean; paths: string[]; emptyText: string }) {
+/** A find/ls detail (mounted only while open): one row per returned path. */
+function PathListDetail({ phase, body, notes, empty, emptyText }: { phase: ToolPhase; body: string; notes: string[]; empty: boolean; emptyText: string }) {
+  const paths = useMemo(() => (phase === 'done' && !empty ? body.split('\n').filter(Boolean) : []), [phase, empty, body])
   if (isActive(phase)) return null
   return (
     <RowDetail copy={body}>
@@ -269,10 +281,7 @@ function FindRow(props: ToolRendererProps) {
   const { phase, body, empty } = result
   const pattern = str(call.arguments.pattern) ?? ''
   const where = useDisplayPath(agentId, str(call.arguments.path))
-  const toolsExpanded = useToolsExpanded()
-  const [open] = useDisclosure(`tool:${call.id}`, toolsExpanded)
   const count = useMemo(() => (phase === 'done' && !empty ? countNonEmptyLines(body) : 0), [body, phase, empty])
-  const paths = useMemo(() => (open && phase === 'done' && !empty ? body.split('\n').filter(Boolean) : []), [open, body, phase, empty])
   return (
     <ToolRow
       verb={isActive(phase) ? 'Finding' : 'Found'}
@@ -288,7 +297,7 @@ function FindRow(props: ToolRendererProps) {
       startedAt={execution?.startedAt}
       subline={phase === 'error' ? firstLine(body) || 'Find failed' : undefined}
       sublineTone="danger"
-      detail={<PathListDetail {...result} paths={paths} emptyText={`No files match “${pattern}”.`} />}
+      detail={<PathListDetail {...result} emptyText={`No files match “${pattern}”.`} />}
     />
   )
 }
@@ -298,10 +307,7 @@ function LsRow(props: ToolRendererProps) {
   const result = useSearchResult(agentId, props)
   const { phase, body, empty } = result
   const path = str(call.arguments.path) ?? '.'
-  const toolsExpanded = useToolsExpanded()
-  const [open] = useDisclosure(`tool:${call.id}`, toolsExpanded)
   const count = useMemo(() => (phase === 'done' && !empty ? countNonEmptyLines(body) : 0), [body, phase, empty])
-  const entries = useMemo(() => (open && phase === 'done' && !empty ? body.split('\n').filter(Boolean) : []), [open, body, phase, empty])
   return (
     <ToolRow
       verb={isActive(phase) ? 'Listing' : 'Listed'}
@@ -312,7 +318,7 @@ function LsRow(props: ToolRendererProps) {
       startedAt={execution?.startedAt}
       subline={phase === 'error' ? firstLine(body) || 'Listing failed' : undefined}
       sublineTone="danger"
-      detail={<PathListDetail {...result} paths={entries} emptyText="This folder is empty." />}
+      detail={<PathListDetail {...result} emptyText="This folder is empty." />}
     />
   )
 }

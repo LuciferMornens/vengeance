@@ -64,7 +64,8 @@ export class PrimeUpdatesService {
     this.scheduleCheck()
     this.stopPrefsListener = appState.onPrefsChange((next, previous) => {
       if (updatesScheduleChanged(next, previous)) this.scheduleCheck()
-      else if (!isPrimeConfigured(previous) && isPrimeConfigured(next) && !this.state.lastChecked) {
+      // A background check skipped while Prime was unused left nothing scheduled: resume once it is in use.
+      else if (!this.nextCheck && !isPrimeConfigured(previous) && isPrimeConfigured(next)) {
         this.scheduleCheck()
       }
     })
@@ -84,7 +85,10 @@ export class PrimeUpdatesService {
     if (!this.checksFrom) return
     const delay = nextCheckDelay(this.state.lastChecked, this.checksFrom)
     if (delay === null) return
-    this.nextCheck = setTimeout(() => void this.check(false), delay)
+    this.nextCheck = setTimeout(() => {
+      this.nextCheck = undefined
+      void this.check(false)
+    }, delay)
   }
 
   getState(): UpdatesState {

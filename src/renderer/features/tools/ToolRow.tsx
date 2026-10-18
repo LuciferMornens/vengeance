@@ -1,9 +1,9 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Ban, Check, ChevronRight, X } from 'lucide-react'
 import { stripAnsi } from '../../lib/ansi'
 import { cn } from '../../lib/cn'
 import { formatDuration } from '../../lib/format'
-import { CodeView } from '../../ui/CodeView'
+import { CodeView, type CodeViewProps } from '../../ui/CodeView'
 import { Collapse } from '../../ui/Collapse'
 import { CopyButton } from '../../ui/CopyButton'
 import { Spinner } from '../../ui'
@@ -378,6 +378,19 @@ export function DetailNote({ children, tone = 'neutral' }: { children: ReactNode
 /** Quiet placeholder inside a detail well ("No matches for …"). */
 export function DetailEmpty({ children }: { children: ReactNode }) {
   return <div className="px-3.5 py-3 text-sm text-fg-3">{children}</div>
+}
+
+/**
+ * Code body of a detail well, cut to its first `previewLines` lines while `folded`. Lives inside the detail,
+ * which mounts only while open, so a closed row never splits or highlights its content.
+ */
+export function PreviewCode({ code, folded, previewLines, className, ...view }: CodeViewProps & { folded: boolean; previewLines: number }) {
+  const shown = useMemo(() => (folded ? code.split('\n').slice(0, previewLines).join('\n') : code), [code, folded, previewLines])
+  return (
+    <div className="overflow-x-auto bg-[var(--code-bg)] px-3 py-2.5">
+      <CodeView {...view} code={shown} className={cn(className, folded && '[mask-image:linear-gradient(to_bottom,black_calc(100%-44px),transparent)]')} />
+    </div>
+  )
 }
 
 /** "Show all N lines" toggle used by truncated previews. */

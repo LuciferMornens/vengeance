@@ -417,7 +417,12 @@ export function splitLensVerdict(text: string): { body: string; lens: LensVerdic
 
 export function lineCount(text: string): number {
   if (!text) return 0
-  return text.replace(/\n$/, '').split('\n').length
+  const end = text.endsWith('\n') ? text.length - 1 : text.length
+  let lines = 1
+  for (let i = 0; i < end; i++) {
+    if (text.charCodeAt(i) === 10) lines++
+  }
+  return lines
 }
 
 /** `+added −removed` of an edit, from the unified `details.patch` or pi's display `details.diff`. */

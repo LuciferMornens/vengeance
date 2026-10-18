@@ -301,10 +301,22 @@ const TabBar = memo(function TabBar({
   )
 })
 
+/**
+ * The agent the panel shows. While the panel is closed it stops following the store (no tab re-renders per engine
+ * event) but keeps the agent it last showed, so the closing slide and the open tab's own state stay intact.
+ */
+function usePanelAgent(agentId: string | null, open: boolean): AgentState | undefined {
+  const live = useAgents((s) => (open && agentId ? s.agents[agentId] : undefined))
+  const shown = useRef(live)
+  if (open) shown.current = live
+  else if (shown.current?.id !== agentId) shown.current = undefined
+  return shown.current
+}
+
 /** `width` is the panel's drawn width, which the shell may narrow below the saved preference. */
 export function Inspector({ agentId, width }: { agentId: string | null; width: number }) {
   const open = useApp((s) => s.prefs.inspector.open)
-  const agent = useAgents((s) => (open && agentId ? s.agents[agentId] : undefined))
+  const agent = usePanelAgent(agentId, open)
   const stored = useApp((s) => s.prefs.inspector.tab)
   const engine = agent?.info.engine ?? 'pi'
   const capabilities = useEngineCapabilities(engine)

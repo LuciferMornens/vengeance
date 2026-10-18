@@ -140,7 +140,8 @@ export function Composer({ agentId }: { agentId: string }) {
   const trigger = useMemo(() => detectTrigger(text, caret), [text, caret])
   const menuOpen = !compacting && trigger !== null && dismissedAt !== text
   const slashMenuOpen = menuOpen && trigger?.kind === 'slash'
-  const hints = useCommandHints(cwd, commands, text.startsWith('/'))
+  // Loaded up front (once per workspace + command set): a picked `<required>` command must complete, not run bare.
+  const hints = useCommandHints(cwd, commands)
   const offeredCommands = useOfferedCommands(commands, cwd || null, engine, slashMenuOpen)
   const slashItems = useSlashSuggestions(
     offeredCommands,

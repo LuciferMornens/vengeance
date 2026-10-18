@@ -73,13 +73,14 @@ export async function readFileBounded(path: string, options: ReadFileOptions | u
   }
 }
 
-interface CachedWorkspaceFile {
-  path: string
-  lower: string
-  baseOffset: number
+/** A workspace's files, sorted by path: the lower-cased path (the same string when already lower) and basename offset per file. */
+interface WorkspaceFiles {
+  paths: string[]
+  lowers: string[]
+  bases: Uint32Array
 }
 
-const fileCache = new Map<string, { at: number; files: Promise<CachedWorkspaceFile[]> }>()
+const fileCache = new Map<string, { at: number; files: Promise<WorkspaceFiles> }>()
 
 async function gitFiles(cwd: string): Promise<string[]> {
   const stdout = await runGit(['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
@@ -126,50 +127,38 @@ async function walkFiles(cwd: string): Promise<string[]> {
   return files
 }
 
-function workspaceFiles(cwd: string): Promise<CachedWorkspaceFile[]> {
+function indexFiles(list: string[]): WorkspaceFiles {
+  const paths = list.map((f) => f.split(sep).join('/')).sort((a, b) => a.localeCompare(b))
+  const lowers = new Array<string>(paths.length)
+  const bases = new Uint32Array(paths.length)
+  for (let i = 0; i < paths.length; i++) {
+    const path = paths[i]!
+    const lower = path.toLowerCase()
+    lowers[i] = lower === path ? path : lower
+    bases[i] = lower.lastIndexOf('/') + 1
+  }
+  return { paths, lowers, bases }
+}
+
+function workspaceFiles(cwd: string): Promise<WorkspaceFiles> {
   const cached = fileCache.get(cwd)
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.files
   const files = gitFiles(cwd)
     .catch(() => fdFiles(cwd))
     .catch(() => walkFiles(cwd))
-    .then((list) =>
-      list
-        .map((f) => f.split(sep).join('/'))
-        .sort((a, b) => a.localeCompare(b))
-        .map((path) => {
-          const lower = path.toLowerCase()
-          return { path, lower, baseOffset: lower.lastIndexOf('/') + 1 }
-        })
-    )
-  fileCache.set(cwd, { at: Date.now(), files })
+    .then(indexFiles)
+  const entry = { at: Date.now(), files }
+  fileCache.set(cwd, entry)
   files.catch(() => fileCache.delete(cwd))
+  // Drop the list once stale, so a workspace @-mentioned once does not hold its file list for the app's lifetime.
+  setTimeout(() => {
+    if (fileCache.get(cwd) === entry) fileCache.delete(cwd)
+  }, CACHE_MS).unref()
   return files
 }
 
 /** Subsequence fuzzy score; higher is better, -1 = no match. Rewards basename hits and contiguous runs. */
-export function fuzzyScore(path: string, query: string): number {
-  if (!query) return 1
-  const hay = path.toLowerCase()
-  const needle = query.toLowerCase()
-  const base = hay.slice(hay.lastIndexOf('/') + 1)
-  if (base.startsWith(needle)) return 1000 - path.length
-  if (base.includes(needle)) return 800 - path.length
-  if (hay.includes(needle)) return 600 - path.length
-  let score = 0
-  let run = 0
-  let from = 0
-  for (const ch of needle) {
-    const at = hay.indexOf(ch, from)
-    if (at === -1) return -1
-    run = at === from ? run + 1 : 0
-    score += 1 + run * 2 + (at === 0 || hay[at - 1] === '/' || hay[at - 1] === '-' || hay[at - 1] === '_' || hay[at - 1] === '.' ? 3 : 0)
-    from = at + 1
-  }
-  return score * 4 - path.length * 0.1
-}
-
-function fuzzyScoreCached(file: CachedWorkspaceFile, needle: string): number {
-  const { path, lower: hay, baseOffset } = file
+function fuzzyScore(path: string, hay: string, baseOffset: number, needle: string): number {
   if (hay.startsWith(needle, baseOffset)) return 1000 - path.length
   if (hay.indexOf(needle, baseOffset) !== -1) return 800 - path.length
   if (hay.indexOf(needle) !== -1) return 600 - path.length
@@ -189,18 +178,17 @@ function fuzzyScoreCached(file: CachedWorkspaceFile, needle: string): number {
 }
 
 export async function listFiles(cwd: string, query: string, limit = 50): Promise<FileMatch[]> {
-  const files = await workspaceFiles(resolve(cwd))
+  const { paths, lowers, bases } = await workspaceFiles(resolve(cwd))
   const needle = query.trim().replace(/\\/g, '/').toLowerCase()
   if (!needle) {
-    return files.slice(0, limit).map((file) => ({ path: file.path, score: 1 }))
+    return paths.slice(0, limit).map((path) => ({ path, score: 1 }))
   }
   const matches: FileMatch[] = []
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i]!
-    const score = fuzzyScoreCached(file, needle)
-    if (score >= 0) matches.push({ path: file.path, score })
+  for (let i = 0; i < paths.length; i++) {
+    const score = fuzzyScore(paths[i]!, lowers[i]!, bases[i]!, needle)
+    if (score >= 0) matches.push({ path: paths[i]!, score })
   }
-  // `files` is pre-sorted by `path.localeCompare`, and V8's TimSort is stable, so ties preserve path order.
+  // `paths` is pre-sorted by `path.localeCompare`, and V8's TimSort is stable, so ties preserve path order.
   matches.sort((a, b) => b.score - a.score)
   return matches.slice(0, limit)
 }

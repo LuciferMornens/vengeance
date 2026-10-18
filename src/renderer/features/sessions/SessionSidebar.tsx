@@ -12,8 +12,7 @@ import { normalizePath, samePath } from '../../lib/paths'
 import { useAgents, type AgentsStore } from '../../store/agents'
 import { useApp } from '../../store/app'
 import { Button, IconButton, Tooltip } from '../../ui'
-import { useSettings } from '../settings/store'
-import { preloadSettingsSheet } from '../shell/AppShell'
+import { preloadSettingsSheet } from '../shell/settings-sheet'
 import { chooseWorkspace } from '../shell/workspace'
 import {
   activateAgent,
@@ -725,10 +724,6 @@ export function SessionSidebar() {
           size="sm"
           onPointerEnter={preloadSettingsSheet}
           onFocus={preloadSettingsSheet}
-          onPointerDown={() => {
-            preloadSettingsSheet()
-            void useSettings.getState().load()
-          }}
           onClick={() => useApp.getState().openSettings()}
         >
           <Settings />

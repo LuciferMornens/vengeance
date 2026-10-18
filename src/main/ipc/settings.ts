@@ -8,7 +8,7 @@ import { appState } from '../app-state'
 import { disposeSdkHost, prewarmSdkHost, releaseSdkHost } from '../engine/sdk-host/client'
 import { isInside } from '../paths'
 import { ACCOUNT_PROVIDER, refreshAccountModels } from '../features/settings/account-models'
-import { agentDir, prepareAgentDir, projectRoot } from '../features/settings/agent-dir'
+import { agentDir, projectRoot } from '../features/settings/agent-dir'
 import { clearExtensionFlagCache } from '../features/launch/flags'
 import { setProjectTrust, trustPreflight } from '../features/launch/trust'
 import { ConfigWatcher } from '../features/settings/config-watcher'
@@ -107,7 +107,6 @@ function invalidateFlagsFor(area: SettingsChangeArea): void {
 
 /** Settings feature: engine settings, providers & auth, custom models, packages, resources, MCP, instructions, trust, keybindings. */
 export function registerSettingsIpc(context: IpcContext): void {
-  void prepareAgentDir()
   const override = () => context.engineOverridePath()
   /** `force`: re-read the account's models now (a sign-in through Vengeance); otherwise only when the list is stale. */
   const checkAccountModels = (force: boolean) =>

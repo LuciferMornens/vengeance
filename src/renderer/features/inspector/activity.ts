@@ -1,6 +1,7 @@
 import type { ToolCall } from '@shared/engine-types'
 import { isWindowsPath } from '../../lib/path-kind'
 import type { AgentState, ToolExecution, ToolStatus } from '../../store/agent-state'
+import { lineCount, str } from '../tools/tool-utils'
 
 /** One tool call of the session in transcript order, joined with its execution record. */
 export interface ToolActivity {
@@ -110,16 +111,6 @@ export function relativeTo(cwd: string, path: string): string {
   return path.replace(/\\/g, '/')
 }
 
-function lineCount(text: unknown): number {
-  if (typeof text !== 'string' || text.length === 0) return 0
-  const end = text.endsWith('\n') ? text.length - 1 : text.length
-  let lines = 1
-  for (let i = 0; i < end; i++) {
-    if (text.charCodeAt(i) === 10) lines++
-  }
-  return lines
-}
-
 const editStatsCache = new WeakMap<ToolExecution, { added: number; removed: number }>()
 const writeLinesCache = new WeakMap<ToolExecution, number>()
 
@@ -146,8 +137,8 @@ function editStats(activity: ToolActivity): { added: number; removed: number } {
     let added = 0
     let removed = 0
     for (const edit of edits) {
-      added += lineCount(edit.newText ?? edit.new_string)
-      removed += lineCount(edit.oldText ?? edit.old_string)
+      added += lineCount(str(edit.newText ?? edit.new_string) ?? '')
+      removed += lineCount(str(edit.oldText ?? edit.old_string) ?? '')
     }
     result = { added, removed }
   }
@@ -162,7 +153,7 @@ function writeAddedLines(activity: ToolActivity): number {
     const cached = writeLinesCache.get(execution)
     if (cached !== undefined) return cached
   }
-  const lines = lineCount(activity.args.content)
+  const lines = lineCount(str(activity.args.content) ?? '')
   if (cacheable) writeLinesCache.set(execution, lines)
   return lines
 }
