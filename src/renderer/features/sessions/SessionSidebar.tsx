@@ -179,7 +179,7 @@ function HistoryRow({
         }
         menu={historyMenu(item, pinned)}
         deferOpen
-        onOpen={() => void openSession(item)}
+        onOpen={(revision) => void openSession(item, revision)}
         onRename={(name) => void renameSession(target, name)}
         onDelete={() => useSessions.getState().openDialog({ kind: 'delete', target })}
         onIntent={() => prewarmSavedSession(target)}
@@ -365,7 +365,7 @@ function DormantRow({
         }
         menu={listing ? historyMenu(listing, pinned) : []}
         deferOpen
-        onOpen={() => resumeDormant(session)}
+        onOpen={(revision) => resumeDormant(session, revision)}
         onRename={(name) => void renameSession(target, name)}
         onDelete={() => useSessions.getState().openDialog({ kind: 'delete', target })}
         onIntent={() => prewarmSavedSession(target)}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ClipboardEvent } from 'react'
+import { useCallback, useEffect, useState, type ClipboardEvent, type RefObject } from 'react'
 import { invoke } from '../../lib/ipc'
 import { toast } from '../../ui'
 import type { Draft, DraftPatch, ImageAttachment } from './drafts'
@@ -7,6 +7,8 @@ import { mentionText } from './suggestions'
 
 interface AttachmentOptions {
   cwd: string
+  composerRef: RefObject<HTMLElement | null>
+  enabled: boolean
   patchDraft(patch: DraftPatch): void
   insertAtCaret(snippet: string): void
 }
@@ -28,7 +30,13 @@ function settle(draft: Draft, id: string, image: ImageAttachment | null): Partia
   return { pending: pending.slice(ready.length), images: [...draft.images, ...ready] }
 }
 
-export function useComposerAttachments({ cwd, patchDraft, insertAtCaret }: AttachmentOptions) {
+export function useComposerAttachments({
+  cwd,
+  composerRef,
+  enabled,
+  patchDraft,
+  insertAtCaret
+}: AttachmentOptions) {
   const [dragging, setDragging] = useState(false)
   const addImage = useCallback(
     async (name: string, load: () => Promise<Blob>) => {
@@ -98,16 +106,36 @@ export function useComposerAttachments({ cwd, patchDraft, insertAtCaret }: Attac
 
   useEffect(() => {
     let depth = 0
+    if (!enabled) setDragging(false)
     const hasFiles = (event: DragEvent) => event.dataTransfer?.types.includes('Files') ?? false
+    const acceptsFiles = () => {
+      const composer = composerRef.current
+      return (
+        enabled &&
+        !!composer &&
+        !composer.closest('[inert]') &&
+        composer.checkVisibility({ visibilityProperty: true })
+      )
+    }
     const onEnter = (event: DragEvent) => {
       if (!hasFiles(event)) return
+      if (!acceptsFiles()) {
+        depth = 0
+        setDragging(false)
+        return
+      }
       depth += 1
       setDragging(true)
     }
     const onOver = (event: DragEvent) => {
       if (!hasFiles(event)) return
       event.preventDefault()
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+      const accepts = acceptsFiles()
+      if (event.dataTransfer) event.dataTransfer.dropEffect = accepts ? 'copy' : 'none'
+      if (!accepts) {
+        depth = 0
+        setDragging(false)
+      }
     }
     const onLeave = (event: DragEvent) => {
       if (!hasFiles(event)) return
@@ -119,7 +147,7 @@ export function useComposerAttachments({ cwd, patchDraft, insertAtCaret }: Attac
       event.preventDefault()
       depth = 0
       setDragging(false)
-      attachFiles([...(event.dataTransfer?.files ?? [])])
+      if (acceptsFiles()) attachFiles([...(event.dataTransfer?.files ?? [])])
     }
     window.addEventListener('dragenter', onEnter)
     window.addEventListener('dragover', onOver)
@@ -131,7 +159,7 @@ export function useComposerAttachments({ cwd, patchDraft, insertAtCaret }: Attac
       window.removeEventListener('dragleave', onLeave)
       window.removeEventListener('drop', onDrop)
     }
-  }, [attachFiles])
+  }, [attachFiles, composerRef, enabled])
 
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = [...event.clipboardData.files]
@@ -140,5 +168,5 @@ export function useComposerAttachments({ cwd, patchDraft, insertAtCaret }: Attac
     attachFiles(files)
   }
 
-  return { dragging, onPaste, pickAttachments }
+  return { dragging: enabled && dragging, onPaste, pickAttachments }
 }

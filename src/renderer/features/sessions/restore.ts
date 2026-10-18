@@ -119,6 +119,10 @@ export async function restoreOpenSessions(
 }
 
 /** Resume a dormant session (it leaves the dormant rows once its agent is open). */
-export function resumeDormant(session: OpenSessionRef): void {
-  void openSessionFile(session.path, { cwd: session.cwd, engine: session.engine })
+export function resumeDormant(session: OpenSessionRef, activationRevision?: number): void {
+  void openSessionFile(session.path, {
+    cwd: session.cwd,
+    engine: session.engine,
+    activationRevision
+  })
 }

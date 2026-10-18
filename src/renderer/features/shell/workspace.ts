@@ -6,33 +6,88 @@ import { useApp, workspaceEngine } from '../../store/app'
 import { toast } from '../../ui'
 import { prepareLaunch, type PrepareLaunchOptions } from '../launch/spawn'
 
-/** Number of engines being spawned (engine:create in flight); the center pane shows a spinner only then. */
-export const useEngineSpawns = create<{ pending: number }>(() => ({ pending: 0 }))
+interface SessionOpenings {
+  activations: Record<number, number>
+  focusIntent: { revision: number; owner: Element | null; started: boolean } | null
+}
+
+export const useSessionOpenings = create<SessionOpenings>(() => ({
+  activations: {},
+  focusIntent: null
+}))
+
+export function requestSessionActivation(): number {
+  const owner = document.activeElement
+  const revision = useAgents.getState().requestActivation()
+  useSessionOpenings.setState({ focusIntent: { revision, owner, started: false } })
+  return revision
+}
+
+export function releaseSessionFocus(revision: number): void {
+  if (useSessionOpenings.getState().focusIntent?.revision === revision) {
+    useSessionOpenings.setState({ focusIntent: null })
+  }
+}
+
+/** Nested opens share an activation; older completions cannot clear the latest request's feedback. */
+export async function withSessionOpening<T>(
+  activationRevision: number,
+  open: () => Promise<T>
+): Promise<T> {
+  useSessionOpenings.setState((state) => ({
+    focusIntent:
+      useAgents.getState().activationRevision !== activationRevision
+        ? state.focusIntent
+        : {
+            revision: activationRevision,
+            owner:
+              state.focusIntent?.revision === activationRevision
+                ? state.focusIntent.owner
+                : document.activeElement,
+            started: true
+          },
+    activations: {
+      ...state.activations,
+      [activationRevision]: (state.activations[activationRevision] ?? 0) + 1
+    }
+  }))
+  try {
+    return await open()
+  } finally {
+    useSessionOpenings.setState((state) => {
+      const activations = { ...state.activations }
+      const remaining = activations[activationRevision]! - 1
+      if (remaining > 0) activations[activationRevision] = remaining
+      else delete activations[activationRevision]
+      const superseded = useAgents.getState().activationRevision !== activationRevision
+      const releaseFocus =
+        remaining === 0 && superseded && state.focusIntent?.revision === activationRevision
+      return { activations, focusIntent: releaseFocus ? null : state.focusIntent }
+    })
+  }
+}
 
 export interface SpawnAgentOptions extends PrepareLaunchOptions {
   activationRevision?: number
 }
 
 /**
- * Spawn an engine for a session, tracked by `useEngineSpawns`. Every spawn path goes through here:
- * the workspace's launch defaults are merged in and project trust is resolved first (Trust dialog when
- * the folder is undecided), before the spinner shows.
+ * Spawn an engine for a session, tracked by `useSessionOpenings`. Every spawn path goes through here:
+ * the workspace's launch defaults are merged in and project trust is resolved (Trust dialog when
+ * the folder is undecided) while the current foreground request shows its opening state.
  */
 export async function spawnAgent(
   args: CreateAgentArgs,
   options: SpawnAgentOptions = {}
 ): Promise<string> {
-  const activationRevision = options.activationRevision ?? useAgents.getState().requestActivation()
-  const prepared = await prepareLaunch(
-    { ...args, engine: args.engine ?? workspaceEngine(args.cwd) },
-    options
-  )
-  useEngineSpawns.setState((s) => ({ pending: s.pending + 1 }))
-  try {
-    return await useAgents.getState().createAgent(prepared, activationRevision)
-  } finally {
-    useEngineSpawns.setState((s) => ({ pending: s.pending - 1 }))
-  }
+  const activationRevision = options.activationRevision ?? requestSessionActivation()
+  return withSessionOpening(activationRevision, async () => {
+    const prepared = await prepareLaunch(
+      { ...args, engine: args.engine ?? workspaceEngine(args.cwd) },
+      options
+    )
+    return useAgents.getState().createAgent(prepared, activationRevision)
+  })
 }
 
 /** Start a new session (new engine process) in a workspace (default: the active one). */

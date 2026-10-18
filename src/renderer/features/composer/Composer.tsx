@@ -30,6 +30,7 @@ import { useCommandHints } from './command-hints'
 import { promptHistory, pushHistory, useDraft, useDrafts, type DraftPatch } from './drafts'
 import { RotatingPlaceholder } from './editor-hints'
 import { ComposerFooter } from './footer'
+import { useComposerFocus, type OpeningFocus } from './focus'
 import { cycleThinkingLevel, stopAgent } from './operations'
 import { AttachmentTray, BashRunningRow, QueueChips, type QueuedItem } from './parts'
 import {
@@ -97,7 +98,7 @@ const ESC_LABEL: Record<EscIntent, string> = {
 
 const EMPTY_COMMANDS: never[] = []
 
-export function Composer({ agentId }: { agentId: string }) {
+export function Composer({ agentId, opening }: { agentId: string; opening: OpeningFocus }) {
   const draft = useDraft(agentId)
   const patchDraft = useCallback(
     (patch: DraftPatch) => useDrafts.getState().patch(agentId, patch),
@@ -115,7 +116,6 @@ export function Composer({ agentId }: { agentId: string }) {
   const model = useAgents((s) => s.agents[agentId]?.model)
   const editorText = useAgents((s) => s.agents[agentId]?.ext.editorText)
   const bashRuns = useAgents((s) => s.agents[agentId]?.bash)
-  const focusRequest = useDrafts((s) => s.focusRequest)
 
   const rootRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -215,16 +215,11 @@ export function Composer({ agentId }: { agentId: string }) {
     }
   }, [])
 
-  const focus = useCallback(() => textareaRef.current?.focus(), [])
+  const focus = useComposerFocus(agentId, textareaRef, opening)
   useEffect(() => {
-    focus()
     setHistoryIndex(null)
     setDismissedAt(null)
-  }, [agentId, focus])
-  useEffect(() => {
-    // Only the active session's composer answers (a pane fading out after a switch is still mounted).
-    if (focusRequest && useAgents.getState().activeAgentId === agentId) focus()
-  }, [focusRequest, focus, agentId])
+  }, [agentId])
 
   // set_editor_text from extensions (and edit & resend) replaces the draft text.
   useEffect(() => {
@@ -251,6 +246,8 @@ export function Composer({ agentId }: { agentId: string }) {
 
   const { dragging, onPaste, pickAttachments } = useComposerAttachments({
     cwd,
+    composerRef: rootRef,
+    enabled: !opening.pending,
     patchDraft,
     insertAtCaret
   })

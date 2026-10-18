@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useEffectEvent,
   useRef,
@@ -9,7 +10,9 @@ import {
 } from 'react'
 import { cn } from '../../lib/cn'
 import { isDeleteItemKey, isImeComposing, isRenameItemKey } from '../../lib/keybindings'
-import { ContextMenu, listRowClass, Tooltip, type MenuItem } from '../../ui'
+import { useAgents } from '../../store/agents'
+import { ContextMenu, listRowClass, Spinner, Tooltip, type MenuItem } from '../../ui'
+import { releaseSessionFocus, requestSessionActivation } from '../shell/workspace'
 import { useSessions } from './store'
 
 export interface SessionRowProps {
@@ -35,7 +38,7 @@ export interface SessionRowProps {
    * whose open is expensive (resuming a closed session starts an engine).
    */
   deferOpen?: boolean
-  onOpen: () => void
+  onOpen: (activationRevision?: number) => void
   onRename: (name: string) => void
   onDelete?: () => void
   /** The user is about to act on this row: its context menu opened or an inline rename started. */
@@ -114,6 +117,7 @@ function TitleText({
 
 /** Common double-click interval; a slower second click opens first and then renames. */
 const DOUBLE_CLICK_MS = 250
+const ROW_SPINNER_SIZE = 12
 
 /** A sidebar session row (the rich ListRow look): two lines, live state, hover actions, context menu, inline rename. */
 export function SessionRow({
@@ -137,24 +141,60 @@ export function SessionRow({
   const renaming = useSessions((s) => s.renaming === rowKey)
   const setRenaming = useSessions((s) => s.setRenaming)
   const openTimer = useRef<number | undefined>(undefined)
+  const deferredRevision = useRef<number | null>(null)
+  const [deferredOpening, setDeferredOpening] = useState(false)
+  const activationRevision = useAgents((state) =>
+    deferredOpening ? state.activationRevision : null
+  )
   const intend = useEffectEvent(() => onIntent?.())
+  const cancelDeferredOpen = useCallback(() => {
+    window.clearTimeout(openTimer.current)
+    if (deferredRevision.current !== null) releaseSessionFocus(deferredRevision.current)
+    openTimer.current = undefined
+    deferredRevision.current = null
+    setDeferredOpening(false)
+  }, [])
 
-  useEffect(() => () => window.clearTimeout(openTimer.current), [])
+  useEffect(
+    () => () => {
+      window.clearTimeout(openTimer.current)
+      if (deferredRevision.current !== null) releaseSessionFocus(deferredRevision.current)
+    },
+    []
+  )
   // However the rename started (double-click, F2, the menu, the palette).
   useEffect(() => {
-    if (renaming) intend()
-  }, [renaming])
+    if (renaming) {
+      cancelDeferredOpen()
+      intend()
+    }
+  }, [renaming, cancelDeferredOpen])
+  useEffect(() => {
+    if (deferredRevision.current !== null && activationRevision !== deferredRevision.current) {
+      cancelDeferredOpen()
+    }
+  }, [activationRevision, cancelDeferredOpen])
 
   const onClick = (event: MouseEvent<HTMLButtonElement>) => {
-    window.clearTimeout(openTimer.current)
+    cancelDeferredOpen()
     if (renaming) return
     // detail 0: keyboard activation (Enter / Space), never part of a double-click.
     if (!deferOpen || event.detail === 0) return onOpen()
-    if (event.detail === 1) openTimer.current = window.setTimeout(onOpen, DOUBLE_CLICK_MS)
+    if (event.detail === 1) {
+      const revision = requestSessionActivation()
+      deferredRevision.current = revision
+      setDeferredOpening(true)
+      openTimer.current = window.setTimeout(() => {
+        deferredRevision.current = null
+        cancelDeferredOpen()
+        if (useAgents.getState().activationRevision === revision) onOpen(revision)
+        else releaseSessionFocus(revision)
+      }, DOUBLE_CLICK_MS)
+    }
   }
 
   const onDoubleClick = () => {
-    window.clearTimeout(openTimer.current)
+    cancelDeferredOpen()
     setRenaming(rowKey)
   }
 
@@ -180,13 +220,16 @@ export function SessionRow({
         <button
           type="button"
           data-session-row
+          aria-busy={deferredOpening || undefined}
           aria-current={active ? 'true' : undefined}
           onClick={onClick}
           onDoubleClick={onDoubleClick}
           onKeyDown={onKeyDown}
           className="relative flex w-full items-start gap-2.5 rounded-md py-[7px] pr-2 pl-2.5 text-left focus-visible:outline-none"
         >
-          <span className="flex h-[19px] w-3 shrink-0 items-center justify-center">{leading}</span>
+          <span className="flex h-[19px] w-3 shrink-0 items-center justify-center">
+            {deferredOpening ? <Spinner size={ROW_SPINNER_SIZE} /> : leading}
+          </span>
           <span
             className={cn(
               'flex min-w-0 flex-1 flex-col gap-px',
