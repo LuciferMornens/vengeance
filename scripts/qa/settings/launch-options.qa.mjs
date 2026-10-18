@@ -36,7 +36,7 @@ const ECHO = 'echo "QA_ENV plain=$QA_PLAIN secret=$QA_SECRET_TOKEN"'
 
 async function runPalette(app, title) {
   await dismissToasts(app)
-  await app.page.keyboard.press('Control+KeyK')
+  await app.page.keyboard.press('ControlOrMeta+KeyK')
   const input = app.page
     .getByRole('combobox')
     .or(app.page.getByPlaceholder(/command/i))
@@ -155,10 +155,21 @@ await runSuite(
           const workspaces = state.prefs?.features?.launch?.workspaces ?? {}
           return Object.values(workspaces)[0]
         }, 'workspace defaults in app-state.json')
-        const raw = await readFile(appStatePath, 'utf8')
-        assert.ok(!raw.includes(SECRET) && !raw.includes(PLAIN), 'no clear-text env value on disk')
-        assert.match(saved.env.QA_SECRET_TOKEN, /^vengeance-sealed:v1:/)
-        assert.match(saved.env.QA_PLAIN, /^vengeance-sealed:v1:/)
+        const sealsSecrets = await app.app.evaluate(({ safeStorage }) =>
+          safeStorage.isEncryptionAvailable()
+        )
+        if (sealsSecrets) {
+          const raw = await readFile(appStatePath, 'utf8')
+          assert.ok(
+            !raw.includes(SECRET) && !raw.includes(PLAIN),
+            'no clear-text env value on disk'
+          )
+          assert.match(saved.env.QA_SECRET_TOKEN, /^vengeance-sealed:v1:/)
+          assert.match(saved.env.QA_PLAIN, /^vengeance-sealed:v1:/)
+        } else {
+          // Without OS encryption (Linux's basic password store) the values stay plain at rest.
+          assert.deepEqual([saved.env.QA_SECRET_TOKEN, saved.env.QA_PLAIN], [SECRET, PLAIN])
+        }
         assert.deepEqual(saved.extensionFlags, { 'qavng-style': 'loud-style', 'qavng-loud': true })
         assert.deepEqual(saved.models, ['qa/qa-small', 'qa/qa-vision'])
         assert.equal(saved.offline, true)

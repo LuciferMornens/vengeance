@@ -15,6 +15,8 @@ import {
   X
 } from 'lucide-react'
 import type { SessionListItem } from '@shared/api/sessions'
+import { deleteItemCombo, renameItemCombo } from '../../lib/keybindings'
+import { REVEAL_LABEL } from '../../lib/platform-copy'
 import { useAgents } from '../../store/agents'
 import type { MenuItem } from '../../ui'
 import {
@@ -69,7 +71,7 @@ function fileItems(target: SessionTarget): MenuItem[] {
     },
     { kind: 'separator' },
     {
-      label: 'Show in Explorer',
+      label: REVEAL_LABEL,
       icon: <FolderSearch />,
       disabled: !path,
       onSelect: () => path && revealSession(path)
@@ -104,7 +106,7 @@ export function historyMenu(item: SessionListItem, pinned: boolean): MenuItem[] 
     {
       label: 'Rename',
       icon: <Pencil />,
-      hotkey: 'f2',
+      hotkey: renameItemCombo(),
       onSelect: () => useSessions.getState().setRenaming(item.path)
     },
     {
@@ -119,7 +121,7 @@ export function historyMenu(item: SessionListItem, pinned: boolean): MenuItem[] 
     {
       label: 'Delete…',
       icon: <Trash2 />,
-      hotkey: 'delete',
+      hotkey: deleteItemCombo(),
       danger: true,
       onSelect: () => useSessions.getState().openDialog({ kind: 'delete', target })
     }
@@ -135,7 +137,7 @@ export function openAgentMenu(target: SessionTarget, pinned: boolean): MenuItem[
     {
       label: 'Rename',
       icon: <Pencil />,
-      hotkey: 'f2',
+      hotkey: renameItemCombo(),
       onSelect: () => useSessions.getState().setRenaming(`agent:${agentId}`)
     },
     pinItem(path, pinned),

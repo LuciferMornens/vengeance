@@ -8,13 +8,14 @@ import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { reportShotsDir, ROOT } from '../../lib/app.mjs'
+import { ELECTRON_SWITCHES, unpackedExecutable } from '../../lib/platform.mjs'
 import { isAlive, killTree } from '../../lib/processes.mjs'
 
 export { descendants, isAlive, killTree, processTable } from '../../lib/processes.mjs'
 export { softSteps } from '../../lib/steps.mjs'
 export { tempRoot } from '../../lib/tmp.mjs'
 
-export const PACKAGED_EXE = join(ROOT, 'release', 'win-unpacked', 'Vengeance.exe')
+export const PACKAGED_EXE = unpackedExecutable(join(ROOT, 'release'))
 export const SHOTS_DIR = reportShotsDir('shell')
 const INHERITED_ENGINE_VARS = /^(PI_|AI_AGENT$)/
 const INHERITED_PRIME_VARS = /^PRIME_/
@@ -76,6 +77,8 @@ export async function launchRaw({
   await mkdir(tempFolder, { recursive: true })
   Object.assign(env, {
     VENGEANCE_NO_MICA: '1',
+    // Launches outside test mode would otherwise read the login shell's environment (macOS, Linux).
+    VENGEANCE_SKIP_SHELL_ENV: '1',
     VENGEANCE_USER_DATA: userData,
     TEMP: tempFolder,
     TMP: tempFolder,
@@ -106,7 +109,7 @@ export async function launchRaw({
   }
   const executablePath = exe ? resolve(exe) : null
   if (executablePath && !existsSync(executablePath)) throw new Error(`Missing ${executablePath}`)
-  const args = ['--force-device-scale-factor=1', ...extraArgs]
+  const args = ['--force-device-scale-factor=1', ...ELECTRON_SWITCHES, ...extraArgs]
   const started = Date.now()
   const app = await electron.launch(
     executablePath
@@ -180,13 +183,13 @@ export async function launchRaw({
   }
 }
 
-/** Ctrl+K, type `query`, click the palette row titled `title` (string = start of the row, or RegExp). */
+/** Ctrl/⌘+K, type `query`, click the palette row titled `title` (string = row start, or RegExp). */
 export async function runPalette(page, query, title = query) {
   const input = page.locator('input[role="combobox"]')
   // Never type into a palette that is still playing its close animation (see shell-crash.qa.mjs).
   await input.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => undefined)
   await page.waitForTimeout(250)
-  await page.keyboard.press('Control+k')
+  await page.keyboard.press('ControlOrMeta+k')
   await input.fill(query)
   const option = page
     .getByRole('option')
@@ -242,7 +245,7 @@ export async function electronMemory(app) {
  */
 export async function paletteWithoutClosePause(page, query) {
   const input = page.locator('input[role="combobox"]')
-  await page.keyboard.press('Control+k')
+  await page.keyboard.press('ControlOrMeta+k')
   await input.fill(query)
   const option = page
     .getByRole('option')

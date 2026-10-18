@@ -4,6 +4,7 @@ import { bridge } from '../../lib/bridge'
 import { rpc } from '../../lib/engine'
 import { basename, formatTokens } from '../../lib/format'
 import { invoke, on } from '../../lib/ipc'
+import { REVEAL_LABEL } from '../../lib/platform-copy'
 import { useAgents, withModelChange } from '../../store/agents'
 import { toast } from '../../ui'
 import { providerLabel } from '../chat/ModelPicker'
@@ -341,7 +342,7 @@ export async function exportSessionTo(agentId: string, outputPath: string): Prom
       level: 'success',
       title: 'Session exported',
       description: basename(written),
-      action: { label: 'Show in folder', onClick: () => void invoke('sys:reveal', written) }
+      action: { label: REVEAL_LABEL, onClick: () => void invoke('sys:reveal', written) }
     })
   } catch (error) {
     fail('Could not export the session', error)

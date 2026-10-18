@@ -1,0 +1,6 @@
+# Engine 2 and its helper build with the release pinned in engines.lock.json. Targets are not
+# listed: every platform builds natively, and CI installs the single target its runner needs.
+[toolchain]
+channel = "1.98.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

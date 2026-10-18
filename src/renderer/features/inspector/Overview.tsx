@@ -11,6 +11,7 @@ import {
   pluralize
 } from '../../lib/format'
 import { invoke } from '../../lib/ipc'
+import { REVEAL_LABEL } from '../../lib/platform-copy'
 import type { AgentState } from '../../store/agent-state'
 import { IconButton } from '../../ui'
 import { ContextRing, providerLabel, ThinkingMeter } from '../chat'
@@ -37,21 +38,33 @@ function sessionDuration(agent: AgentState): number | null {
   return end - Math.min(...times)
 }
 
+/**
+ * Session length on one tile line: whole minutes to an hour, then hours and minutes. Below 10
+ * minutes the seconds come apart, so a tile too narrow for them can drop just the seconds.
+ */
+function tileDuration(ms: number): { value: string; seconds?: string } {
+  if (ms < 60_000) return { value: formatDuration(ms) }
+  const seconds = Math.floor(ms / 1000)
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 10) return { value: `${minutes}m`, seconds: `${seconds % 60}s` }
+  return { value: minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${minutes % 60}m` }
+}
+
 /** Thinking level as the composer names it. */
 function thinkingLabel(level: ThinkingLevel): string {
   return level === 'xhigh' ? 'Extra high' : level.charAt(0).toUpperCase() + level.slice(1)
 }
 
-/** `Fast · 2× price (Ultrafast requested)`; just the label at standard speed. */
-function speedSummary(speed: SpeedState): string {
-  if (speed.options.length === 0) return 'Unavailable'
+/** `Fast · 2× price` (just the label at standard speed), with an `Ultrafast requested` note when the model runs another speed. */
+function speedSummary(speed: SpeedState): { value: string; note?: string } {
+  if (speed.options.length === 0) return { value: 'Unavailable' }
   const price = formatSpeedPrice(findSpeedOption(speed, speed.effective))
-  const label = price
-    ? `${SPEED_LABELS[speed.effective]} \u00b7 ${price}`
-    : SPEED_LABELS[speed.effective]
-  return speed.requested === speed.effective
-    ? label
-    : `${label} (${SPEED_LABELS[speed.requested]} requested)`
+  const label = SPEED_LABELS[speed.effective]
+  return {
+    value: price ? `${label} \u00b7 ${price}` : label,
+    note:
+      speed.requested === speed.effective ? undefined : `${SPEED_LABELS[speed.requested]} requested`
+  }
 }
 
 function TokenTile({ label, value, total }: { label: string; value: number; total: number }) {
@@ -113,6 +126,7 @@ export function Overview({ agent }: { agent: AgentState }) {
   const duration = sessionDuration(agent)
   const sessionFile = agent.session?.sessionFile ?? agent.info.sessionFile
   const model = agent.model
+  const speed = hasSpeedControl(agent.speed) ? speedSummary(agent.speed) : null
   const tokenTotal = tokens
     ? Math.max(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite, 1)
     : 1
@@ -126,9 +140,13 @@ export function Overview({ agent }: { agent: AgentState }) {
             <div className="tabular heading text-xl leading-none font-semibold text-fg">
               {percent === null ? '—' : `${Math.min(100, Math.round(percent))}%`}
             </div>
-            <div className="tabular mt-1.5 truncate text-xs text-fg-3">
-              of context · {formatTokens(usage?.tokens)} /{' '}
-              {formatTokens(usage?.contextWindow ?? model?.contextWindow)}
+            {/* The numbers always show; the words drop where they would not fit beside them. */}
+            <div className="tabular @container mt-1.5 flex gap-1 text-xs text-fg-3">
+              <span className="truncate @max-[11em]:hidden">of context ·</span>
+              <span className="shrink-0">
+                {formatTokens(usage?.tokens)} /{' '}
+                {formatTokens(usage?.contextWindow ?? model?.contextWindow)}
+              </span>
             </div>
           </div>
           <div className="shrink-0 text-right">
@@ -165,8 +183,10 @@ export function Overview({ agent }: { agent: AgentState }) {
               '—'
             )}
           </KeyValue>
-          {hasSpeedControl(agent.speed) && (
-            <KeyValue label="Speed">{speedSummary(agent.speed)}</KeyValue>
+          {speed && (
+            <KeyValue label="Speed" note={speed.note}>
+              {speed.value}
+            </KeyValue>
           )}
           {model && (
             <KeyValue label="Pricing">{`$${model.cost.input} in · $${model.cost.output} out / M`}</KeyValue>
@@ -203,14 +223,16 @@ export function Overview({ agent }: { agent: AgentState }) {
             },
             {
               label: 'Duration',
-              value: duration === null ? '—' : formatDuration(duration),
+              ...(duration === null ? { value: '—' } : tileDuration(duration)),
               hint: agent.phase === 'running' ? 'running' : 'active time'
             }
           ].map((tile) => (
-            <div key={tile.label} className="flex flex-col gap-0.5 px-3 py-2.5">
+            <div key={tile.label} className="flex min-w-0 flex-col gap-0.5 px-3 py-2.5">
               <span className="text-2xs text-fg-3">{tile.label}</span>
-              <span className="tabular heading text-lg leading-tight font-semibold text-fg">
-                {tile.value}
+              {/* One line: seconds that do not fit ("59s" of "9m 59s") wrap onto a clipped second line. */}
+              <span className="tabular heading flex h-[1lh] flex-wrap gap-x-[0.25em] overflow-hidden text-lg leading-tight font-semibold text-fg">
+                <span className="min-w-0 truncate">{tile.value}</span>
+                {tile.seconds && <span>{tile.seconds}</span>}
               </span>
               <span
                 className={
@@ -280,7 +302,7 @@ export function Overview({ agent }: { agent: AgentState }) {
                   <Copy />
                 </IconButton>
                 <IconButton
-                  label="Show in Explorer"
+                  label={REVEAL_LABEL}
                   size="xs"
                   onClick={() => void invoke('sys:reveal', sessionFile)}
                 >

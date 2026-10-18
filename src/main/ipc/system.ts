@@ -1,8 +1,10 @@
 import { BrowserWindow, dialog, shell, type IpcMainInvokeEvent } from 'electron'
+import { stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { appState } from '../app-state'
 import type { EngineManager } from '../engine/manager'
 import { agentDir, SESSION_DIR_ENV } from '../features/settings/agent-dir'
+import { physicalPath } from '../paths'
 import { applyWindowTheme } from '../window'
 import { listFiles, readFileBounded, type ReadAccess } from './files'
 import { handle } from './handle'
@@ -42,7 +44,17 @@ export function registerSystemIpc(manager: EngineManager): void {
       defaultPath: options?.defaultPath,
       properties: ['openDirectory', 'createDirectory']
     })
-    return result.canceled ? null : (result.filePaths[0] ?? null)
+    const folder = result.canceled ? undefined : result.filePaths[0]
+    // A linked folder opens as its target, which is the workspace pi records for it.
+    return folder ? physicalPath(folder) : null
+  })
+
+  handle('sys:dropped-folder', async (path) => {
+    try {
+      return (await stat(path)).isDirectory() ? physicalPath(path) : null
+    } catch {
+      return null
+    }
   })
 
   handle('sys:pick-files', async (options, event) => {

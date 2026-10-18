@@ -50,7 +50,6 @@ function useAppearance(): void {
       root.dataset.density = density
       root.dataset.material = platform.material
       root.style.setProperty('--font-scale', String(fontScale))
-      root.style.setProperty('--caption-w', `${platform.captionButtonsWidth}px`)
       void invoke('win:set-theme', resolved)
     }
     apply()
@@ -232,15 +231,16 @@ const SessionPane = memo(function SessionPane({
 })
 
 const SIDEBAR_LIMITS = { minWidth: 208, maxWidth: 420, defaultWidth: 268 }
-// 304px: the tab bar's seven tabs fit with the active one labelled.
+// 304px: the tab bar's seven tabs fit, the active one labelled when there is room.
 const INSPECTOR_LIMITS = { minWidth: 304, maxWidth: 560, defaultWidth: 340 }
 
 /** The full app frame. Feature components are mounted into their slots here. */
 export function AppShell() {
   useAppearance()
   useWorkspaceBoot()
-  // Chrome dims while the window is in the background (like native Windows apps).
-  const focused = useWindowFocused()
+  // Chrome dims while the window is in the background, as native window controls do. Tiling compositors draw none
+  // and move focus with the pointer, where the dim would only flicker.
+  const dimmed = !useWindowFocused() && platform.windowControls !== 'none'
   useEffect(() => registerCoreActions(), [])
 
   const sidebar = useApp((s) => s.prefs.sidebar)
@@ -279,7 +279,7 @@ export function AppShell() {
   useHotkey('mod+comma', () => openSettings())
 
   return (
-    <div className="flex h-full flex-col" data-window-blurred={focused ? undefined : ''}>
+    <div className="flex h-full flex-col" data-window-blurred={dimmed ? '' : undefined}>
       <Titlebar />
       <div className="flex min-h-0 flex-1">
         <SidePanel

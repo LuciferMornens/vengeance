@@ -168,7 +168,7 @@ await runSuite(
         .getByRole('button', { name: `Add a key for ${description}` })
         .click()
       await keyRow(app, RESUME).getByRole('textbox', { name: 'Press a key combination' }).waitFor()
-      await app.page.keyboard.press('Control+KeyL')
+      await app.page.keyboard.press('ControlOrMeta+KeyL')
       await app.page.waitForTimeout(500)
       const picker = app.page.getByPlaceholder(/^Search models/)
       const pickerOpened = await picker.isVisible().catch(() => false)
@@ -178,7 +178,8 @@ await runSuite(
       // settings-12: Vengeance's global hotkeys (mod+l, mod+k, mod+n, ...) stand aside while a key capture
       // has focus, so Ctrl+L is recorded instead of opening the model picker.
       assert.equal(pickerOpened, false, 'Ctrl+L opened the model picker instead of being captured')
-      await waitForBinding(file, RESUME, 'ctrl+l')
+      // macOS records ⌘L, which is mod+l there.
+      await waitForBinding(file, RESUME, process.platform === 'darwin' ? 'super+l' : 'ctrl+l')
     })
 
     await step(

@@ -9,8 +9,11 @@
 
 :root {
   /* Typography */
-  --font-ui: 'Geist Variable', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
-  --font-mono: 'Geist Mono Variable', 'Cascadia Code', Consolas, ui-monospace, monospace;
+  /* Geist is bundled; the system fonts after it (Windows, macOS, Linux) fill in glyphs it lacks (⌘ ⌥ ⇧ ⌃, box drawing). */
+  --font-ui: 'Geist Variable', 'Segoe UI Variable Text', 'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui,
+    sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Cascadia Code', Consolas, 'SF Mono', Menlo, 'DejaVu Sans Mono',
+    'Liberation Mono', ui-monospace, monospace;
   --font-scale: 1;
   --text-2xs: calc(10.5px * var(--font-scale));
   --text-xs: calc(11.5px * var(--font-scale));
@@ -42,8 +45,18 @@
 
   /* Layout */
   --titlebar-h: 40px;
+  /*
+   * Titlebar space under the native window controls: macOS traffic lights at the start, Windows and Linux caption
+   * buttons at the end. The Window Controls Overlay reports their live geometry (env titlebar-area-*); without it
+   * the reserves, the platform's estimate set by lib/window-controls.ts, stand in.
+   */
+  --titlebar-reserve-start: 0px;
+  --titlebar-reserve-end: 0px;
+  --titlebar-inset-start: env(titlebar-area-x, var(--titlebar-reserve-start));
+  --titlebar-inset-end: calc(
+    100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - var(--titlebar-reserve-end)))
+  );
   --pane-header-h: 44px;
-  --caption-w: 138px;
   --transcript-w: 760px;
   --row-h: 32px;
   --control-h: 32px;

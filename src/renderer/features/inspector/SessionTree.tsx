@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { Bot, Flag, GitBranch, Layers, Puzzle, Settings2, SquareTerminal, Wrench } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { formatRelativeTime, pluralize } from '../../lib/format'
+import { isImeComposing } from '../../lib/keybindings'
 import { spring } from '../../lib/motion'
 import { Badge, Skeleton, Tooltip } from '../../ui'
 import { primaryChild, TREE_FILTER_MODES, type BranchNode, type BranchNodeKind, type TreeFilterMode } from './tree-model'
@@ -175,7 +176,7 @@ function LabelField({ node, ctx }: { node: BranchNode; ctx: TreeCtx }) {
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         e.stopPropagation()
-        if (e.key === 'Enter') void commit()
+        if (e.key === 'Enter' && !isImeComposing(e)) void commit()
         else if (e.key === 'Escape') ctx.setEditing(null)
       }}
       className="mt-1 h-6 w-full min-w-0 rounded-sm bg-surface-1 px-2 text-xs text-fg shadow-[inset_0_0_0_1px_var(--hairline-strong)] outline-none placeholder:text-fg-3 focus-visible:shadow-focus focus-visible:outline-none"

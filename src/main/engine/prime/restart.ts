@@ -525,7 +525,9 @@ function processIsAlive(processId: number): boolean {
     process.kill(processId, 0)
     return true
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false
+    const code = (error as NodeJS.ErrnoException).code
+    // On macOS and Linux, EPERM means another user's process has the ID now: this user's runtime is gone.
+    if (code === 'ESRCH' || (code === 'EPERM' && process.platform !== 'win32')) return false
     throw error
   }
 }

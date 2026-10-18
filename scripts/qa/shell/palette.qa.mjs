@@ -85,7 +85,7 @@ async function launch() {
 
 /** Every command title the root palette page lists, with the query cleared. */
 async function paletteTitles() {
-  await page().keyboard.press('Control+k')
+  await page().keyboard.press('ControlOrMeta+k')
   await page().getByRole('combobox').waitFor()
   await sleep(300)
   const titles = await page()
@@ -303,7 +303,7 @@ try {
     async () => {
       await closeOverlays()
       await composer().click()
-      await page().keyboard.press('Control+/')
+      await page().keyboard.press('ControlOrMeta+/')
       await expectDialog(/shortcuts/i)
       await shot(page(), 'palette-shortcuts-sheet')
       const rows = await page()
@@ -344,30 +344,30 @@ try {
   )
 
   const HOTKEYS = [
-    ['Control+b', 'sidebar', async () => (await appState()).prefs.sidebar?.open],
-    ['Control+i', 'inspector', async () => (await appState()).prefs.inspector?.open],
+    ['b', 'sidebar', async () => (await appState()).prefs.sidebar?.open],
+    ['i', 'inspector', async () => (await appState()).prefs.inspector?.open],
     [
-      'Control+t',
+      't',
       'thinking visibility (global hideThinkingBlock)',
       async () =>
         JSON.parse((await agentDir.readText('settings.json').catch(() => '{}')) || '{}')
           .hideThinkingBlock === true
     ],
-    ['Control+o', 'tool output', () => page().locator('main [aria-expanded="true"]').count()]
+    ['o', 'tool output', () => page().locator('main [aria-expanded="true"]').count()]
   ]
-  for (const [combo, what, read] of HOTKEYS) {
+  for (const [key, what, read] of HOTKEYS) {
     await step(
-      `shortcut ${combo} (${what}) works from the composer, keeps focus there`,
+      `shortcut Control+${key} (${what}) works from the composer, keeps focus there`,
       async () => {
         await closeOverlays()
         await composer().click()
         const before = await read()
-        await page().keyboard.press(combo)
+        await page().keyboard.press(`ControlOrMeta+${key}`)
         await waitUntil(async () => (await read()) !== before, { label: `${what} changed` })
         const focused = await page().evaluate(() =>
           document.activeElement?.getAttribute('aria-label')
         )
-        await page().keyboard.press(combo)
+        await page().keyboard.press(`ControlOrMeta+${key}`)
         await waitUntil(async () => (await read()) === before, { label: `${what} restored` })
         assert.equal(focused, 'Message', 'focus stays in the composer')
       }
@@ -384,14 +384,14 @@ try {
         )
       await closeOverlays()
       await composer().click()
-      await page().keyboard.press('Control+k')
+      await page().keyboard.press('ControlOrMeta+k')
       await page().getByRole('combobox').waitFor()
-      await page().keyboard.press('Control+k')
+      await page().keyboard.press('ControlOrMeta+k')
       await page().getByRole('combobox').waitFor({ state: 'hidden' })
       await sleep(300)
       const afterToggle = await focusedLabel()
       await composer().click()
-      await page().keyboard.press('Control+k')
+      await page().keyboard.press('ControlOrMeta+k')
       await page().getByRole('combobox').waitFor()
       await page().keyboard.press('Escape')
       await page().getByRole('combobox').waitFor({ state: 'hidden' })
@@ -399,7 +399,7 @@ try {
       const afterEscape = await focusedLabel()
       console.log(`      focus after Ctrl+K close: ${afterToggle}; after Escape: ${afterEscape}`)
       assert.deepEqual([afterToggle, afterEscape], ['Message', 'Message'])
-      await page().keyboard.press('Control+k')
+      await page().keyboard.press('ControlOrMeta+k')
       await page().getByRole('combobox').waitFor()
       await page().keyboard.press('Escape')
       await page().getByRole('combobox').waitFor({ state: 'hidden' })
@@ -423,12 +423,12 @@ try {
   await step('shortcut Control+, opens settings; Control+n opens a new session', async () => {
     await closeOverlays()
     await composer().click()
-    await page().keyboard.press('Control+,')
+    await page().keyboard.press('ControlOrMeta+,')
     await expectDialog(/Settings/)
     await closeOverlays()
     const before = await agentId()
     await composer().click()
-    await page().keyboard.press('Control+n')
+    await page().keyboard.press('ControlOrMeta+n')
     await waitUntil(async () => (await agentId()) !== before, { label: 'new session' })
     // The previous session's pane fades out with its composer still in the DOM (first in order).
     await waitUntil(async () => (await page().getByRole('textbox', { name: 'Message' }).count()) === 1, {
@@ -445,7 +445,7 @@ try {
       await composer().press('Enter')
       await run.test('waitForIdle', 60_000)
       await composer().click()
-      await page().keyboard.press('Control+l')
+      await page().keyboard.press('ControlOrMeta+l')
       await waitUntil(
         async () =>
           (await page().getByRole('listbox').count()) +
@@ -463,7 +463,7 @@ try {
       await waitUntil(async () => (await agent()).thinkingLevel !== level, {
         label: `thinking from ${level}`
       })
-      await page().keyboard.press('Control+p')
+      await page().keyboard.press('ControlOrMeta+p')
       await sleep(600)
     }
   )
@@ -474,7 +474,7 @@ try {
       await closeOverlays()
       await composer().fill('')
       await composer().click()
-      await page().keyboard.press('Control+x')
+      await page().keyboard.press('ControlOrMeta+x')
       const toastText = await copyToast()
       assert.match(
         await run.app.evaluate(({ clipboard }) => clipboard.readText()),
@@ -482,8 +482,8 @@ try {
         `after "${toastText}"`
       )
       await composer().fill('cut this')
-      await composer().press('Control+a')
-      await composer().press('Control+x')
+      await composer().press('ControlOrMeta+a')
+      await composer().press('ControlOrMeta+x')
       await sleep(300)
       assert.equal(await run.app.evaluate(({ clipboard }) => clipboard.readText()), 'cut this')
       assert.equal(

@@ -17,19 +17,40 @@ const WIDTH_SWEEP_STEP = 24
 /** Narrowest center pane beside docked panels (MIN_CENTER_WIDTH in shell/panel-layout.ts). */
 const MIN_CENTER_WIDTH = 480
 
+/** `WxH` sizes the display keeps the window from reaching: tried once, then skipped. */
+const unreachable = new Set()
+
+/**
+ * Resize the window's content to `width`×`height`. Resolves false (logged once) when the size is
+ * larger than the display's work area and the window manager clamps it there, as macOS does with
+ * every window; any other failure to reach the size throws.
+ */
 async function resize(app, page, { width, height }) {
-  await app.evaluate(
-    ({ BrowserWindow }, size) => {
+  const key = `${width}x${height}`
+  if (unreachable.has(key)) return false
+  const workArea = await app.evaluate(
+    ({ BrowserWindow, screen }, size) => {
       const win = BrowserWindow.getAllWindows()[0]
       win.setContentSize(size.width, size.height)
       win.center()
+      return screen.getDisplayMatching(win.getBounds()).workAreaSize
     },
     { width, height }
   )
-  await page.waitForFunction(
-    (size) => window.innerWidth === size.width && window.innerHeight === size.height,
-    { width, height }
-  )
+  try {
+    await page.waitForFunction(
+      (size) => window.innerWidth === size.width && window.innerHeight === size.height,
+      { width, height }
+    )
+    return true
+  } catch (error) {
+    if (width <= workArea.width && height <= workArea.height) throw error
+    unreachable.add(key)
+    console.log(
+      `  ○ ${key} skipped: larger than the display's ${workArea.width}x${workArea.height} work area`
+    )
+    return false
+  }
 }
 
 /** Where the composer footer wraps or anything in the session pane overflows horizontally. */
@@ -96,7 +117,7 @@ export async function scenarios(page, { app, shot, test, wait, MOCK_WORKSPACE })
     [SIZES[2], true],
     [SIZES[3], true]
   ]) {
-    await resize(app, page, size)
+    if (!(await resize(app, page, size))) continue
     await test('setPrefs', {
       sidebar: { open: true, width: 268 },
       inspector: { open: inspector, width: 340, tab: 'overview' }
@@ -128,7 +149,7 @@ export async function scenarios(page, { app, shot, test, wait, MOCK_WORKSPACE })
   await test('answerDialog', 'No, just SessionStore')
 
   for (const size of SIZES) {
-    await resize(app, page, size)
+    if (!(await resize(app, page, size))) continue
     for (const [label, sidebar, inspector] of [
       ['bare', false, false],
       ['sidebar', true, false],
@@ -168,7 +189,7 @@ export async function scenarios(page, { app, shot, test, wait, MOCK_WORKSPACE })
         inspector: { open: inspector, width: 340, tab: 'overview' }
       })
       for (let width = SIZES[0].width; width <= 1600; width += WIDTH_SWEEP_STEP) {
-        await resize(app, page, { width, height: SIZES[1].height })
+        if (!(await resize(app, page, { width, height: SIZES[1].height }))) continue
         await wait(250)
         const where = `${width}px, text ${fontScale * 100}%, inspector ${inspector}`
         problems.push(...(await layoutProblems(page, where)))
@@ -181,7 +202,7 @@ export async function scenarios(page, { app, shot, test, wait, MOCK_WORKSPACE })
 
   await test('mockPlay', { resume: true, instant: true })
   for (const size of [SIZES[0], SIZES[1], SIZES[3]]) {
-    await resize(app, page, size)
+    if (!(await resize(app, page, size))) continue
     await test('setPrefs', {
       sidebar: { open: true, width: 268 },
       inspector: { open: true, width: 340, tab: 'overview' }
@@ -201,7 +222,7 @@ export async function scenarios(page, { app, shot, test, wait, MOCK_WORKSPACE })
 
   await test('setPrefs', { inspector: { open: false, width: 340, tab: 'overview' } })
   for (const size of [SIZES[0], SIZES[3]]) {
-    await resize(app, page, size)
+    if (!(await resize(app, page, size))) continue
     await test('openSettings', 'general')
     await shot(`responsive-${size.name}-settings`, { settleMs: 700 })
     await test('openSettings', 'extensions')

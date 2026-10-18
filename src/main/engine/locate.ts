@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import { childBaseEnv, childEnvVariable, shellEnvironmentReady } from '../shell-env'
 import { bundledEngine } from './bundled'
 
 const execFileAsync = promisify(execFile)
@@ -121,8 +122,7 @@ function fromOverride(overridePath: string): Found | null {
 }
 
 function pathDirs(): string[] {
-  const raw = process.env.PATH ?? process.env.Path ?? ''
-  return raw.split(delimiter).filter(Boolean)
+  return (childEnvVariable('PATH') ?? '').split(delimiter).filter(Boolean)
 }
 
 function locatePackage(overridePath: string | null): Found | null {
@@ -153,6 +153,7 @@ async function findSystemNode(): Promise<NodeRuntime | null> {
       if (!isFile(candidate)) continue
       try {
         const { stdout } = await execFileAsync(candidate, ['--version'], {
+          env: childBaseEnv(),
           windowsHide: true,
           timeout: 10_000
         })
@@ -179,11 +180,16 @@ export class EngineNotFoundError extends Error {
 
 let cached: { key: string; location: EngineLocation } | null = null
 
-/** Locate pi + a Node runtime able to run it. Cached per override path; pass `refresh` after updates. */
+/**
+ * Locate pi + a Node runtime able to run it. Cached per override path; pass `refresh` after updates. Every pi
+ * spawn locates its engine first, so this waits for the login shell environment (shell-env.ts), which also
+ * supplies the PATH a custom location's Node is found on.
+ */
 export async function locateEngine(
   overridePath: string | null,
   refresh = false
 ): Promise<EngineLocation> {
+  await shellEnvironmentReady()
   const key = overridePath ?? ''
   if (!refresh && cached && cached.key === key) return cached.location
   const found = locatePackage(overridePath)

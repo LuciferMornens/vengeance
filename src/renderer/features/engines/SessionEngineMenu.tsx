@@ -1,12 +1,31 @@
 import { useState } from 'react'
 import { ArrowRightLeft, ChevronDown, Cpu, Settings, SquarePen } from 'lucide-react'
 import { ENGINE_LABELS } from '@shared/api/engine'
+import { cn } from '../../lib/cn'
 import { useAgents } from '../../store/agents'
 import { Button, Dialog, DropdownMenu, toast } from '../../ui'
 import { prepareLaunch } from '../launch/spawn'
 import { openSettingsSection } from '../palette/settings-sections'
 import { agentOwnTitle } from '../sessions/model'
 import { newSession } from '../shell/workspace'
+
+/**
+ * The trigger turns icon-only at the footer's first step (composer/footer.tsx). A running Engine 2 footer also
+ * holds Controls and token speed beside Steer and Follow-up, so it compacts sooner, together with Controls
+ * (prime-controls.tsx). Idle, it keeps the shared step.
+ */
+const COMPACT = {
+  shared: {
+    trigger:
+      '@max-[52em]/composer:w-7 @max-[52em]/composer:justify-center @max-[52em]/composer:px-0',
+    label: '@max-[52em]/composer:hidden'
+  },
+  primeRunning: {
+    trigger:
+      '@max-[62em]/composer:w-7 @max-[62em]/composer:justify-center @max-[62em]/composer:px-0',
+    label: '@max-[62em]/composer:hidden'
+  }
+}
 
 export function SessionEngineMenu({ agentId }: { agentId: string }) {
   const engine = useAgents((state) => state.agents[agentId]?.info.engine ?? 'pi')
@@ -26,6 +45,7 @@ export function SessionEngineMenu({ agentId }: { agentId: string }) {
         ? 'Wait for this conversation to finish its current work.'
         : undefined
   const canSwitch = !unavailableReason
+  const compact = engine === 'prime' && phase === 'running' ? COMPACT.primeRunning : COMPACT.shared
 
   async function switchEngine(): Promise<void> {
     const agent = useAgents.getState().agents[agentId]
@@ -90,13 +110,16 @@ export function SessionEngineMenu({ agentId }: { agentId: string }) {
             type="button"
             aria-label={`Conversation engine: ${ENGINE_LABELS[engine]}`}
             disabled={preparing || status === 'starting'}
-            className="pressable inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium whitespace-nowrap text-fg-3 hover:bg-hover hover:text-fg-2 disabled:opacity-50 @max-[52em]/composer:w-7 @max-[52em]/composer:justify-center @max-[52em]/composer:px-0"
+            className={cn(
+              'pressable inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium whitespace-nowrap text-fg-3 hover:bg-hover hover:text-fg-2 disabled:opacity-50',
+              compact.trigger
+            )}
           >
             <Cpu className="size-3.5 shrink-0" />
-            <span className="@max-[52em]/composer:hidden">
+            <span className={compact.label}>
               {preparing ? 'Switching…' : ENGINE_LABELS[engine]}
             </span>
-            <ChevronDown className="size-3 @max-[52em]/composer:hidden" />
+            <ChevronDown className={cn('size-3', compact.label)} />
           </button>
         }
       />

@@ -1,0 +1,14 @@
+# Every change needs the maintainer's review.
+* @LuciferMornens
+
+# Release, build and supply-chain paths. Listed explicitly so they keep a required owner even if
+# the default above changes.
+/.github/ @LuciferMornens
+/scripts/ci/ @LuciferMornens
+/electron-builder.yml @LuciferMornens
+/engines.lock.json @LuciferMornens
+/rust-toolchain.toml @LuciferMornens
+/patches/ @LuciferMornens
+/scripts/engines/ @LuciferMornens
+/scripts/build-prime-auth.mjs @LuciferMornens
+/resources/prime-auth/ @LuciferMornens

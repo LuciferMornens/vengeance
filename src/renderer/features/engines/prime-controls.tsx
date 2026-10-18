@@ -54,6 +54,21 @@ const primeControlTabs = lazyWithPreload(() =>
 )
 const PrimeControlTabs = primeControlTabs.Component
 
+/**
+ * Icon-only at the footer's first step (composer/footer.tsx). While running, the footer also holds Steer and
+ * Follow-up, so Controls compacts sooner, together with the engine menu (SessionEngineMenu).
+ */
+const COMPACT = {
+  idle: {
+    button: '@max-[52em]/composer:w-6 @max-[52em]/composer:px-0',
+    label: '@max-[52em]/composer:hidden'
+  },
+  running: {
+    button: '@max-[62em]/composer:w-6 @max-[62em]/composer:px-0',
+    label: '@max-[62em]/composer:hidden'
+  }
+}
+
 export function PrimeControls({
   agentId,
   disabled = false
@@ -63,6 +78,9 @@ export function PrimeControls({
 }) {
   const state = usePrimeControls()
   const ephemeral = useAgents((store) => store.agents[agentId]?.info.args.noSession === true)
+  const compact = useAgents((store) =>
+    store.agents[agentId]?.phase === 'running' ? COMPACT.running : COMPACT.idle
+  )
   const [confirmStop, setConfirmStop] = useState(false)
   const action = usePrimeAction()
   const requested = state.agentId === agentId
@@ -85,9 +103,9 @@ export function PrimeControls({
           leading={<SlidersHorizontal />}
           disabled={disabled}
           onClick={() => openPrimeControls(agentId)}
-          className="@max-[52em]/composer:w-6 @max-[52em]/composer:px-0"
+          className={compact.button}
         >
-          <span className="@max-[52em]/composer:hidden">Controls</span>
+          <span className={compact.label}>Controls</span>
         </Button>
       </Tooltip>
       <Dialog

@@ -19,9 +19,11 @@ export function formatDuration(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return ''
   if (ms < 1000) return `${Math.round(ms)}ms`
   const s = ms / 1000
-  if (s < 60) return `${s < 10 ? s.toFixed(1) : Math.round(s)}s`
-  const m = Math.floor(s / 60)
-  return `${m}m ${Math.round(s % 60)}s`
+  if (s < 10) return `${s.toFixed(1)}s`
+  // Rounded before it is split, so 59.6 s reads "1m 0s", never "60s" or "1m 60s".
+  const whole = Math.round(s)
+  if (whole < 60) return `${whole}s`
+  return `${Math.floor(whole / 60)}m ${whole % 60}s`
 }
 
 export function formatRelativeTime(epochMs: number, now = Date.now()): string {

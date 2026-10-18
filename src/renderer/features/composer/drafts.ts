@@ -17,6 +17,8 @@ export interface ImageAttachment {
 export interface PendingAttachment {
   id: string
   name: string
+  /** Decoded already, waiting for an image added before it: attachments keep their paste/drop order. */
+  image?: ImageAttachment
 }
 
 export interface Draft {
@@ -55,7 +57,9 @@ export const useDrafts = create<DraftStore>()((set, get) => ({
   clear(agentId) {
     set((state) => {
       const current = state.drafts[agentId] ?? EMPTY
-      return { drafts: { ...state.drafts, [agentId]: { ...EMPTY, editorNonce: current.editorNonce } } }
+      return {
+        drafts: { ...state.drafts, [agentId]: { ...EMPTY, editorNonce: current.editorNonce } }
+      }
     })
   }
 }))
@@ -98,5 +102,7 @@ export function pushHistory(text: string): void {
   const prefs = useApp.getState().prefs.features.composer ?? {}
   const history = (prefs.history ?? []).filter((entry) => entry !== text)
   history.push(text)
-  useApp.getState().updateFeaturePrefs('composer', { ...prefs, history: history.slice(-HISTORY_LIMIT) })
+  useApp
+    .getState()
+    .updateFeaturePrefs('composer', { ...prefs, history: history.slice(-HISTORY_LIMIT) })
 }

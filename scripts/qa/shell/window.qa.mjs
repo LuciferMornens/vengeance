@@ -105,19 +105,21 @@ try {
     assert.deepEqual(saved, FINAL)
   })
 
-  await step('frameless titlebar: drag region, 138px caption reserve, overlay rect', async () => {
+  // Native controls: Windows and floating Linux caption buttons on the right, macOS traffic lights
+  // on the left (the overlay starts after them), none under a tiling Linux compositor.
+  await step('frameless titlebar: drag region, native controls reserve, overlay rect', async () => {
     await openSession()
     const info = await run.page.evaluate(() => {
       const header = document.querySelector('header')
       const style = getComputedStyle(header)
       const rect = header.getBoundingClientRect()
-      const reserveLeft = window.innerWidth - window.vengeance.platform.captionButtonsWidth
       const interactive = [...header.querySelectorAll('button, [role="button"], a, input')]
         .filter((el) => el.getBoundingClientRect().width > 0)
         .map((el) => {
           const r = el.getBoundingClientRect()
           return {
             name: el.getAttribute('aria-label') || el.textContent.trim().slice(0, 30),
+            left: r.left,
             right: r.right,
             region:
               getComputedStyle(el).webkitAppRegion ||
@@ -126,10 +128,10 @@ try {
         })
       const overlay = navigator.windowControlsOverlay
       return {
+        platform: window.vengeance.platform,
         region: style.webkitAppRegion || style.getPropertyValue('-webkit-app-region'),
         height: rect.height,
         paddingRight: parseFloat(style.paddingRight),
-        reserveLeft,
         interactive,
         overlayVisible: overlay?.visible ?? null,
         overlayRect: overlay ? overlay.getTitlebarAreaRect().toJSON() : null,
@@ -138,23 +140,41 @@ try {
     })
     assert.equal(info.region, 'drag')
     assert.equal(info.height, 40)
-    assert.ok(info.paddingRight >= 138, `padding-right ${info.paddingRight}`)
     for (const el of info.interactive) {
-      assert.ok(
-        el.right <= info.reserveLeft,
-        `${el.name} overlaps the caption buttons (${el.right} > ${info.reserveLeft})`
-      )
       assert.equal(el.region, 'no-drag', `${el.name} must be no-drag to be clickable`)
     }
-    assert.equal(info.overlayVisible, true)
-    assert.ok(info.overlayRect.width <= info.width - 138 + 1, JSON.stringify(info.overlayRect))
+    const { windowControls, titlebarInsetLeft } = info.platform
+    if (windowControls === 'none') {
+      assert.equal(info.overlayVisible, false)
+      assert.equal(info.paddingRight, 8)
+    } else {
+      assert.equal(info.overlayVisible, true)
+      const start = info.overlayRect.x
+      const end = info.overlayRect.x + info.overlayRect.width
+      for (const el of info.interactive) {
+        assert.ok(
+          el.left >= start && el.right <= end,
+          `${el.name} overlaps the window controls (${el.left}–${el.right} outside ${start}–${end})`
+        )
+      }
+      if (windowControls === 'left') {
+        assert.ok(
+          Math.abs(titlebarInsetLeft - start) <= 1,
+          `the traffic-light inset ${titlebarInsetLeft} must match the overlay's ${start}`
+        )
+      }
+    }
+    if (process.platform === 'win32') {
+      assert.ok(info.paddingRight >= 138, `padding-right ${info.paddingRight}`)
+      assert.ok(info.overlayRect.width <= info.width - 138 + 1, JSON.stringify(info.overlayRect))
+    }
     await shot(run.page, 'window-1-titlebar')
   })
 
   await step('sidebar: Ctrl+B and the titlebar button toggle it, the state persists', async () => {
     const open = async () => (await run.test('appState')).prefs.sidebar.open
     assert.equal(await open(), true)
-    await run.page.keyboard.press('Control+b')
+    await run.page.keyboard.press('ControlOrMeta+b')
     await waitUntil(async () => (await open()) === false, { label: 'sidebar closed' })
     await run.page.getByRole('button', { name: 'Show sidebar' }).click()
     await waitUntil(async () => (await open()) === true, { label: 'sidebar open' })
@@ -166,7 +186,7 @@ try {
       .first()
       .evaluate((el) => el.getBoundingClientRect().width)
     assert.equal(width, 0)
-    await run.page.keyboard.press('Control+b')
+    await run.page.keyboard.press('ControlOrMeta+b')
     await waitUntil(async () => (await open()) === true, { label: 'sidebar reopened' })
   })
 
@@ -198,11 +218,18 @@ try {
   )
 
   await step(
-    'inspector: Ctrl+I and the header button toggle it; resize 280..560 and persist',
+    'inspector: Ctrl+I and the header button toggle it; resize 304..560 and persist',
     async () => {
       const prefs = async () => (await run.test('appState')).prefs.inspector
+      // The inspector docks at 304..560px while the center pane keeps 480px (panel-layout.ts): widen
+      // the window so the 560px maximum fits beside the 268px sidebar.
+      await run.win((win, b) => win.setBounds(b), { ...NORMAL, width: 1320 })
+      await waitUntil(
+        async () => (await run.page.evaluate(() => window.innerWidth)) >= 480 + 268 + 560,
+        { label: 'window wide enough to dock 560px' }
+      )
       await run.page.getByRole('textbox', { name: 'Message' }).first().click()
-      await run.page.keyboard.press('Control+i')
+      await run.page.keyboard.press('ControlOrMeta+i')
       await waitUntil(async () => (await prefs()).open === true, { label: 'inspector open' })
       await run.page.getByRole('button', { name: 'Hide inspector' }).first().click()
       await waitUntil(async () => (await prefs()).open === false, { label: 'inspector closed' })
@@ -211,9 +238,9 @@ try {
       const handle = run.page.getByRole('separator', { name: 'Resize inspector' })
       await handle.focus()
       await run.page.keyboard.press('Home')
-      await waitUntil(async () => (await prefs()).width === 280, { label: 'min 280' })
+      await waitUntil(async () => (await prefs()).width === 304, { label: 'min 304' })
       await run.page.keyboard.press('ArrowLeft')
-      await waitUntil(async () => (await prefs()).width === 296, {
+      await waitUntil(async () => (await prefs()).width === 320, {
         label: 'ArrowLeft grows the right panel'
       })
       await run.page.keyboard.press('End')
@@ -226,6 +253,7 @@ try {
       await run.page.mouse.up()
       await waitUntil(async () => (await prefs()).width === 400, { label: 'dragged to 400' })
       await shot(run.page, 'window-2-inspector-open')
+      await run.win((win, b) => win.setBounds(b), NORMAL)
       await sleep(500)
       await run.close()
       const saved = (await savedState()).prefs
@@ -243,14 +271,18 @@ try {
     async () => {
       for (const name of ['Resize sidebar', 'Resize inspector']) {
         const box = await run.page.getByRole('separator', { name }).boundingBox()
-        const hittable = await run.page.evaluate((b) => {
-          let count = 0
-          for (let dx = 0; dx < b.width; dx++) {
-            const el = document.elementFromPoint(b.x + dx + 0.5, b.y + 300)
-            if (el?.getAttribute('role') === 'separator') count++
-          }
-          return count
-        }, box)
+        // The grip's own line (wider while hovered or focused) counts: its presses reach the grip.
+        const hittable = await run.page.evaluate(
+          ([b, label]) => {
+            let count = 0
+            for (let dx = 0; dx < b.width; dx++) {
+              const el = document.elementFromPoint(b.x + dx + 0.5, b.y + 300)
+              if (el?.closest('[role="separator"]')?.getAttribute('aria-label') === label) count++
+            }
+            return count
+          },
+          [box, name]
+        )
         assert.ok(hittable >= 6, `${name}: only ${hittable}px of ${box.width}px can be grabbed`)
       }
     }
@@ -350,7 +382,7 @@ try {
     )
     await run.test('closeSettings')
     await shot(run.page, 'window-5-text-125')
-    await run.page.keyboard.press('Control+,')
+    await run.page.keyboard.press('ControlOrMeta+,')
     await slider.focus()
     await run.page.keyboard.press('Home')
     await waitUntil(async () => (await run.test('appState')).prefs.fontScale === 0.85, {
@@ -376,12 +408,12 @@ try {
       await run.page.mouse.wheel(0, -400)
       await run.page.keyboard.up('Control')
       await sleep(300)
-      await run.page.keyboard.press('Control+=')
+      await run.page.keyboard.press('ControlOrMeta+=')
       await sleep(300)
       const zoomed = await zoom()
       console.log(`      zoom factor after Ctrl+wheel / Ctrl+= : ${zoomed}`)
       if (zoomed !== 1) {
-        await run.page.keyboard.press('Control+0')
+        await run.page.keyboard.press('ControlOrMeta+0')
         await sleep(300)
         assert.equal(await zoom(), 1, 'Ctrl+0 resets the zoom')
       }

@@ -3,7 +3,7 @@
 
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 @custom-variant light (&:where([data-theme='light'], [data-theme='light'] *));
-/* Window in the background (native Windows apps dim their chrome). */
+/* Window in the background (native apps dim their chrome; AppShell sets it). */
 @custom-variant window-blurred (&:where([data-window-blurred] *));
 /* A short window (laptop height, half-height snap): heroes drop secondary content and tighten. */
 @custom-variant short (@media (max-height: 760px));
@@ -239,12 +239,17 @@
    * the panes are covered, so toasts ignore those insets. A sheet with a 244px nav column (Settings sets
    * data-sheet-nav) docks them bottom-left over the nav, never over its centered content; sheets without a nav
    * keep them bottom-right and pad the end of their scroll column so every control scrolls clear.
+   * While the transcript's "Jump to latest" pill shows ([data-jump-latest], centred 14-46px above the composer),
+   * toasts float 8px above it: a narrow pane would otherwise put the pill under the stack.
    * Defined on the toaster, never on :root: changing a custom property there restyles every element.
    */
   [data-toaster] {
     --toast-w: 340px;
     --toast-right: calc(var(--toast-inset-right, 0px) + 16px);
     --toast-bottom: calc(var(--toast-inset-bottom, 0px) + 16px);
+  }
+  :root:has([data-jump-latest]) [data-toaster] {
+    --toast-bottom: calc(var(--toast-inset-bottom, 0px) + 46px);
   }
   :root[data-sheet='full'] [data-toaster] {
     --toast-w: 300px;

@@ -5,6 +5,7 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import type { EngineLocationInfo } from '@shared/api/engine'
+import { childBaseEnv, shellEnvironmentReady } from '../../shell-env'
 import { PRIME_CAPABILITIES } from './capabilities'
 import { bundledEngine } from '../bundled'
 import { bundledPrimeRuntime } from './bundled-runtime'
@@ -67,7 +68,7 @@ async function describeExecutable(
       windowsHide: true,
       timeout: VERSION_TIMEOUT_MS,
       maxBuffer: VERSION_OUTPUT_LIMIT,
-      env: { ...process.env, PI_PACKAGE_DIR: dirname(executablePath), DO_NOT_TRACK: '1' }
+      env: { ...childBaseEnv(), PI_PACKAGE_DIR: dirname(executablePath), DO_NOT_TRACK: '1' }
     }).then((result) => {
       const value = /\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?/.exec(result.stdout)?.[0]
       if (!value) throw new Error('Engine 2 did not return a valid version')
@@ -85,9 +86,11 @@ async function describeExecutable(
   return { executablePath, packageDir: dirname(executablePath), version, source }
 }
 
+/** Every Engine 2 spawn locates its executable first, so this waits for the login shell environment. */
 export async function locatePrimeEngine(
   overridePath?: string | null
 ): Promise<PrimeEngineLocation> {
+  await shellEnvironmentReady()
   const override = overridePath ?? process.env.VENGEANCE_PRIME_EXECUTABLE
   if (override) {
     const executable = await executableIn(override)

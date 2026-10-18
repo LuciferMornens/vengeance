@@ -30,6 +30,12 @@ import { workspaceSessionDir } from '../qa/sessions/lib/session-files.mjs'
 import { longAnswer, longSession, shortSession } from './lib/fixtures.mjs'
 import { byKind, mib, sampleTree } from './lib/tree-sample.mjs'
 
+// Task Manager's private working set and the user32 window calls only exist on Windows.
+if (process.platform !== 'win32') {
+  console.error('footprint.mjs measures Windows process trees; run it on Windows.')
+  process.exit(1)
+}
+
 const SETTLE_MS = Number(argValue('--settle') ?? 30_000)
 /** How long a minimized scenario waits before sampling: Chromium trims a hidden window within about 30 s. */
 const MINIMIZED_SETTLE_MS = 45_000

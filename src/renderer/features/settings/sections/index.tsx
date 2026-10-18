@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import type { SettingsSectionId } from '@shared/api/settings-schema'
 import type { EngineCapabilities, EngineId } from '@shared/api/engine'
+import { shortcutText } from '../../../lib/keybindings'
 import { PrimeResourcesSection, PrimeSettingsGroups } from '../../engines/prime-settings'
 import { PrimeMcpSection } from '../../engines/prime-mcp'
 import { SchemaGroups } from '../fields'
@@ -72,7 +73,7 @@ export const SECTIONS: SectionDef[] = [
     label: 'Models',
     icon: <BrainCircuit />,
     description:
-      'Default model, thinking levels, response speed and which models Ctrl+P cycles through.',
+      `Default model, thinking levels, response speed and which models ${shortcutText('mod+p')} cycles through.`,
     scoped: true,
     groupLabel: 'Engine',
     render: () => <SchemaGroups section="models" extras={{ Defaults: <SpeedDefaultRow /> }} />

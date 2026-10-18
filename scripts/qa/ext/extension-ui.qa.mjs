@@ -4,6 +4,7 @@
 //
 //   node scripts/qa/ext/extension-ui.qa.mjs
 import assert from 'node:assert/strict'
+import { DOCUMENT_END_KEY } from '../lib/platform.mjs'
 import { runSuite } from '../lib/suite.mjs'
 import {
   bugSteps,
@@ -155,10 +156,10 @@ await runSuite(
       const area = dialog('QA edit the notes').locator('textarea')
       assert.equal(await area.inputValue(), 'first line\nsecond line')
       await area.press('End')
-      await area.press('Control+End')
+      await area.press(DOCUMENT_END_KEY)
       await area.pressSequentially('\nthird line')
       await reportShot(app, 'ext-ui-editor')
-      await area.press('Control+Enter')
+      await area.press('ControlOrMeta+Enter')
       const entry = await waitForExtLog(agentDir, 'editor', { from })
       assert.equal(entry.value, 'first line\nsecond line\nthird line')
     })
@@ -169,7 +170,7 @@ await runSuite(
         const from = await command('/qa-editor')
         await dialog('QA edit the notes').waitFor()
         const area = dialog('QA edit the notes').locator('textarea')
-        await area.press('Control+End')
+        await area.press(DOCUMENT_END_KEY)
         await area.pressSequentially(' changed')
         await page.keyboard.press('Escape')
         await page.getByText('again to discard changes').waitFor()

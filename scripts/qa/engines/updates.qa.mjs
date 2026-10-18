@@ -207,7 +207,7 @@ try {
   )
 
   await step('the Updates sheet explains app-owned engine releases', async () => {
-    await application.page.keyboard.press('Control+k')
+    await application.page.keyboard.press('ControlOrMeta+k')
     await application.page.getByRole('combobox').first().fill('Check for updates')
     await application.page
       .getByRole('option', { name: /^Check for updates/ })

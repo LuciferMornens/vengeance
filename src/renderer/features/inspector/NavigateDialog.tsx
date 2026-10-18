@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { motion } from 'motion/react'
 import { GitBranch } from 'lucide-react'
 import { cn } from '../../lib/cn'
+import { isModEnter } from '../../lib/keybindings'
 import { spring } from '../../lib/motion'
 import { Button, Dialog, Textarea } from '../../ui'
 import type { GoToPointOptions } from '../sessions/actions'
@@ -71,7 +72,7 @@ export function NavigateDialog({
         aria-label="Branch summary"
         className="flex flex-col gap-1.5 pb-1"
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          if (isModEnter(e)) {
             e.preventDefault()
             void confirm()
           }

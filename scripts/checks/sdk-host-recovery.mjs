@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
+import { processTable } from '../qa/lib/processes.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const hostBundle = join(root, 'out', 'main', 'provider-host.js')
@@ -22,7 +23,12 @@ process.env.PI_OFFLINE = '1'
 let client
 
 /** Node processes this check started that run the host bundle (it never touches anything else). */
-function ownHostPids() {
+async function ownHostPids() {
+  if (process.platform !== 'win32') {
+    return (await processTable())
+      .filter((proc) => proc.ppid === process.pid && proc.commandLine.includes('provider-host.js'))
+      .map((proc) => proc.pid)
+  }
   const script = `Get-CimInstance Win32_Process -Filter "ParentProcessId=${process.pid} AND Name='node.exe'" | Where-Object { $_.CommandLine -like '*provider-host.js*' } | ForEach-Object { $_.ProcessId }`
   return execFileSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8' })
     .split(/\s+/)
@@ -34,7 +40,7 @@ const sleep = (ms) => new Promise((done) => setTimeout(done, ms))
 
 async function waitForExit(pid, timeoutMs) {
   const started = Date.now()
-  while (ownHostPids().includes(pid)) {
+  while ((await ownHostPids()).includes(pid)) {
     if (Date.now() - started > timeoutMs) throw new Error(`the SDK host ${pid} is still running`)
     await sleep(250)
   }
@@ -43,7 +49,7 @@ async function waitForExit(pid, timeoutMs) {
 
 async function waitForHost() {
   for (let attempt = 0; attempt < 50; attempt++) {
-    const pids = ownHostPids()
+    const pids = await ownHostPids()
     if (pids.length > 0) return pids
     await sleep(100)
   }
@@ -76,7 +82,11 @@ try {
     extraModels: [],
     extraProviderIds: []
   })
-  execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' })
+  if (process.platform === 'win32') {
+    execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' })
+  } else {
+    process.kill(pid, 'SIGKILL')
+  }
   await assert.rejects(pending, { message: 'The Engine stopped unexpectedly.' })
   console.log('PASS a host that dies mid-operation fails it once, with the plain crash text')
 
@@ -91,7 +101,10 @@ try {
   console.log('PASS the next operation starts a new host and succeeds')
 
   await sleep(6_000)
-  assert.ok(ownHostPids().includes(catalogPid), 'a background call keeps the host for a follow-up')
+  assert.ok(
+    (await ownHostPids()).includes(catalogPid),
+    'a background call keeps the host for a follow-up'
+  )
   const exitedAfter = await waitForExit(catalogPid, 12_000)
   console.log(`PASS a host that only ran background calls exits soon (${6 + Math.round(exitedAfter / 1000)} s)`)
 
@@ -99,7 +112,7 @@ try {
   const [settingsPid] = await waitForHost()
   await client.sdkHostCall(null, 'keybindings', { config: null })
   await sleep(20_000)
-  assert.ok(ownHostPids().includes(settingsPid), 'Settings keeps the host for a visit')
+  assert.ok((await ownHostPids()).includes(settingsPid), 'Settings keeps the host for a visit')
   console.log('PASS a prewarm and a Settings section call keep the host past the background idle time')
 } finally {
   client?.disposeSdkHost()

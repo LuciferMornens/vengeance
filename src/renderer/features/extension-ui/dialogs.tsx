@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { CircleHelp, FilePenLine, ListChecks, Search, TextCursorInput } from 'lucide-react'
 import type { ExtensionUIDialogRequest } from '@shared/engine-types'
 import { cn } from '../../lib/cn'
+import { isImeComposing, isModEnter } from '../../lib/keybindings'
 import { Button, fieldClass, Input, Kbd, listRowClass } from '../../ui'
 import { fuzzyMatch } from '../composer/fuzzy'
 import { Highlight } from '../composer/SuggestionMenu'
@@ -52,7 +53,7 @@ export function SelectDialog({ request, answer, frame }: { request: Request<'sel
     } else if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault()
       setActive(event.key === 'Home' ? 0 : Math.max(0, visible.length - 1))
-    } else if (event.key === 'Enter') {
+    } else if (event.key === 'Enter' && !isImeComposing(event)) {
       event.preventDefault()
       const item = visible[active]
       if (item) answer.value(item.option)
@@ -195,7 +196,7 @@ export function InputDialog({ request, answer, frame }: { request: Request<'inpu
           placeholder={request.placeholder}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+            if (e.key === 'Enter' && !isImeComposing(e)) {
               e.preventDefault()
               answer.value(value)
             }
@@ -226,7 +227,7 @@ export function EditorDialog({ request, answer, frame }: { request: Request<'edi
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     const el = event.currentTarget
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+    if (isModEnter(event)) {
       event.preventDefault()
       answer.value(value)
     } else if (event.key === 'Tab' && !event.shiftKey) {

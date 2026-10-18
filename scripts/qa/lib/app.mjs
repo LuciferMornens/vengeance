@@ -4,7 +4,7 @@
 // Isolation from the user's own running Vengeance: VENGEANCE_TEST=1 skips the single-instance lock
 // (main/index.ts), so this instance never takes the user's lock or signals their instance, and
 // VENGEANCE_USER_DATA points the profile at a temp folder. launchApp() checks both on the live app,
-// and close() checks that every Vengeance.exe that was running before the launch still runs.
+// and close() checks that every Vengeance process that was running before the launch still runs.
 // Fake mode also gives the app a temp HOME, so the engine never loads the user's ~/.agents/skills;
 // workspaces therefore live outside the user's profile (lib/tmp.mjs explains why).
 import { _electron as electron } from 'playwright'
@@ -13,6 +13,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { APP_PROCESS_NAME, ELECTRON_SWITCHES } from './platform.mjs'
 import { isAlive, killTree, pidsOfImage, processTable } from './processes.mjs'
 import { snapshotRealConfig, REAL_PROMPT_MAX_CHARS } from './real-guard.mjs'
 import { assertOutsideRealHome, isInside, qaTempDir } from './tmp.mjs'
@@ -45,7 +46,11 @@ const MAIN_ERROR_MARKER = '[qa main error]'
 const INHERITED_ENGINE_VARS = /^(PI_|AI_AGENT$)/
 const INHERITED_PRIME_VARS = /^PRIME_/
 const DAEMON_SHUTDOWN_TIMEOUT_MS = 5000
-const DAEMON_ENDPOINT = /^\\\\\.\\pipe\\vengeance-engine2-[a-f0-9]{20}$/
+/** Engine 2 daemon endpoints: a named pipe on Windows, an absolute Unix socket path elsewhere. */
+const DAEMON_ENDPOINT =
+  process.platform === 'win32'
+    ? /^\\\\\.\\pipe\\vengeance-engine2-[a-f0-9]{20}$/
+    : /^\/(?:.+\/)?vengeance-engine2-[a-f0-9]{20}\.sock$/
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
 
@@ -69,7 +74,8 @@ function buildEnv({ mode, agentDir, primeDir, userData, tempFolder, homeFolder, 
     // The fake LLM is local; no catalog refresh, version check or telemetry should leave the box.
     Object.assign(env, {
       // The engine (and main's trust check, which mirrors it) finds user skills under
-      // `process.env.HOME || homedir()`; Electron's own paths use USERPROFILE and stay real.
+      // `process.env.HOME || homedir()`; on Windows Electron's own paths use USERPROFILE and
+      // stay real.
       HOME: homeFolder,
       PI_CODING_AGENT_DIR: agentDir,
       PRIME_AGENT_CODING_AGENT_DIR: primeDir,
@@ -165,6 +171,12 @@ export async function shutdownOwnedPrimeDaemons(agentDir, foreignPids) {
     if (owned.length === 0) continue
     try {
       await stopDaemonEndpoint(record.socketPath)
+      // The daemon answers before it stops its workers. Killing it mid-stop leaves workers without
+      // their stop record, and the next daemon on this agent dir revives those with unfinished work.
+      const deadline = Date.now() + DAEMON_SHUTDOWN_TIMEOUT_MS
+      while (owned.some((entry) => isAlive(entry.pid)) && Date.now() < deadline) {
+        await sleep(POLL_MS)
+      }
     } finally {
       for (const entry of owned) if (isAlive(entry.pid)) await killTree(entry.pid)
     }
@@ -246,11 +258,11 @@ async function startApp(options, runRoot, initialPrimePids) {
   }
 
   const realGuard = mode === 'real' ? await snapshotRealConfig() : null
-  const foreignPids = await pidsOfImage('Vengeance.exe')
+  const foreignPids = await pidsOfImage(APP_PROCESS_NAME)
   const foreignPrimePids =
     initialPrimePids ?? (mode === 'fake' ? (await processTable()).map((entry) => entry.pid) : [])
   const env = buildEnv({ mode, agentDir, primeDir, userData, tempFolder, homeFolder, extraEnv })
-  const args = ['--force-device-scale-factor=1']
+  const args = ['--force-device-scale-factor=1', ...ELECTRON_SWITCHES]
   const app = await electron.launch(
     executablePath
       ? { executablePath, args, env, timeout: LAUNCH_TIMEOUT_MS }
@@ -375,7 +387,7 @@ async function startApp(options, runRoot, initialPrimePids) {
     }
     const gone = foreignPids.filter((pid) => pid !== appPid && !isAlive(pid))
     for (const pid of gone) {
-      problems.push(`a Vengeance.exe the harness did not start exited (pid ${pid})`)
+      problems.push(`a ${APP_PROCESS_NAME} the harness did not start exited (pid ${pid})`)
     }
     if (!keepRunFolder) {
       await rm(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }).catch(

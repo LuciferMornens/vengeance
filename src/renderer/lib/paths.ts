@@ -3,14 +3,15 @@ import { stripWindowsPathPrefix } from '@shared/session-identity'
 
 /**
  * Canonical form of a filesystem path for comparisons: one separator, no trailing separator, and
- * case-folded on Windows (where `d:\proj` and `D:\Proj` are the same folder).
+ * case-folded on Windows (where `d:\proj` and `D:\Proj` are the same folder). On macOS and Linux only `/`
+ * separates (a backslash is part of a name) and the root `/` stays itself.
  */
 export function normalizePath(path: string): string {
-  const ordinary = stripWindowsPathPrefix(path)
-  const unified = ordinary
-    .replace(/[\\/]+/g, platform.os === 'win32' ? '\\' : '/')
-    .replace(/[\\/]$/, '')
-  return platform.os === 'win32' ? unified.toLowerCase() : unified
+  if (platform.os !== 'win32') return path.replace(/\/+/g, '/').replace(/(.)\/$/, '$1')
+  return stripWindowsPathPrefix(path)
+    .replace(/[\\/]+/g, '\\')
+    .replace(/\\$/, '')
+    .toLowerCase()
 }
 
 /** Two paths name the same file or folder (both must be set). */

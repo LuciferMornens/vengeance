@@ -48,7 +48,7 @@ await runSuite(
 
     await step('Ctrl+L opens the footer picker; Enter on a search hit switches', async () => {
       await composer(app).focus()
-      await app.page.keyboard.press('Control+l')
+      await app.page.keyboard.press('ControlOrMeta+l')
       const search = app.page.getByPlaceholder('Search models…')
       await search.waitFor()
       await app.screenshot('model-picker-ctrl-l')
@@ -60,7 +60,7 @@ await runSuite(
 
     await checks.check('palette Models page finds a model by its id', async () => {
       await composer(app).focus()
-      await app.page.keyboard.press('Control+k')
+      await app.page.keyboard.press('ControlOrMeta+k')
       const input = app.page.getByPlaceholder('Search or run a command…')
       await input.waitFor()
       await input.fill('Change model')
@@ -77,7 +77,7 @@ await runSuite(
 
     await step('palette: Ctrl+K → Change model → QA OpenAI (by name)', async () => {
       await composer(app).focus()
-      await app.page.keyboard.press('Control+k')
+      await app.page.keyboard.press('ControlOrMeta+k')
       const input = app.page.getByPlaceholder('Search or run a command…')
       await input.waitFor()
       await input.fill('Change model')
@@ -94,7 +94,7 @@ await runSuite(
 
     await step('palette thinking page sets the level', async () => {
       await composer(app).focus()
-      await app.page.keyboard.press('Control+k')
+      await app.page.keyboard.press('ControlOrMeta+k')
       const input = app.page.getByPlaceholder('Search or run a command…')
       await input.fill('Thinking level')
       await app.page.keyboard.press('Enter')
@@ -135,7 +135,7 @@ await runSuite(
       const ids = models.map((m) => m.id)
       const start = (await app.agentState()).model.id
       await composer(app).focus()
-      await app.page.keyboard.press('Control+p')
+      await app.page.keyboard.press('ControlOrMeta+p')
       const expected = ids[(ids.indexOf(start) + 1) % ids.length]
       await until(modelIs(app, expected), { label: `Ctrl+P → ${expected}` })
       await app.screenshot('model-cycle-toast')
@@ -173,7 +173,7 @@ await runSuite(
       for (let i = 0; i < 3; i++) {
         const before = (await app.agentState()).model.id
         await composer(app).focus()
-        await app.page.keyboard.press('Control+p')
+        await app.page.keyboard.press('ControlOrMeta+p')
         await until(async () => (await app.agentState()).model.id !== before, {
           label: 'cycle step'
         })

@@ -3,7 +3,7 @@ import { join, sep } from 'node:path'
 import type { AuthEventLike, AuthInteractionLike, AuthPromptLike } from '../features/settings/pi-modules'
 import type { ProviderHostConfig } from '../features/settings/provider-host-protocol'
 import type { EngineLocation } from './locate'
-import { engineEnv, killProcessTree } from './runtime'
+import { engineEnv, killProcessTree, OWN_PROCESS_GROUP } from './runtime'
 import type { SdkHostConfig } from './sdk-host/protocol'
 
 /**
@@ -71,6 +71,7 @@ export function spawnHost(
     cwd,
     env: engineEnv(location),
     windowsHide: true,
+    detached: OWN_PROCESS_GROUP,
     // The engine's code may print while it loads; only the IPC channel carries the protocol.
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     serialization: 'json'

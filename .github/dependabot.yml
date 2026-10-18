@@ -1,0 +1,76 @@
+# Dependency updates. Every updater waits a cooldown before proposing a new release, so a
+# compromised or broken publish has time to be caught upstream first.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: deps
+    ignore:
+      # A new Electron major changes the runtime both engines and every platform package are
+      # qualified against (UPSTREAM.md); adopt it deliberately, not from a weekly update.
+      - dependency-name: electron
+        update-types: ['version-update:semver-major']
+      # Type definitions follow the Node major in .node-version.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+    groups:
+      react:
+        patterns:
+          - react
+          - react-dom
+          - '@types/react'
+          - '@types/react-dom'
+      build-tooling:
+        patterns:
+          - electron-builder
+          - electron-vite
+          - vite
+          - '@vitejs/*'
+          - tailwindcss
+          - '@tailwindcss/*'
+          - typescript
+          - playwright
+          - sharp
+          - png-to-ico
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # The Engine 2 helper. Its pa-* crates are pinned to the Prime revision in engines.lock.json and
+  # move only with an engine upgrade. Version updates are off (limit 0); security updates still
+  # open pull requests when Dependabot security updates are enabled for the repository.
+  - package-ecosystem: cargo
+    directory: /resources/prime-auth
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: deps(helper)
+    ignore:
+      - dependency-name: 'pa-*'
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns:
+          - '*'

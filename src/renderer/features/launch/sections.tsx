@@ -11,7 +11,7 @@ import { friendlyFlagName } from '@shared/display-names'
 import { cn } from '../../lib/cn'
 import { rpc } from '../../lib/engine'
 import { pluralize } from '../../lib/format'
-import { invoke } from '../../lib/ipc'
+import { invoke, platform } from '../../lib/ipc'
 import { samePath } from '../../lib/paths'
 import { useAgents } from '../../store/agents'
 import { Button, Input, Skeleton, Switch, Textarea, Tooltip, toast } from '../../ui'
@@ -27,6 +27,9 @@ export interface SectionProps {
   cwd: string
   engine: EngineId
 }
+
+/** pi's PowerShell tool runs only on Windows; its help lists it everywhere. */
+const WINDOWS_ONLY_TOOLS = new Set(['powershell'])
 
 /** Used until the engine help has been read (pi 1.1.0 built-in tool names). */
 const FALLBACK_TOOLS: EngineToolInfo[] = [
@@ -56,10 +59,9 @@ function useKnownTools(cwd: string, engine: EngineId): TagSuggestion[] {
     flags?.status === 'ready' && flags.result.builtinTools.length > 0
       ? flags.result.builtinTools
       : FALLBACK_TOOLS
-  return [...builtin, ...EXTENSION_TOOLS].map((tool) => ({
-    value: tool.name,
-    description: tool.description
-  }))
+  return [...builtin, ...EXTENSION_TOOLS]
+    .filter((tool) => platform.os === 'win32' || !WINDOWS_ONLY_TOOLS.has(tool.name))
+    .map((tool) => ({ value: tool.name, description: tool.description }))
 }
 
 /** `--tools` cannot mix plain names with `+name`/`-name` entries (pi cli.md). */

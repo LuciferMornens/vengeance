@@ -4,19 +4,25 @@
 // user's real ~/.agents/skills never loads), which turns the real one into a project resource of any
 // workspace below the profile. The default root sits next to the repo, never inside it: a git-ignored
 // folder would hide the workspace's files from `git ls-files` and the engine's fd/rg tools.
+// On macOS and Linux a checkout usually sits inside the profile, so the default there is a short
+// folder under /tmp instead: the physical path on macOS (/tmp links to /private/tmp, and the app
+// compares realpaths), short enough for the 104-byte Unix socket paths of Engine 2 daemons.
 //
-//   QA_TMP_ROOT=<folder outside your profile and outside any git repo>   (default: <repo>/../.vengeance-qa-tmp)
+//   QA_TMP_ROOT=<folder outside your profile and outside any git repo>
+//   (default: Windows <repo>/../.vengeance-qa-tmp, macOS /private/tmp/vq, Linux /tmp/vq)
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
+const DEFAULT_QA_TMP_ROOT = {
+  win32: join(REPO_ROOT, '..', '.vengeance-qa-tmp'),
+  darwin: '/private/tmp/vq'
+}[process.platform] ?? '/tmp/vq'
 
 export const REAL_HOME = resolve(homedir())
-export const QA_TMP_ROOT = resolve(
-  process.env.QA_TMP_ROOT || join(REPO_ROOT, '..', '.vengeance-qa-tmp')
-)
+export const QA_TMP_ROOT = resolve(process.env.QA_TMP_ROOT || DEFAULT_QA_TMP_ROOT)
 
 export function isInside(parent, child) {
   const path = relative(resolve(parent), resolve(child))

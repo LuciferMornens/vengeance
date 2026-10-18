@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import electron from 'electron'
-import { bundleRoot, root } from '../engines/common.mjs'
+import { bundleRoot, root, systemPath } from '../engines/common.mjs'
 import { verifyEngines } from '../engines/verify.mjs'
 import { tempRoot } from '../qa/lib/tmp.mjs'
 
@@ -24,12 +24,9 @@ try {
         !/^(PI_|PRIME_AGENT_|VENGEANCE_)/.test(name)
     )
   )
-  assert.ok(process.env.SystemRoot)
-  Object.assign(environment, {
+  Object.assign(environment, systemPath(), {
     HOME: home,
     USERPROFILE: home,
-    PATH: join(process.env.SystemRoot, 'System32'),
-    Path: join(process.env.SystemRoot, 'System32'),
     PI_CODING_AGENT_DIR: account,
     PRIME_AGENT_CODING_AGENT_DIR: account,
     PRIME_AGENT_SESSION_DIR: sessions,

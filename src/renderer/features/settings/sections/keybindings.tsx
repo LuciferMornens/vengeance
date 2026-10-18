@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CircleAlert, FolderOpen, Plus, Search, X } from 'lucide-react'
 import type { KeybindingAction, KeybindingsState } from '@shared/api/settings'
 import { cn } from '../../../lib/cn'
+import { platform } from '../../../lib/ipc'
 import { invoke, on } from '../ipc'
-import { KEY_CAPTURE_ATTRIBUTE } from '../../../lib/keybindings'
+import { composedKey, KEY_CAPTURE_ATTRIBUTE, keyFromCode } from '../../../lib/keybindings'
 import { Badge, Button, Input, Kbd, Skeleton, toast, Tooltip } from '../../../ui'
 import { FOCUS_RING } from '../controls'
 import { Group, Highlight, KeyHint, Note, Row, SearchQueryContext } from '../layout'
@@ -38,6 +39,8 @@ function comboFromEvent(event: KeyboardEvent): string | null {
     (/^F([1-9]|1[0-2])$/.test(event.key) ? event.key.toLowerCase() : event.key)
   if (/^Key[A-Z]$/.test(event.code)) key = event.code.slice(3).toLowerCase()
   else if (/^Digit[0-9]$/.test(event.code) && !event.shiftKey) key = event.code.slice(5)
+  // Option on macOS composes another character (⌥, is ≤); pi reads it as alt plus the physical key.
+  else if (platform.os === 'darwin' && event.altKey && composedKey(event.key)) key = keyFromCode(event.code) ?? key
   if (key.length === 1) key = key.toLowerCase()
   const modifiers = [
     event.ctrlKey && 'ctrl',

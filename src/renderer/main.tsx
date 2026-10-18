@@ -8,11 +8,13 @@ import { startSpeedTracking } from './features/composer/speed'
 import { startPrimeSideQuestionEvents } from './features/engines/prime-side-questions'
 import { platform } from './lib/ipc'
 import { installTestHook } from './lib/test-hook'
+import { trackWindowControls } from './lib/window-controls'
 import { startAgentEventPump } from './store/agents'
 import { useApp } from './store/app'
 import { Toaster, TooltipProvider } from './ui'
 
 document.documentElement.dataset.material = platform.material
+trackWindowControls()
 startAgentEventPump()
 window.addEventListener('pagehide', startPrimeSideQuestionEvents(), { once: true })
 window.addEventListener('pagehide', startSpeedTracking(), { once: true })

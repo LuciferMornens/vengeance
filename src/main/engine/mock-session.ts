@@ -317,6 +317,9 @@ export abstract class MockSession {
   protected seedAbandonedBranch(): void {
     const root = this.leafId
     const at = Date.now() - 6 * 60_000
+    // The session started before the branch was abandoned: the entries it grows from date a minute earlier.
+    const start = new Date(at - 60_000).toISOString()
+    for (const entry of this.branchPath()) entry.timestamp = start
     const user: UserMessage = {
       role: 'user',
       content: 'How is the session store persisted?',

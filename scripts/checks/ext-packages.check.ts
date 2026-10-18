@@ -29,7 +29,8 @@ await check('ext-11: tarball sources are recognised', () => {
   assert.equal(isTarballSource('D:\\pkgs\\pi-qa-tools'), false)
   assert.equal(isTarballSource('npm:pi-tgz-tools'), false)
   // A tarball entry already in settings still gets a readable name (the crash card's Remove action).
-  assert.equal(packageLabel('C:\\pkgs\\pi-qa-tools-1.2.3.tgz'), 'Qa tools')
+  const packages = process.platform === 'win32' ? 'C:\\pkgs' : '/pkgs'
+  assert.equal(packageLabel(join(packages, 'pi-qa-tools-1.2.3.tgz')), 'Qa tools')
 })
 
 const resource = (path: string, metadata: Partial<ResolvedResource['metadata']>): ResolvedResource => ({

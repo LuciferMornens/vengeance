@@ -51,7 +51,7 @@ async function composerScenarios(page, { shot, test, wait }, workspace) {
 
   const clearComposer = async () => {
     await composer.click()
-    await page.keyboard.press('Control+a')
+    await page.keyboard.press('ControlOrMeta+a')
     await page.keyboard.press('Backspace')
   }
   const dismissToasts = async () => {
@@ -251,7 +251,7 @@ async function composerScenarios(page, { shot, test, wait }, workspace) {
 
   await command('/mock-ui editor')
   await shot('extension-editor-dialog')
-  await page.keyboard.press('Control+Enter')
+  await page.keyboard.press('ControlOrMeta+Enter')
   await wait(300)
   await dismissToasts()
 
@@ -264,17 +264,17 @@ async function composerScenarios(page, { shot, test, wait }, workspace) {
   await shot('palette-root')
   await page.keyboard.type('comp')
   await shot('palette-search')
-  await page.keyboard.press('Control+a')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('retry')
   await shot('palette-settings-search')
-  await page.keyboard.press('Control+a')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('/todos')
   await shot('palette-extension-command')
   await page.keyboard.press('Tab')
   await page.keyboard.type('--open done')
   await shot('palette-run-with-args')
   await page.keyboard.press('Escape')
-  await page.keyboard.press('Control+a')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.type('qqzzx')
   await shot('palette-no-results')
   await page.keyboard.press('Escape')
@@ -311,7 +311,7 @@ async function composerScenarios(page, { shot, test, wait }, workspace) {
   await test('closeSettings')
   await wait(400)
 
-  await page.keyboard.press('Control+/')
+  await page.keyboard.press('ControlOrMeta+/')
   await shot('shortcuts-sheet', { settleMs: 700 })
   await page.keyboard.press('Escape')
   await wait(300)

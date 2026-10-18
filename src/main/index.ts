@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, session, type RenderProcessGoneDetails } from 'electron'
 import { existsSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { SPEED_DEFAULT_ENV } from '@shared/api/speed'
 import { appState, engineOverridePath } from './app-state'
 import { bridgeExtensionPath } from './engine/bridge'
@@ -10,6 +11,8 @@ import { maskAgentInfo } from './features/launch/env-vault'
 import { accountModelFilter } from './features/settings/account-models'
 import { broadcast, handle } from './ipc/handle'
 import { registerIpc } from './ipc'
+import { physicalPath } from './paths'
+import { resolveShellEnvironment } from './shell-env'
 import { createMainWindow, saveWindowBounds, setThemePreference } from './window'
 
 /**
@@ -34,25 +37,103 @@ appendFeature('disable-features', 'PartitionAllocLargeThreadCacheSize')
 // Must equal the installer's appId (its shortcuts carry it): electron-builder.yml for release builds, and
 // scripts/dist-qa.mjs for the QA build (product name "Vengeance QA"), which must never group with the real app.
 app.setAppUserModelId(app.getName() === 'Vengeance QA' ? 'com.vengeance.qa' : 'com.vengeance.app')
-// N12: no application menu outside `npm run dev`, so Electron's default accelerators (Ctrl+R reload, which
-// would dispose every engine; Ctrl+Shift+I devtools; Ctrl+W close) never act. Dev keeps the default menu.
-if (!env.rendererUrl) Menu.setApplicationMenu(null)
+/**
+ * The macOS menu bar: the standard app, Edit and Window menus. Edit carries the system editing shortcuts (Cmd+C, Cmd+V,
+ * Cmd+Z…), which macOS text fields only get from a menu; nothing reloads, opens developer tools or closes the window.
+ */
+function macApplicationMenu(): Menu {
+  return Menu.buildFromTemplate([
+    {
+      role: 'appMenu',
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'delete' },
+        { role: 'selectAll' }
+      ]
+    },
+    {
+      role: 'window',
+      submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }]
+    }
+  ])
+}
+
+// N12: outside `npm run dev` no menu carries Electron's default accelerators (Ctrl+R reload, which would dispose
+// every engine; Ctrl+Shift+I devtools; Ctrl+W close): Windows and Linux get none, macOS the one above. Dev keeps the
+// default menu.
+if (!env.rendererUrl)
+  Menu.setApplicationMenu(process.platform === 'darwin' ? macApplicationMenu() : null)
+if (process.platform === 'darwin') {
+  app.setAboutPanelOptions({ applicationName: app.getName(), applicationVersion: app.getVersion() })
+}
+
+// Chromium picks the Linux secret store by desktop: libsecret on GNOME and its relatives, KWallet on KDE, and plain
+// text anywhere else. Other sessions (Hyprland, sway, MATE…) usually run a Secret Service such as gnome-keyring or
+// KeePassXC, so they ask libsecret; `--password-store` on the command line still decides.
+const SECRET_STORE_DESKTOP = /gnome|unity|cinnamon|xfce|kde|pantheon|ukui|deepin/i
+if (
+  process.platform === 'linux' &&
+  !app.commandLine.hasSwitch('password-store') &&
+  !SECRET_STORE_DESKTOP.test(
+    process.env.ORIGINAL_XDG_CURRENT_DESKTOP ?? process.env.XDG_CURRENT_DESKTOP ?? ''
+  )
+) {
+  app.commandLine.appendSwitch('password-store', 'gnome-libsecret')
+}
+// Under Wayland, input methods (fcitx5, IBus) reach Chromium only through the compositor's text-input protocol, and
+// version 3 is the one GNOME, KDE, Hyprland and sway all offer. X11 sessions ignore both switches; a command line that
+// already enables the IME keeps its own choice.
+if (process.platform === 'linux' && !app.commandLine.hasSwitch('enable-wayland-ime')) {
+  app.commandLine.appendSwitch('enable-wayland-ime')
+  app.commandLine.appendSwitch('wayland-text-input-version', '3')
+}
+
+/**
+ * `arg` names an existing folder (a path, or a file:// URL as Linux launchers pass) other than the app itself; a linked
+ * folder opens as its target, which is the workspace pi records for it (paths.ts physicalPath). A relative path is
+ * relative to `cwd`, the folder the command ran in.
+ */
+function folderFromArgument(arg: string, cwd = process.cwd()): string | null {
+  try {
+    const candidate = resolve(cwd, arg.startsWith('file://') ? fileURLToPath(arg) : arg)
+    if (
+      existsSync(candidate) &&
+      statSync(candidate).isDirectory() &&
+      candidate !== resolve(app.getAppPath())
+    )
+      return physicalPath(candidate)
+  } catch {
+    // Not a path.
+  }
+  return null
+}
 
 /** A folder passed on the command line (e.g. `Vengeance.exe D:\project`). */
-function folderFromArgv(argv: string[]): string | null {
+function folderFromArgv(argv: string[], cwd?: string): string | null {
   for (const arg of argv.slice(1)) {
     if (arg.startsWith('-')) continue
-    const candidate = resolve(arg)
-    try {
-      if (
-        existsSync(candidate) &&
-        statSync(candidate).isDirectory() &&
-        candidate !== resolve(app.getAppPath())
-      )
-        return candidate
-    } catch {
-      // Not a path.
-    }
+    const folder = folderFromArgument(arg, cwd)
+    if (folder) return folder
   }
   return null
 }
@@ -68,13 +149,34 @@ const singleInstance = env.test || app.requestSingleInstanceLock()
 if (!singleInstance) {
   app.quit()
 } else {
+  // Read while the app starts: every child process waits for it on macOS and Linux (shell-env.ts).
+  resolveShellEnvironment()
   let mainWindow: BrowserWindow | null = null
+  /** The renderer finished loading once; later loads are reloads. */
+  let rendererLoaded = false
+  /** Folders to open once the renderer has loaded (command line, macOS `open-file`). */
+  const pendingFolders: string[] = []
   let quitting = false
   let recoveryNoticePending = false
   let crashStreak = 0
   let lastCrashAt = 0
   /** Set while engines wait for the reloaded renderer to adopt them; firing stops them. */
   let orphanShutdown: NodeJS.Timeout | null = null
+
+  const openFolder = (folder: string): void => {
+    if (rendererLoaded) broadcast('app:open-folder', { path: folder })
+    else pendingFolders.push(folder)
+  }
+
+  // Finder and the Dock hand over folders dropped on the app; the first may arrive before the app is ready.
+  app.on('open-file', (event, path) => {
+    event.preventDefault()
+    const folder = folderFromArgument(path)
+    if (!folder) return
+    if (mainWindow?.isMinimized()) mainWindow.restore()
+    mainWindow?.focus()
+    openFolder(folder)
+  })
 
   const manager = new EngineManager(
     {
@@ -135,12 +237,13 @@ if (!singleInstance) {
   /** Copy buttons need clipboard writes; everything else (camera, notifications, geolocation…) is denied. */
   const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write'])
 
-  app.on('second-instance', (_event, argv) => {
+  // A second launch hands over its command line, which names folders relative to where it ran.
+  app.on('second-instance', (_event, argv, workingDirectory) => {
     if (!mainWindow) return
     if (mainWindow.isMinimized()) mainWindow.restore()
     mainWindow.focus()
-    const folder = folderFromArgv(argv)
-    if (folder) broadcast('app:open-folder', { path: folder })
+    const folder = folderFromArgv(argv, workingDirectory)
+    if (folder) openFolder(folder)
   })
 
   void app.whenReady().then(() => {
@@ -170,19 +273,16 @@ if (!singleInstance) {
     // A reloaded renderer forgets its agents; never leave their engines running headless. The reload after a
     // renderer crash is the exception: its engines wait for adoption (recoverRenderer).
     const contents = mainWindow.webContents
-    let loaded = false
     contents.on('did-finish-load', () => {
-      loaded = true
+      rendererLoaded = true
+      for (const folder of pendingFolders.splice(0)) broadcast('app:open-folder', { path: folder })
     })
     contents.on('did-start-loading', () => {
-      if (loaded && !orphanShutdown) void manager.disposeAll()
+      if (rendererLoaded && !orphanShutdown) void manager.disposeAll()
     })
     contents.on('render-process-gone', (_event, details) => recoverRenderer(window, details))
     const folder = folderFromArgv(process.argv)
-    if (folder)
-      mainWindow.webContents.once('did-finish-load', () =>
-        broadcast('app:open-folder', { path: folder })
-      )
+    if (folder) pendingFolders.push(folder)
   })
 
   app.on('before-quit', (event) => {

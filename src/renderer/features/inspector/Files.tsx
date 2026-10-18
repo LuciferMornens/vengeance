@@ -5,6 +5,7 @@ import { cn } from '../../lib/cn'
 import { basename, formatRelativeTime, pluralize } from '../../lib/format'
 import { invoke } from '../../lib/ipc'
 import { lazyWithPreload } from '../../lib/lazy-with-preload'
+import { REVEAL_LABEL } from '../../lib/platform-copy'
 import { fadeUp, stagger } from '../../lib/motion'
 import type { AgentState } from '../../store/agent-state'
 import { IconButton, Spinner } from '../../ui'
@@ -67,7 +68,7 @@ function FileRow({ file, onOpen }: { file: FileActivity; onOpen: () => void }) {
         <IconButton label="Preview" size="xs" onClick={onOpen}>
           <Eye />
         </IconButton>
-        <IconButton label="Show in Explorer" size="xs" onClick={() => void invoke('sys:reveal', file.path)}>
+        <IconButton label={REVEAL_LABEL} size="xs" onClick={() => void invoke('sys:reveal', file.path)}>
           <FolderSearch />
         </IconButton>
       </div>

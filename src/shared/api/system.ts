@@ -43,6 +43,8 @@ export type WindowTheme = 'dark' | 'light'
 
 export interface SystemInvokeMap {
   'sys:pick-folder': [options: PickFolderOptions | undefined, result: string | null]
+  /** A dropped path as a folder to open, like sys:pick-folder returns one; null when it is not a folder. */
+  'sys:dropped-folder': [path: string, result: string | null]
   'sys:pick-files': [options: PickFilesOptions | undefined, result: string[]]
   'sys:open-external': [url: string, result: void]
   'sys:reveal': [path: string, result: void]

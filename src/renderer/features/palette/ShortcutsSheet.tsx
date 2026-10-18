@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { motion } from 'motion/react'
 import { Search, X } from 'lucide-react'
+import { shortcutMatches } from '../../lib/keybindings'
 import { fadeUp, stagger } from '../../lib/motion'
 import { IconButton, Input, Kbd, Sheet } from '../../ui'
 import { useShortcutGroups, type ShortcutGroup } from './shortcuts'
@@ -50,7 +51,7 @@ export function ShortcutsSheet() {
     const q = query.trim().toLowerCase()
     if (!q) return all
     return all
-      .map((g) => ({ ...g, items: g.items.filter((i) => i.label.toLowerCase().includes(q) || g.title.toLowerCase().includes(q) || i.keys.some((k) => k.includes(q))) }))
+      .map((g) => ({ ...g, items: g.items.filter((i) => i.label.toLowerCase().includes(q) || g.title.toLowerCase().includes(q) || i.keys.some((k) => shortcutMatches(k, q))) }))
       .filter((g) => g.items.length > 0)
   }, [all, query])
 

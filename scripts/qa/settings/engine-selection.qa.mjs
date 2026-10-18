@@ -22,7 +22,7 @@ async function workspaceDefault(application, cwd) {
 
 async function checkNewSession(application, engine) {
   const before = await application.activeAgentId()
-  await application.page.keyboard.press('Control+n')
+  await application.page.keyboard.press('ControlOrMeta+n')
   await waitUntil(
     async () => {
       const state = await application.agentState()

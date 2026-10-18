@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
-import { existsSync, watch, type FSWatcher } from 'node:fs'
-import { readdir } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -10,7 +11,8 @@ import type { FlatSessionTree, SessionEntry } from '@shared/engine-types'
 import { locateEngine } from '../../engine/locate'
 import { engineEnv } from '../../engine/runtime'
 import { flattenSessionTree } from '../../engine/session-tree'
-import { comparablePath, isInside, samePath } from '../../paths'
+import { comparablePath, isInside, physicalPath, samePath } from '../../paths'
+import { watchTree, type TreeWatcher } from '../../watch-tree'
 import { readJsonFile, replaceFile } from '../settings/json-file'
 import { piConfig, piPaths, piSessions, type PiSessionHeader } from '../settings/pi-modules'
 import { mapSessionFiles, readIndexedSessionHeader, SessionIndex, sessionFilesIn } from './index'
@@ -96,9 +98,12 @@ function configuredSessionDir(storage: SessionStorage, cwd: string | null): stri
   return typeof value === 'string' && value ? storage.normalizePath(value) : undefined
 }
 
-/** pi's default per-workspace folder: `<agentDir>/sessions/--<cwd with / \ : → ->--`. */
+/**
+ * pi's default per-workspace folder: `<agentDir>/sessions/--<cwd with / \ : → ->--`, named after the folder pi runs in
+ * (its `process.cwd()`: symlinks resolved on macOS and Linux).
+ */
 function defaultSessionDir(agentDir: string, cwd: string): string {
-  const encoded = `--${resolve(cwd)
+  const encoded = `--${physicalPath(cwd)
     .replace(/^[/\\]/, '')
     .replace(/[/\\:]/g, '-')}--`
   return join(agentDir, 'sessions', encoded)
@@ -319,8 +324,13 @@ async function loadSessions(
   const folder = dir ?? defaultSessionDir(storage.agentDir, cwd)
   if (!existsSync(folder)) return { sessions: [], sessionDir: folder }
   const sessions = await sessionIndex.list([folder])
+  // pi records the folder it runs in: a linked folder's target on macOS and Linux.
+  const physical = physicalPath(cwd)
   const filtered = dir
-    ? sessions.filter((session) => session.cwd && samePath(session.cwd, cwd))
+    ? sessions.filter(
+        (session) =>
+          session.cwd && (samePath(session.cwd, cwd) || samePath(session.cwd, physical))
+      )
     : sessions
   return { sessions: await withSubagentChildren(filtered), sessionDir: folder }
 }
@@ -485,13 +495,32 @@ export async function exportSessionWithCli(
 // ─── Watching ────────────────────────────────────────────────────────────────
 
 const WATCH_DEBOUNCE_MS = 350
+/** How often a root that cannot be watched is compared for changed session files. */
+const POLL_INTERVAL_MS = 10_000
+/** Folder levels below a sessions root that hold session files: `--<cwd>--/<parent>/<run id>/run-<n>` (subagents). */
+const SESSION_FOLDER_DEPTH = 4
 
 interface WatchedSessionsRoot {
-  watcher: FSWatcher
+  /** The folder-tree watcher; null while the root is polled instead. */
+  watcher: TreeWatcher | null
+  poll: NodeJS.Timeout | null
   timer: NodeJS.Timeout | null
 }
 
-/** Recursive watchers follow the requested storage roots and release roots no longer in scope. */
+/** Names, sizes and modification times of the session files below `root`. */
+async function sessionFilesSignature(root: string): Promise<string> {
+  const hash = createHash('sha256')
+  const files = (await readdir(root, { recursive: true }))
+    .filter((file) => file.toLowerCase().endsWith('.jsonl'))
+    .sort()
+  for (const file of files) {
+    const info = await stat(join(root, file)).catch(() => null)
+    if (info) hash.update(`${file}\0${info.size}\0${info.mtimeMs}\0`)
+  }
+  return hash.digest('hex')
+}
+
+/** Folder-tree watchers follow the requested storage roots and release roots no longer in scope. */
 export class SessionsWatcher {
   private readonly roots = new Map<string, WatchedSessionsRoot>()
 
@@ -506,9 +535,23 @@ export class SessionsWatcher {
     }
     for (const root of roots) {
       if (this.roots.has(root) || !existsSync(root)) continue
-      try {
-        const watcher = watch(root, { recursive: true }, (event, file) => {
-          if (event !== 'rename' && file && !String(file).toLowerCase().endsWith('.jsonl')) return
+      this.watchRoot(root)
+    }
+  }
+
+  private watchRoot(root: string): void {
+    try {
+      const watcher = watchTree(
+        root,
+        (segments) => segments.length <= SESSION_FOLDER_DEPTH,
+        (event, file) => {
+          if (event === 'rename' && !existsSync(root)) {
+            // The root itself was removed (Windows keeps reporting renames for it): poll it until it is back.
+            this.pollRoot(root, new Error('the folder was removed'))
+            this.onChange(root)
+            return
+          }
+          if (event !== 'rename' && file && !file.toLowerCase().endsWith('.jsonl')) return
           const watched = this.roots.get(root)
           if (!watched) return
           if (watched.timer) clearTimeout(watched.timer)
@@ -516,19 +559,49 @@ export class SessionsWatcher {
             watched.timer = null
             this.onChange(root)
           }, WATCH_DEBOUNCE_MS)
-        })
-        this.roots.set(root, { watcher, timer: null })
-        watcher.on('error', () => this.closeRoot(root))
-      } catch {
-        this.closeRoot(root)
-      }
+        }
+      )
+      this.roots.set(root, { watcher, poll: null, timer: null })
+      watcher.on('error', (error) => this.pollRoot(root, error))
+    } catch (error) {
+      this.pollRoot(root, error)
     }
+  }
+
+  /**
+   * A root the system will not watch (Linux runs out of inotify watches: ENOSPC) or that was removed is compared every
+   * POLL_INTERVAL_MS instead, so its list still follows new and removed sessions. A root that could not be read is
+   * watched again once it is back.
+   */
+  private pollRoot(root: string, error: unknown): void {
+    this.closeRoot(root)
+    console.warn(
+      `[vengeance] cannot watch ${root} (${(error as Error).message}); checking it every ${POLL_INTERVAL_MS / 1000} s`
+    )
+    const watched: WatchedSessionsRoot = { watcher: null, poll: null, timer: null }
+    this.roots.set(root, watched)
+    /** Undefined before the first comparison; null while the root cannot be read. */
+    let signature: string | null | undefined
+    const compare = async (): Promise<void> => {
+      const next = await sessionFilesSignature(root).catch(() => null)
+      if (this.roots.get(root) !== watched) return
+      if (signature !== undefined && next !== signature) this.onChange(root)
+      if (signature === null && next !== null) {
+        this.closeRoot(root)
+        this.watchRoot(root)
+        return
+      }
+      signature = next
+      watched.poll = setTimeout(() => void compare(), POLL_INTERVAL_MS)
+    }
+    void compare()
   }
 
   private closeRoot(root: string): void {
     const watched = this.roots.get(root)
     if (!watched) return
-    watched.watcher.close()
+    watched.watcher?.close()
+    if (watched.poll) clearTimeout(watched.poll)
     if (watched.timer) clearTimeout(watched.timer)
     this.roots.delete(root)
   }

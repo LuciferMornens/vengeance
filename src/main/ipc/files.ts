@@ -5,7 +5,9 @@ import { homedir } from 'node:os'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import type { FileMatch, ReadFileOptions, ReadFileResult } from '@shared/api/system'
+import { runGit } from '../git'
 import { isInside, samePath } from '../paths'
+import { childBaseEnv } from '../shell-env'
 
 const execFileAsync = promisify(execFile)
 
@@ -39,13 +41,18 @@ export async function readFileBounded(path: string, options: ReadFileOptions | u
   const limit = Math.min(options?.maxBytes ?? DEFAULT_READ_BYTES, MAX_READ_BYTES)
   const info = await stat(target)
   if (!info.isFile()) throw new Error(`Not a file: ${target}`)
-  // Compare real paths so symlinks/junctions cannot escape the allowed folders.
+  // Compare real paths so symlinks/junctions cannot escape the allowed folders. The requested path only has to avoid
+  // the credential files: an engine running in a linked workspace reports its files below the link's target (POSIX
+  // `getcwd`), which is inside the real root.
   const [real, roots, denied] = await Promise.all([
     realOrResolved(target),
     Promise.all(access.allowedRoots.map(realOrResolved)),
     Promise.all(access.deniedFiles.map(realOrResolved))
   ])
-  if (!isReadAllowed(real, { allowedRoots: roots, deniedFiles: denied }) || !isReadAllowed(target, access)) {
+  if (
+    !isReadAllowed(real, { allowedRoots: roots, deniedFiles: denied }) ||
+    access.deniedFiles.some((file) => samePath(file, target))
+  ) {
     throw new Error(`Reading ${target} is not allowed (only files in open workspaces and session folders)`)
   }
   const handle = await open(target, 'r')
@@ -69,9 +76,8 @@ export async function readFileBounded(path: string, options: ReadFileOptions | u
 const fileCache = new Map<string, { at: number; files: Promise<string[]> }>()
 
 async function gitFiles(cwd: string): Promise<string[]> {
-  const { stdout } = await execFileAsync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
+  const stdout = await runGit(['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
     cwd,
-    windowsHide: true,
     maxBuffer: 64 * 1024 * 1024,
     timeout: 15_000
   })
@@ -84,6 +90,7 @@ async function fdFiles(cwd: string): Promise<string[]> {
   const { stdout } = await execFileAsync(fd, ['--type', 'f', '--hidden', '--exclude', '.git', '--max-results', String(MAX_FILES)], {
     cwd,
     windowsHide: true,
+    env: childBaseEnv(),
     maxBuffer: 64 * 1024 * 1024,
     timeout: 15_000
   })

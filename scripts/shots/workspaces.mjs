@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { mockVolumePath } from './lib/mock-paths.mjs'
 
 const WINDOW_SIZE = { width: 1440, height: 900 }
 const NARROW_WINDOW_SIZE = { width: 880, height: 760 }
@@ -12,16 +13,16 @@ export async function scenarios(page, { app, shot, test, MOCK_WORKSPACE }) {
     workspaces: [
       { path: MOCK_WORKSPACE, name: 'Aurora', lastOpenedAt: now, pinned: true },
       {
-        path: 'D:\\work\\platform\\release-orchestration',
+        path: mockVolumePath('work', 'platform', 'release-orchestration'),
         name: 'Release orchestration',
         lastOpenedAt: now - RECENT_WORKSPACE_AGE_MS
       },
       {
-        path: 'D:\\work\\research\\interface-experiments\\vengeance',
+        path: mockVolumePath('work', 'research', 'interface-experiments', 'vengeance'),
         name: 'Vengeance interface experiments',
         lastOpenedAt: 0
       },
-      { path: 'D:\\work\\relay', name: 'Relay', lastOpenedAt: 0 }
+      { path: mockVolumePath('work', 'relay'), name: 'Relay', lastOpenedAt: 0 }
     ],
     features: { sessions: { scope: 'workspace', hiddenWorkspaces: [] } }
   })

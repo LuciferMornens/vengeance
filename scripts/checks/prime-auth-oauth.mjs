@@ -251,7 +251,8 @@ try {
     process.platform === 'win32' ? 'vengeance-prime-auth.exe' : 'vengeance-prime-auth'
   const fakeHelper = join(tempRoot, 'resources', 'prime-auth', 'bin', helperName)
   await mkdir(dirname(fakeHelper), { recursive: true })
-  await writeFile(fakeHelper, '')
+  // A real helper is executable on POSIX; resolvers may check it before spawning.
+  await writeFile(fakeHelper, '', { mode: 0o755 })
 
   const nativeStub = {
     name: 'native-helper-stub',

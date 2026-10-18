@@ -1,12 +1,12 @@
 # Vengeance's pi build
 
 Vengeance builds stable `v1.3.0`, commit `71023aec1546d6d677a65669c5665c0927ce0dd0`,
-as `1.3.0+vengeance.1`. See [UPSTREAM.md](../../UPSTREAM.md) and
+as `1.3.0+vengeance.2`. See [UPSTREAM.md](../../UPSTREAM.md) and
 [engines.lock.json](../../engines.lock.json) for the source and maintenance contract.
 
 The active series includes distribution policy (0001), extension runtime version identity (0002),
-native runtime qualification (0003), Windows native test fixtures (0005), Abliteration (0006), and
-native session sharing (0007).
+native runtime qualification (0003), Windows native test fixtures (0005), Abliteration (0006),
+native session sharing (0007) and POSIX shell test paths (0008).
 Patch `0005` normalizes the external-editor fixture's temporary path on Windows. Patch `0006`
 also supplies Abliteration's native default model, required by the 1.3 provider-selection contract.
 The series applies to the stable base without source conflict.
@@ -37,6 +37,10 @@ authentication only after the user requests a link. Settings are reloaded per op
 expected destination prevents an already reviewed share dialog from silently changing upload targets.
 Explicit-path HTML exports support native in-memory sessions, allowing saved gist shares without
 opening the source session for writing or requiring a currently available model.
+
+Patch `0008` is test-only. Patch `0005` compares the bash tool's `pwd` with the test directory exactly.
+POSIX shells report the physical directory, and macOS keeps `tmpdir()` behind the `/var` symlink, so
+the fixture compares against the directory's real path off Windows. The shipped payload is unchanged.
 
 The distribution patch refuses native self-updates and suppresses upstream release notifications.
 Extension/package updates and model catalog refreshes remain native operations. Built-in extensions,

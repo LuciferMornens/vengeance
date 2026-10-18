@@ -25,8 +25,10 @@ import { cn } from '../../lib/cn'
 import { rpc } from '../../lib/engine'
 import { basename, formatRelativeTime, pluralize } from '../../lib/format'
 import { invoke } from '../../lib/ipc'
+import { isModEnter } from '../../lib/keybindings'
 import { lazyWithPreload } from '../../lib/lazy-with-preload'
 import { samePath } from '../../lib/paths'
+import { TRASH_NAME } from '../../lib/platform-copy'
 import { useAgents } from '../../store/agents'
 import { useApp } from '../../store/app'
 import { Button, Dialog, EmptyState, Input, ListRow, Skeleton, Spinner } from '../../ui'
@@ -496,7 +498,7 @@ function ImportDialog({ candidate, onClose }: { candidate: ImportCandidate; onCl
       <div
         className="flex flex-col gap-3 pb-1"
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void run()
+          if (isModEnter(e)) void run()
         }}
       >
         <div className="flex items-start gap-3 rounded-card bg-surface-1 px-3.5 py-3 shadow-elev-0">
@@ -597,9 +599,9 @@ function DeleteDialog({
       title="Delete this session?"
       description={
         <>
-          <span className="font-medium text-fg">“{target.title}”</span> moves to the Recycle Bin.
+          <span className="font-medium text-fg">“{target.title}”</span> moves to the {TRASH_NAME}.
           {stopsResident && ' Its running work and schedules will stop.'} To recover the
-          conversation, restore its file from the Recycle Bin and import it as a new session.
+          conversation, restore its file from the {TRASH_NAME} and import it as a new session.
         </>
       }
       footer={
@@ -608,7 +610,7 @@ function DeleteDialog({
             Cancel
           </Button>
           <Button variant="danger" loading={busy} onClick={() => void remove()}>
-            {error ? 'Try again' : 'Move to Recycle Bin'}
+            {error ? 'Try again' : `Move to ${TRASH_NAME}`}
           </Button>
         </>
       }

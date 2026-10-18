@@ -1,9 +1,16 @@
-import { existsSync, readFileSync, statSync, watch, type FSWatcher } from 'node:fs'
+import { existsSync, readFileSync, statSync, watch } from 'node:fs'
 import { join } from 'node:path'
 import type { SettingsChangeArea } from '@shared/api/settings'
 import { appState } from '../../app-state'
+import { watchTree, type TreeWatcher } from '../../watch-tree'
 import { agentDir, projectRoot } from './agent-dir'
-import { agentDirArea, areaOf, authSignature, INSTRUCTION_FILE } from './config-areas'
+import {
+  agentDirArea,
+  areaOf,
+  authSignature,
+  INSTRUCTION_FILE,
+  watchedConfigFolder
+} from './config-areas'
 import { lastWrittenText } from './json-file'
 import { hadRecentRun, hasActiveRuns } from './pi-cli'
 
@@ -36,9 +43,14 @@ function isDirectory(path: string): boolean {
   }
 }
 
+/** A watch on one config folder (ConfigWatcher.watchDir). */
+interface FolderWatch {
+  close(): void
+}
+
 export class ConfigWatcher {
-  private agentWatcher: FSWatcher | null = null
-  private projectWatchers: FSWatcher[] = []
+  private agentWatcher: FolderWatch | null = null
+  private projectWatchers: FolderWatch[] = []
   private project: string | null = null
   /**
    * Changes waiting for the debounce, per area and folder (null = the agent dir), whether a file's content proved the
@@ -117,25 +129,57 @@ export class ConfigWatcher {
     return 'auth'
   }
 
+  /**
+   * Watch `dir`, with its config subfolders when `subfolders`. A watch the system refuses or ends (Linux: ENOSPC once
+   * fs.inotify.max_user_watches is used up) is logged, and the folder, while it exists, falls back to its top level,
+   * which holds the config files. A removed folder is re-armed by syncProject.
+   */
   private watchDir(
     dir: string,
-    recursive: boolean,
+    subfolders: boolean,
     cwd: string | null,
     classify: (segments: string[]) => SettingsChangeArea | null
-  ): FSWatcher | null {
+  ): FolderWatch | null {
     if (!existsSync(dir)) return null
-    try {
-      const watcher = watch(dir, { recursive, persistent: false }, (_event, filename) => {
-        if (!filename) return
-        const area = classify(filename.split(/[\\/]+/).filter(Boolean))
-        // Resolving packages creates empty folders (npm/, git/, extensions/); only files change resources.
-        if ((area === 'packages' || area === 'resources') && isDirectory(join(dir, filename))) return
-        if (area) this.queue(area, cwd, join(dir, filename))
-      })
-      watcher.on('error', () => watcher.close())
-      return watcher
-    } catch {
-      return null
+    const listener = (_event: string, filename: string | null): void => {
+      if (!filename) return
+      const area = classify(filename.split(/[\\/]+/).filter(Boolean))
+      // Resolving packages creates empty folders (npm/, git/, extensions/); only files change resources.
+      if ((area === 'packages' || area === 'resources') && isDirectory(join(dir, filename))) return
+      if (area) this.queue(area, cwd, join(dir, filename))
+    }
+    let current: TreeWatcher | null = null
+    const lost = (tree: boolean, error: Error): void => {
+      if (this.stopped || !existsSync(dir)) return
+      console.warn(
+        tree
+          ? `[vengeance] cannot watch ${dir} with its subfolders (${error.message}); watching its top level`
+          : `[vengeance] cannot watch ${dir} (${error.message})`
+      )
+      if (tree) arm(false)
+    }
+    const arm = (tree: boolean): void => {
+      try {
+        const watcher = tree
+          ? watchTree(dir, watchedConfigFolder, listener)
+          : watch(dir, { persistent: false }, listener)
+        current = watcher
+        watcher.on('error', (error) => {
+          watcher.close()
+          if (current !== watcher) return
+          current = null
+          lost(tree, error)
+        })
+      } catch (error) {
+        lost(tree, error as Error)
+      }
+    }
+    arm(subfolders)
+    return {
+      close: () => {
+        current?.close()
+        current = null
+      }
     }
   }
 
@@ -163,7 +207,7 @@ export class ConfigWatcher {
       return segments.length === 1 && INSTRUCTION_FILE.test(name!) ? 'instructions' : null
     })
     const configWatcher = this.watchDir(join(root, '.pi'), true, cwd, areaOf)
-    this.projectWatchers = [rootWatcher, configWatcher].filter((w): w is FSWatcher => w !== null)
+    this.projectWatchers = [rootWatcher, configWatcher].filter((w): w is FolderWatch => w !== null)
   }
 
   private isMuted(area: SettingsChangeArea): boolean {

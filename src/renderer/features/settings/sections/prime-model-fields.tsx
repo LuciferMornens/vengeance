@@ -1,6 +1,7 @@
 import { useId, useState, type ReactNode } from 'react'
 import { Plus, RotateCcw, X } from 'lucide-react'
 import { MODEL_API_TYPES, type JsonObject, type JsonValue } from '@shared/api/settings'
+import { isImeComposing } from '../../../lib/keybindings'
 import { Button, IconButton, Input, SegmentedControl, Select } from '../../../ui'
 import { ListEditor, NumberField } from '../controls'
 
@@ -151,7 +152,7 @@ function ThinkingLevelMap({ target, onChange }: PrimeFieldsProps) {
             aria-invalid={duplicate || undefined}
             onChange={(event) => setNewLevel(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') {
+              if (event.key === 'Enter' && !isImeComposing(event)) {
                 event.preventDefault()
                 add()
               }

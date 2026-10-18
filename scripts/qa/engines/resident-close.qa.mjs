@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { launchApp, reportShotsDir } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
+import { TRASH_NAME } from '../lib/platform.mjs'
 import { isAlive } from '../lib/processes.mjs'
 import { waitFor } from '../settings/settings-ui.mjs'
 import { createEngineFixture, PRIME_MODELS, PRIME_PROVIDER } from './integration-fixture.mjs'
@@ -250,7 +251,9 @@ try {
     exact: true
   })
   await deleteConfirmation.getByText(/Its running work and schedules will stop/).waitFor()
-  await deleteConfirmation.getByRole('button', { name: 'Move to Recycle Bin', exact: true }).click()
+  await deleteConfirmation
+    .getByRole('button', { name: `Move to ${TRASH_NAME}`, exact: true })
+    .click()
   await waitFor(() => !existsSync(deleteState.sessionFile), 'Delete removes the saved session')
   await waitFor(() => !isAlive(deleteDescriptor.pid), 'Delete stops the native worker')
   await waitFor(

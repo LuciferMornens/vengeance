@@ -5,13 +5,13 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { makePng, pickModelInFooter, until } from '../chat/helpers.mjs'
 import { launchApp, reportShotsDir, ROOT } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
-import { isAlive } from '../lib/processes.mjs'
+import { executableName } from '../lib/platform.mjs'
+import { isAlive, processIdentity } from '../lib/processes.mjs'
 import {
   createEngineFixture,
   executableHash,
   PRIME_MODELS,
-  PRIME_PROVIDER,
-  processIdentity
+  PRIME_PROVIDER
 } from './integration-fixture.mjs'
 
 const SUITE_NAME = 'engine2-resident-upgrade'
@@ -301,7 +301,7 @@ async function main() {
   try {
     const selected = await packageIdentity(
       fixture.candidate?.executablePath ??
-        join(ROOT, '.engine-staging', 'bundled', 'prime', 'prime-agent.exe')
+        join(ROOT, '.engine-staging', 'bundled', 'prime', executableName('prime-agent'))
     )
     assert.notEqual(selected.sha256, baseline.sha256)
     assert.notEqual(selected.version, baseline.version)
@@ -495,7 +495,7 @@ async function main() {
 
     await check('upgrade notice fits Bone at minimum width and large text', async () => {
       await application.test('setPrefs', { theme: 'light' })
-      await application.page.keyboard.press('Control+b')
+      await application.page.keyboard.press('ControlOrMeta+b')
       await application.app.evaluate(
         ({ BrowserWindow }, { size, zoom }) => {
           const browserWindow = BrowserWindow.getAllWindows()[0]
@@ -573,7 +573,7 @@ async function main() {
           browserWindow.setContentSize(size.width, size.height)
         }, DEFAULT_WINDOW_SIZE)
         await application.test('setPrefs', { theme: 'dark' })
-        await application.page.keyboard.press('Control+b')
+        await application.page.keyboard.press('ControlOrMeta+b')
       }
     })
 

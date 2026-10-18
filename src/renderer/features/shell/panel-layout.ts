@@ -31,8 +31,12 @@ export interface PanelLayout {
   inspectorOverlay: boolean
 }
 
+/**
+ * The minimum wins over the maximum: a window narrower than the minimum layout (a tiling compositor ignores the
+ * window's minimum size) keeps the panels at their minimum widths and the center pane gives way.
+ */
 function clamp(value: number, min: number, max: number): number {
-  return Math.round(Math.min(max, Math.max(min, value)))
+  return Math.round(Math.max(min, Math.min(max, value)))
 }
 
 /**

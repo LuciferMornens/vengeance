@@ -2,11 +2,13 @@
 // rename, delete confirm, fork dialog, all workspaces), share / import / closed-session tree dialogs,
 // inspector tabs (overview with engine arguments, branches with filters, labels and in-place navigation
 // with the branch-summary prompt, tools, files, timeline, extensions), two agents open + switching, light theme.
+import { mockHomePath, mockVolumePath } from './lib/mock-paths.mjs'
+
 const now = Date.now()
 const WORKSPACES = [
-  { path: 'C:\\Users\\dev\\projects\\aurora', name: 'aurora', lastOpenedAt: now },
-  { path: 'C:\\Users\\dev\\projects\\takedown', name: 'takedown', lastOpenedAt: now - 3_600_000 },
-  { path: 'D:\\work\\relay', name: 'relay', lastOpenedAt: now - 86_400_000 }
+  { path: mockHomePath('projects', 'aurora'), name: 'aurora', lastOpenedAt: now },
+  { path: mockHomePath('projects', 'takedown'), name: 'takedown', lastOpenedAt: now - 3_600_000 },
+  { path: mockVolumePath('work', 'relay'), name: 'relay', lastOpenedAt: now - 86_400_000 }
 ]
 
 /** Launch options of the first session, so Overview shows real engine arguments. */
@@ -164,7 +166,7 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
 
   await row(page, 'Why does the dev server').focus()
   await page.keyboard.press('F2')
-  await page.keyboard.press('Control+A')
+  await page.keyboard.press('ControlOrMeta+A')
   await page.keyboard.type('Vite double restart')
   await shot('sessions-rename', { settleMs: 300 })
   await page.keyboard.press('Enter')

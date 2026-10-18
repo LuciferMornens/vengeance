@@ -289,18 +289,18 @@ export function ProjectStep({ onOpen }: { onOpen: (path: string) => void }) {
     const path = await invoke('sys:pick-folder', { title: 'Choose a project folder' })
     if (path) onOpen(path)
   }
-  const onDrop = (e: DragEvent) => {
+  const onDrop = async (e: DragEvent) => {
     e.preventDefault()
     setOver(false)
     const file = e.dataTransfer.files[0]
     if (!file) return
-    // Folders arrive as size-0 entries without a type; files are rejected.
-    if (file.type || file.size > 0) {
+    const folder = await invoke('sys:dropped-folder', window.vengeance.pathForFile(file))
+    if (!folder) {
       setError('Drop a folder, not a file.')
       return
     }
     setError(null)
-    onOpen(window.vengeance.pathForFile(file))
+    onOpen(folder)
   }
 
   return (
@@ -317,7 +317,7 @@ export function ProjectStep({ onOpen }: { onOpen: (path: string) => void }) {
           setOver(true)
         }}
         onDragLeave={() => setOver(false)}
-        onDrop={onDrop}
+        onDrop={(e) => void onDrop(e)}
         animate={{ scale: over ? 1.015 : 1 }}
         transition={spring.snappy}
         className={cn(

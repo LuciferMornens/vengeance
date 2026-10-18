@@ -1,16 +1,25 @@
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { accessSync, constants, existsSync } from 'node:fs'
 import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { fileURLToPath } from 'node:url'
+import { executableName, hostKey, systemPath } from '../engines/common.mjs'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const root = join(scriptDir, '..', '..')
-const executable = join(root, 'resources', 'prime-auth', 'bin', 'vengeance-prime-auth.exe')
+const executable = join(
+  root,
+  'resources',
+  'prime-auth',
+  'bin',
+  executableName('vengeance-prime-auth', hostKey)
+)
+// Packaging copies the staged helper as-is; a lost executable bit must fail here, not at sign-in.
+accessSync(executable, constants.X_OK)
 const tempRoot = await mkdtemp(join(tmpdir(), 'vengeance-prime-native-auth-'))
 const agentDir = join(tempRoot, 'agent')
 const workspaceDir = join(tempRoot, 'workspace')
@@ -188,6 +197,7 @@ try {
   const fixtureUrl = `http://127.0.0.1:${address.port}`
   const environment = {
     ...process.env,
+    ...systemPath(),
     PRIME_AGENT_CODING_AGENT_DIR: agentDir,
     PRIME_AGENT_INFERENCE_API_BASE_URL: fixtureUrl,
     PRIME_AGENT_INFERENCE_FRONTEND_URL: fixtureUrl,

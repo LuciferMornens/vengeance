@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict'
 import { FAKE_MODELS, FAKE_PROVIDER } from '../lib/agent-dir.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
+import { DOCUMENT_END_KEY, DOCUMENT_START_KEY } from '../lib/platform.mjs'
 import { runSuite } from '../lib/suite.mjs'
 import {
   SHOTS_DIR,
@@ -225,12 +226,12 @@ await runSuite(
       await box.press('ArrowUp')
       assert.equal(await box.inputValue(), 'line one\nline two')
       // The caret lands at the end; Up on the first line of a multi-line entry goes further back.
-      await box.press('Control+Home')
+      await box.press(DOCUMENT_START_KEY)
       await box.press('ArrowUp')
       assert.equal(await box.inputValue(), 'Image on a text model')
       await box.press('ArrowDown')
       assert.equal(await box.inputValue(), 'line one\nline two')
-      await box.press('Control+End')
+      await box.press(DOCUMENT_END_KEY)
       await box.press('ArrowDown')
       assert.equal(await box.inputValue(), '', 'back to the empty draft')
     })
@@ -238,7 +239,7 @@ await runSuite(
     await step('the "!" history entry recalls the command text', async () => {
       const box = await composer(app)
       for (let i = 0; i < 12; i++) {
-        await box.press('Control+Home')
+        await box.press(DOCUMENT_START_KEY)
         await box.press('ArrowUp')
         if ((await box.inputValue()) === '!!echo bang-excluded-output') break
       }

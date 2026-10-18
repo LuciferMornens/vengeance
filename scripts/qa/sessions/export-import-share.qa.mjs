@@ -252,7 +252,10 @@ await runSuite(
     await check(
       'import a file whose folder is gone: warning, continues in this workspace, header rewritten',
       async () => {
-        const missing = 'C:\\qa-missing-folder\\nowhere'
+        const missing =
+          process.platform === 'win32'
+            ? 'C:\\qa-missing-folder\\nowhere'
+            : '/qa-missing-folder/nowhere'
         const source = await importSource('imported-moved.jsonl', {
           cwd: missing,
           prompt: 'imported prompt moved'

@@ -12,6 +12,7 @@ import {
   dismissToasts,
   fill,
   LAUNCH,
+  newSessionIn,
   openSettings,
   readJsonOrNull,
   restartFromToast,
@@ -62,6 +63,17 @@ async function toolsSent(app, server, text) {
   return inspectRequest(await sendAndCapture(app, server, text, turn.text('ok'))).tools
 }
 
+/**
+ * Open a new session in `cwd`; return its agent id and the tools its first request declares.
+ * `defaultTools` selects the tools a session starts with: the Engine resumes a session, as
+ * "Restart engines" does, with the tools its transcript declared (Engine 1.3.0 changelog,
+ * "Resumed sessions keep their active tools").
+ */
+async function newSessionTools(app, server, cwd, text) {
+  const agentId = await newSessionIn(app, cwd)
+  return { agentId, tools: await toolsSent(app, server, text) }
+}
+
 await runSuite(
   'settings-agent-tools-resources',
   async (context) => {
@@ -82,9 +94,10 @@ await runSuite(
     )
     await agentDir.writeText('../extra-ext/qa-ext.ts', EXTENSION)
     let agentId
+    let cwd
 
     await step('baseline: agent-dir skill loaded, extra resources not, default tools', async () => {
-      ;({ agentId } = await app.openWorkspace())
+      ;({ agentId, cwd } = await app.openWorkspace())
       const names = await commandNames(app)
       assert.ok(names.includes('skill:qa-skill'), names.join(', '))
       for (const missing of ['skill:qa-extra', 'qa-prompt', 'qa-ext-cmd']) {
@@ -142,7 +155,8 @@ await runSuite(
       await waitForJsonValue(settingsPath, 'defaultTools', ['+grep'])
       await restartFromToast(app, agentId)
       await closeSettings(app)
-      const tools = await toolsSent(app, server, 'tools with grep')
+      let tools
+      ;({ agentId, tools } = await newSessionTools(app, server, cwd, 'tools with grep'))
       assert.deepEqual([...tools].sort(), ['bash', 'edit', 'grep', 'read', 'write'])
     })
 
@@ -154,7 +168,8 @@ await runSuite(
         await waitForJsonValue(settingsPath, 'defaultTools', ['+grep', '-bash'])
         await restartFromToast(app, agentId)
         await closeSettings(app)
-        const tools = await toolsSent(app, server, 'tools without bash')
+        let tools
+        ;({ agentId, tools } = await newSessionTools(app, server, cwd, 'tools without bash'))
         assert.deepEqual([...tools].sort(), ['edit', 'grep', 'read', 'write'])
       }
     )
@@ -177,7 +192,8 @@ await runSuite(
         )
         await restartFromToast(app, agentId)
         await closeSettings(app)
-        const tools = await toolsSent(app, server, 'tools after reset')
+        let tools
+        ;({ agentId, tools } = await newSessionTools(app, server, cwd, 'tools after reset'))
         assert.deepEqual([...tools].sort(), ['bash', 'edit', 'read', 'write'])
       }
     )
@@ -225,7 +241,7 @@ await runSuite(
         await waitForJsonValue(settingsPath, 'codemode', { mode: 'only', inlineBudget: 0 })
         await restartFromToast(app, agentId)
         await closeSettings(app)
-        const tools = await toolsSent(app, server, 'codemode only')
+        const { tools } = await newSessionTools(app, server, cwd, 'codemode only')
         assert.ok(tools.includes('codemode'), tools.join(', '))
         assert.ok(!tools.includes('bash') && !tools.includes('read'), tools.join(', '))
         await app.screenshot('settings-agent-tools')

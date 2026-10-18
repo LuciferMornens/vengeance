@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { cn } from '../../../lib/cn'
+import { platform } from '../../../lib/ipc'
 import { useAgents } from '../../../store/agents'
 import { CodeView } from '../../../ui/CodeView'
 import { languageFromPath } from '../../../ui/highlight'
@@ -15,10 +16,11 @@ const PREVIEW_LINES = 60
 function touchedBefore(agentId: string, callId: string, path: string | undefined): boolean {
   if (!path) return false
   const tools = useAgents.getState().agents[agentId]?.tools ?? {}
-  const target = normalizePath(path)
+  const windows = platform.os === 'win32'
+  const target = normalizePath(path, windows)
   for (const [id, tool] of Object.entries(tools)) {
     if (id === callId) return false
-    if (['read', 'edit', 'write'].includes(tool.toolName) && typeof tool.args.path === 'string' && normalizePath(tool.args.path) === target) return true
+    if (['read', 'edit', 'write'].includes(tool.toolName) && typeof tool.args.path === 'string' && normalizePath(tool.args.path, windows) === target) return true
   }
   return false
 }

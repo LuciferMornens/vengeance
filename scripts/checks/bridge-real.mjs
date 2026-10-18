@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isDeepStrictEqual } from 'node:util'
+import { ELECTRON_SWITCHES } from '../qa/lib/platform.mjs'
 import { loadSessionTreeModule } from './session-tree-module.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -42,7 +43,7 @@ function assert(condition, message) {
 let app
 let code = 1
 try {
-  app = await electron.launch({ args: [root], env, timeout: 60_000 })
+  app = await electron.launch({ args: [root, ...ELECTRON_SWITCHES], env, timeout: 60_000 })
   const page = await app.firstWindow()
   page.on('pageerror', (error) => console.error('[renderer]', error.message))
   await page.waitForFunction(() => !!window.__vengeanceTest, null, { timeout: 30_000 })

@@ -1,0 +1,238 @@
+# Pull request and main gates: typecheck, build and workflow lint, then checks and screenshots on
+# Windows, macOS and Linux against engines built the way releases build them.
+#
+# The engines job builds each platform's staged engines and native helper once per input change
+# and saves them to the Actions cache. Every test job restores exactly that key and only verifies
+# the payload: npm run build:engines and build:auth reuse it without a toolchain. Linux engines
+# build in the Ubuntu 22.04 container, the glibc 2.35 baseline (scripts/engines/native.mjs refuses
+# newer symbols); the Linux tests run on the plain runner, where Xvfb gives Electron a display.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    name: Typecheck, build and workflow lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Build the app (electron-vite)
+        run: npx electron-vite build
+      - name: actionlint
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
+        with:
+          args: -color
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
+        with:
+          version: 1.31.1
+          advanced-security: false
+          annotations: true
+
+  engines:
+    name: Engines (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win32-x64
+            os: windows-2025
+            container: ''
+            rust-target: x86_64-pc-windows-gnu
+            native-build-jobs: 4
+          - platform: darwin-arm64
+            os: macos-15
+            container: ''
+            rust-target: aarch64-apple-darwin
+            native-build-jobs: 3
+          - platform: linux-x64
+            os: ubuntu-24.04
+            container: mirror.gcr.io/library/ubuntu@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
+            rust-target: x86_64-unknown-linux-gnu
+            native-build-jobs: 4
+    env:
+      VENGEANCE_NATIVE_BUILD_JOBS: ${{ matrix.native-build-jobs }}
+    steps:
+      # The image is minimal. git must exist before checkout (engine sources are git clones), and
+      # zstd before the cache step: the archive format is part of the cache version, so the Linux
+      # test job on the plain runner, which has zstd, only finds an entry written with zstd.
+      - name: Install build prerequisites (Ubuntu 22.04 container)
+        if: runner.os == 'Linux'
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential binutils ca-certificates curl git python3 xz-utils zstd
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Look up the staged engines
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .engine-staging/bundled
+            resources/prime-auth/bin
+          key: engines-v1-${{ matrix.platform }}-${{ hashFiles('engines.lock.json', 'patches/**', 'scripts/engines/**', 'scripts/build-prime-auth.mjs', 'resources/prime-auth/**', '!resources/prime-auth/bin/**', 'rust-toolchain.toml', '.node-version') }}
+          lookup-only: true
+      - name: Trust the mounted checkout (container)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - if: steps.cache.outputs.cache-hit != 'true' && runner.os != 'Linux'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      # Engine 2 and the helper build for x86_64-pc-windows-gnu with the GNU host toolchain, as on
+      # a developer machine: rust-toolchain.toml then resolves 1.98.1 to the GNU host, whose tool
+      # folder scripts/engines/build-prime.mjs uses. The image's UCRT MinGW has gcc and objdump.
+      - name: Use the GNU Rust host and MinGW (Windows)
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        run: |
+          rustup set default-host x86_64-pc-windows-gnu
+          printf '%s\n' 'C:\mingw64\bin' >> "$GITHUB_PATH"
+          /c/mingw64/bin/gcc --version
+          /c/mingw64/bin/objdump --version
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: 1.98.1
+          targets: ${{ matrix.rust-target }}
+          components: clippy, rustfmt
+      - name: Build the engines
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: npm run build:engines
+      - name: Build the Engine 2 helper
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: npm run build:auth
+      - name: Save the staged engines
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .engine-staging/bundled
+            resources/prime-auth/bin
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+  test:
+    name: Checks and shots (${{ matrix.platform }})
+    needs: [lint, engines]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win32-x64
+            os: windows-2025
+          - platform: darwin-arm64
+            os: macos-15
+          - platform: linux-x64
+            os: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      # The electron package has no install script and downloads its binary on demand; the shots launch it.
+      - name: Install the Electron binary
+        run: node node_modules/electron/install.js
+      - name: Restore the staged engines
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .engine-staging/bundled
+            resources/prime-auth/bin
+          key: engines-v1-${{ matrix.platform }}-${{ hashFiles('engines.lock.json', 'patches/**', 'scripts/engines/**', 'scripts/build-prime-auth.mjs', 'resources/prime-auth/**', '!resources/prime-auth/bin/**', 'rust-toolchain.toml', '.node-version') }}
+          fail-on-cache-miss: true
+      # prebuild runs build:engines and build:auth, which verify the restored payloads.
+      - run: npm run build
+      - run: npm run checks
+      # Shots size windows up to 2560 wide; log the desktop they get on hosted Windows and macOS.
+      - name: Raise the display resolution (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          try {
+            Set-DisplayResolution -Width 1920 -Height 1080 -Force -ErrorAction Stop
+          } catch {
+            Write-Output "::warning::The display resolution stays as it is: $_"
+          }
+          Get-CimInstance Win32_VideoController |
+            Format-Table Name, CurrentHorizontalResolution, CurrentVerticalResolution
+      - name: Log the display (macOS)
+        if: runner.os == 'macOS'
+        run: system_profiler SPDisplaysDataType
+      # Ubuntu 24.04 confines unprivileged user namespaces, which Chromium's sandbox needs
+      # (electron/electron#42510); the app keeps its sandbox on.
+      - name: Allow Chromium's sandbox (Linux)
+        if: runner.os == 'Linux'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Shots
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a -s '-screen 0 2560x1440x24' npm run shots
+          else
+            npm run shots
+          fi
+      - name: Upload the shots
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: shots-${{ matrix.platform }}
+          path: .shots/**/*.png
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high

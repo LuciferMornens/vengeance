@@ -1,12 +1,25 @@
 {
   "name": "vengeance",
   "productName": "Vengeance",
-  "version": "0.2.15",
+  "version": "0.3.0",
   "description": "Vengeance — a premium desktop coding agent.",
   "main": "./out/main/index.js",
-  "author": "Vengeance",
+  "author": {
+    "name": "Vengeance",
+    "email": "126121081+LuciferMornens@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/LuciferMornens/vengeance",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LuciferMornens/vengeance.git"
+  },
+  "bugs": {
+    "url": "https://github.com/LuciferMornens/vengeance/issues"
+  },
   "license": "UNLICENSED",
   "private": true,
+  "desktopName": "vengeance.desktop",
+  "packageManager": "npm@11.17.0",
   "engines": {
     "node": ">=22.19.0"
   },
@@ -23,7 +36,7 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "shots": "node scripts/shots.mjs",
     "e2e:real": "node scripts/e2e-real.mjs",
-    "e2e:packaged": "node scripts/e2e-real.mjs --exe release/win-unpacked/Vengeance.exe",
+    "e2e:packaged": "node scripts/e2e-real.mjs --packaged",
     "e2e:bridge": "node scripts/checks/bridge-real.mjs",
     "e2e:mcp": "node scripts/checks/mcp-reconnect-real.mjs",
     "e2e:tree": "node scripts/checks/session-tree-real.mjs",
@@ -54,7 +67,7 @@
     "electron-builder": "26.15.3",
     "electron-vite": "5.0.0",
     "lucide-react": "1.55.0",
-    "mermaid": "12.1.0",
+    "mermaid": "12.2.0",
     "motion": "14.1.0",
     "playwright": "1.64.0",
     "png-to-ico": "3.0.2",

@@ -3,11 +3,17 @@
 // Uses an ephemeral session (--no-session) and a temp Electron profile; engine config is only read.
 //
 //   npm run e2e:real                                   BUILT app (out/, npm run build first)
-//   npm run e2e:packaged                               release/win-unpacked/Vengeance.exe (npm run dist first)
+//   npm run e2e:packaged                               --packaged: the host's unpacked build in
+//                                                      release/ (npm run dist first)
 //   node scripts/e2e-real.mjs --exe <path-to-exe>      any packaged executable
 //
-// With --exe it also checks what only a packaged build can get wrong: app version and name, the bridge
-// extension loading from <resources>/bridge, and the single-instance lock (a second launch exits).
+// The unpacked build is win-unpacked/Vengeance.exe on Windows,
+// mac-arm64|mac/Vengeance.app/Contents/MacOS/Vengeance on macOS and
+// linux-unpacked|linux-arm64-unpacked/vengeance on Linux.
+//
+// With a packaged build it also checks what only a packaged build can get wrong: app version and
+// name, the bridge extension loading from <resources>/bridge, and the single-instance lock (a
+// second launch exits).
 import { _electron as electron } from 'playwright'
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
@@ -15,10 +21,17 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ELECTRON_SWITCHES, unpackedExecutable } from './qa/lib/platform.mjs'
+import { killTree } from './qa/lib/processes.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const exeFlag = process.argv.indexOf('--exe')
-const exe = exeFlag >= 0 ? resolve(process.argv[exeFlag + 1] ?? '') : null
+const exe =
+  exeFlag >= 0
+    ? resolve(process.argv[exeFlag + 1] ?? '')
+    : process.argv.includes('--packaged')
+      ? unpackedExecutable(join(root, 'release'))
+      : null
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 
 if (exe && !existsSync(exe)) {
@@ -48,14 +61,19 @@ function assert(condition, message) {
 /** Launch the packaged exe twice on one profile (test mode off): the second instance must exit on its own. */
 async function checkSingleInstance() {
   const profile = await mkdtemp(join(tmpdir(), 'vengeance-e2e-single-'))
-  const plainEnv = { ...process.env, VENGEANCE_USER_DATA: profile, VENGEANCE_NO_MICA: '1' }
+  const plainEnv = {
+    ...process.env,
+    VENGEANCE_USER_DATA: profile,
+    VENGEANCE_NO_MICA: '1',
+    VENGEANCE_SKIP_SHELL_ENV: '1'
+  }
   delete plainEnv.VENGEANCE_TEST
   delete plainEnv.VENGEANCE_MOCK
-  const first = spawn(exe, [], { env: plainEnv, stdio: 'ignore' })
+  const first = spawn(exe, ELECTRON_SWITCHES, { env: plainEnv, stdio: 'ignore' })
   try {
     await new Promise((r) => setTimeout(r, 4000))
     assert(first.exitCode === null, 'first instance keeps running')
-    const second = spawn(exe, [], { env: plainEnv, stdio: 'ignore' })
+    const second = spawn(exe, ELECTRON_SWITCHES, { env: plainEnv, stdio: 'ignore' })
     const exitCode = await new Promise((r) => {
       const timer = setTimeout(() => r('timeout'), 15_000)
       second.on('exit', (c) => {
@@ -67,7 +85,7 @@ async function checkSingleInstance() {
     assert(exitCode !== 'timeout', `second instance exits (code ${exitCode})`)
     assert(first.exitCode === null, 'first instance survives the second launch')
   } finally {
-    if (first.pid) spawn('taskkill', ['/PID', String(first.pid), '/T', '/F'], { stdio: 'ignore' })
+    if (first.pid) await killTree(first.pid)
     await new Promise((r) => setTimeout(r, 1500))
     await rm(profile, { recursive: true, force: true }).catch(() => undefined)
   }
@@ -77,8 +95,8 @@ let app
 let code = 1
 try {
   app = exe
-    ? await electron.launch({ executablePath: exe, args: [], env, timeout: 60_000 })
-    : await electron.launch({ args: [root], env, timeout: 60_000 })
+    ? await electron.launch({ executablePath: exe, args: ELECTRON_SWITCHES, env, timeout: 60_000 })
+    : await electron.launch({ args: [root, ...ELECTRON_SWITCHES], env, timeout: 60_000 })
   const page = await app.firstWindow()
   page.on('pageerror', (error) => console.error('[renderer]', error.message))
   await page.waitForFunction(() => !!window.__vengeanceTest, null, { timeout: 30_000 })

@@ -8,7 +8,8 @@ export async function runConflictingIdentityFixture(
     listPrimeBackground,
     connectPrimeResident,
     stopPrimeBackground,
-    savedIdentityReads
+    savedIdentityReads,
+    primeDaemonEndpoint
   },
   {
     endpoint,
@@ -28,7 +29,7 @@ export async function runConflictingIdentityFixture(
   const stopped = []
   const endpoints = await Promise.all(
     paths.map((path) =>
-      endpoint((socket) => {
+      endpoint(primeDaemonEndpoint, (socket) => {
         socket.write(
           `${JSON.stringify({ type: 'daemon_hello', protocol, clientId: randomUUID() })}\n`
         )

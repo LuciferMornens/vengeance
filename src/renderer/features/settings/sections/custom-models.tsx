@@ -8,6 +8,7 @@ import {
   type ValidationIssue
 } from '@shared/api/settings'
 import { cn } from '../../../lib/cn'
+import { isImeComposing } from '../../../lib/keybindings'
 import { invoke } from '../ipc'
 import {
   Badge,
@@ -409,7 +410,7 @@ export function CustomModelsSection() {
               list="models-json-providers"
               value={newId}
               onChange={(e) => setNewId(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && addProvider()}
+              onKeyDown={(e) => e.key === 'Enter' && !isImeComposing(e) && addProvider()}
               placeholder="Provider id, e.g. ollama"
               spellCheck={false}
               className="h-8 w-64 bg-surface-1 font-mono text-sm"

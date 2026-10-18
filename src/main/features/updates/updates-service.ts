@@ -1,5 +1,4 @@
 import { net } from 'electron'
-import { execFile } from 'node:child_process'
 import { existsSync, readFileSync, watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import {
@@ -17,6 +16,7 @@ import type { ProcessDoneEvent, ProcessLogEvent } from '@shared/api/settings'
 import type { AppPersistedState } from '@shared/api/app'
 import { appState } from '../../app-state'
 import { env } from '../../env'
+import { runGit } from '../../git'
 import { locateEngine, type EngineLocation } from '../../engine/locate'
 import { ENGINE_UPDATE_MESSAGE } from '../../engine/bundled'
 import type { EngineManager } from '../../engine/manager'
@@ -122,14 +122,10 @@ const MOCK_CHANGELOG = [
 ].join('\n')
 
 function gitShortHead(dir: string): Promise<string | undefined> {
-  return new Promise((resolve) => {
-    execFile(
-      'git',
-      ['-C', dir, 'rev-parse', '--short', 'HEAD'],
-      { windowsHide: true, timeout: 10_000 },
-      (error, stdout) => resolve(error ? undefined : stdout.trim() || undefined)
-    )
-  })
+  return runGit(['-C', dir, 'rev-parse', '--short', 'HEAD'], { timeout: 10_000 }).then(
+    (stdout) => stdout.trim() || undefined,
+    () => undefined
+  )
 }
 
 function gitWebUrl(source: string): string | undefined {

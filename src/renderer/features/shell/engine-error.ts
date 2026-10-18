@@ -3,13 +3,15 @@ const UNEXPECTED_EXIT = /^Engine exited unexpectedly \([^)]*\):?\s*/
 /** A stderr line that says what went wrong (not noise, not a stack frame). */
 const REASON_LINE = /error|failed|cannot|could not|not found|denied|refused|invalid|ENOENT|EACCES|EPERM/i
 const STACK_FRAME = /^\s*at\s/
-const FILE_URL_PREFIX = /file:\/\/\/?/g
+/** `file:///D:/x` becomes `D:/x`; `file:///Users/x` keeps its root (`/Users/x`). */
+const FILE_URL_PREFIX = /file:\/\/(?:\/(?=[A-Za-z]:))?/g
 /**
- * A quoted Windows path, an unquoted Windows path (folders may contain spaces, the last segment may not: `spawn
- * C:\Program Files\nodejs\node.exe ENOENT`), or a POSIX path with 2+ segments.
+ * A quoted Windows or POSIX path, an unquoted Windows path, or an unquoted POSIX path with 2+ segments. Unquoted
+ * folders may contain spaces, the last segment may not (`spawn C:\Program Files\nodejs\node.exe ENOENT`,
+ * `spawn /Applications/My Tools/node ENOENT`).
  */
 const ABSOLUTE_PATH =
-  /"[A-Za-z]:[\\/][^"]*"|[A-Za-z]:[\\/](?:[^\\/\s"'`)]+(?: [^\\/\s"'`)]+)*[\\/])*[^\\/\s"'`)]*|(?<![\w:/.])\/(?:[\w.@-]+\/)+[\w.@-]+/g
+  /"(?:[A-Za-z]:[\\/][^"]*|\/[^"/]+\/[^"]*)"|[A-Za-z]:[\\/](?:[^\\/\s"'`)]+(?: [^\\/\s"'`)]+)*[\\/])*[^\\/\s"'`)]*|(?<![\w:/.])\/(?:[\w.@-]+(?: [\w.@-]+)*\/)+[\w.@-]+/g
 /** A bare drive root used as a label says nothing (the extension loader's `ParseError: D:\: Missing semicolon.`). */
 const DRIVE_ROOT_LABEL = /(?<![\w"])[A-Za-z]:[\\/]:\s*/g
 /** Path segments kept for display: the file and its folder say enough (`extensions/broken.ts`). */

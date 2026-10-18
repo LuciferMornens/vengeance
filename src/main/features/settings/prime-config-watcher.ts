@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, watch, type FSWatcher } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, watch } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import type { SettingsChangeArea, SettingsEventMap } from '@shared/api/settings'
 import { primeProjectDir } from '../../engine/prime/configuration-store'
 import { getPrimeAgentDir } from '../../engine/prime/locate'
-import { authSignature } from './config-areas'
+import { watchTree, type TreeWatcher } from '../../watch-tree'
+import { authSignature, isResourceFolder } from './config-areas'
 
 const WATCH_RETRY_MS = 2_000
 const CHANGE_DEBOUNCE_MS = 350
@@ -25,7 +26,14 @@ interface WatchedRoot {
   signatures: Map<SettingsChangeArea, string | null>
   resourcesMutedUntil: number
   directory?: string
-  watcher?: FSWatcher
+  watcher?: TreeWatcher
+}
+
+const RESOURCE_DIRS = ['skills', 'prompts', 'themes']
+
+/** The subfolders of a config root Linux watches one by one (watch-tree.ts): the resource folders. */
+function watchedFolder(segments: string[]): boolean {
+  return RESOURCE_DIRS.includes(segments[0]!.toLowerCase()) && isResourceFolder(segments)
 }
 
 function changedArea(path: string): SettingsChangeArea | null {
@@ -36,7 +44,7 @@ function changedArea(path: string): SettingsChangeArea | null {
   if (name === 'models.json') return 'models'
   if (name === 'keybindings.json') return 'keybindings'
   if (name === 'mcp.json') return 'mcp'
-  if (name && ['skills', 'prompts', 'themes'].includes(name)) return 'resources'
+  if (name && RESOURCE_DIRS.includes(name)) return 'resources'
   if (name && ['agents.md', 'claude.md', 'system.md', 'append_system.md'].includes(name)) {
     return 'instructions'
   }
@@ -170,23 +178,23 @@ export class PrimeConfigWatcher {
     root.watcher?.close()
     root.directory = directory
     try {
-      const watcher = watch(
-        directory,
-        { recursive: directory === root.path && !root.workspaceRoot, persistent: false },
-        (event, filename) => {
-          if (this.stopped || root.watcher !== watcher) return
-          // A removed directory keeps reporting renames on Windows: move to the nearest existing ancestor.
-          const removed = event === 'rename' && !existsSync(directory)
-          if (removed || directory !== root.path || filename === null) {
-            this.sync()
-            return
-          }
-          const path = relative(root.path, join(directory, filename.toString()))
-          if (root.workspaceRoot && !isWorkspaceInstruction(path)) return
-          const area = changedArea(path)
-          if (area) this.queue(root, area)
+      const listener = (event: string, filename: string | null): void => {
+        if (this.stopped || root.watcher !== watcher) return
+        // A removed directory keeps reporting renames on Windows: move to the nearest existing ancestor.
+        const removed = event === 'rename' && !existsSync(directory)
+        if (removed || directory !== root.path || filename === null) {
+          this.sync()
+          return
         }
-      )
+        const path = relative(root.path, join(directory, filename))
+        if (root.workspaceRoot && !isWorkspaceInstruction(path)) return
+        const area = changedArea(path)
+        if (area) this.queue(root, area)
+      }
+      const watcher =
+        directory === root.path && !root.workspaceRoot
+          ? watchTree(directory, watchedFolder, listener)
+          : watch(directory, { persistent: false }, listener)
       root.watcher = watcher
       watcher.on('error', () => {
         watcher.close()

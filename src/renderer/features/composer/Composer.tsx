@@ -13,7 +13,8 @@ import { ENGINE_LABELS } from '@shared/api/engine'
 import { runAction } from '../../lib/actions'
 import { cn } from '../../lib/cn'
 import { rpc } from '../../lib/engine'
-import { invoke } from '../../lib/ipc'
+import { invoke, platform } from '../../lib/ipc'
+import { isImeComposing, shortcutText } from '../../lib/keybindings'
 import { spring } from '../../lib/motion'
 import { useAgents } from '../../store/agents'
 import { Kbd, Spinner, toast } from '../../ui'
@@ -62,7 +63,7 @@ const IDLE_HINTS = [
   'Mention a file with @',
   'Run a shell command with ! (!! keeps it out of context)',
   'Paste or drop images and files',
-  'Shift+Enter for a new line'
+  `${shortcutText('shift+enter')} for a new line`
 ]
 
 type Trigger =
@@ -421,7 +422,7 @@ export function Composer({ agentId }: { agentId: string }) {
 
   // ─── Keyboard ──────────────────────────────────────────────────────────────
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.nativeEvent.isComposing) return
+    if (isImeComposing(event)) return
     const el = event.currentTarget
 
     if (menuOpen) {
@@ -467,7 +468,13 @@ export function Composer({ agentId }: { agentId: string }) {
       return
     }
 
-    if (event.key === 'ArrowUp' && event.altKey && supportsEngineCommand(engine, 'clear_queue')) {
+    // On macOS ⌥↑ also moves the caret to the start of the paragraph, so there it restores only a non-empty queue.
+    if (
+      event.key === 'ArrowUp' &&
+      event.altKey &&
+      (platform.os !== 'darwin' || queue?.steering.length || queue?.followUp.length) &&
+      supportsEngineCommand(engine, 'clear_queue')
+    ) {
       event.preventDefault()
       void restoreQueue()
       return
@@ -483,7 +490,13 @@ export function Composer({ agentId }: { agentId: string }) {
       return
     }
 
-    if (event.key === 'ArrowUp' && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+    if (
+      event.key === 'ArrowUp' &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey
+    ) {
       const onFirstLine = !text.slice(0, el.selectionStart).includes('\n')
       const atStart = el.selectionStart === 0 && el.selectionEnd === 0
       if (
@@ -501,7 +514,14 @@ export function Composer({ agentId }: { agentId: string }) {
       return
     }
 
-    if (event.key === 'ArrowDown' && historyIndex !== null && !event.shiftKey) {
+    if (
+      event.key === 'ArrowDown' &&
+      historyIndex !== null &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey
+    ) {
       const onLastLine = !text.slice(el.selectionEnd).includes('\n')
       if (!onLastLine) return
       event.preventDefault()
@@ -552,7 +572,7 @@ export function Composer({ agentId }: { agentId: string }) {
         : compacting
           ? ['Compacting context… You can keep drafting or stop compaction.']
           : running
-            ? ['Steer the agent, or Alt+Enter to queue a follow-up']
+            ? [`Steer the agent, or ${shortcutText('alt+enter')} to queue a follow-up`]
             : IDLE_HINTS.filter((hint) => canRunBash || !hint.startsWith('Run a shell')),
     [ready, compacting, running, engine, canRunBash]
   )
@@ -601,10 +621,17 @@ export function Composer({ agentId }: { agentId: string }) {
       ref={rootRef}
       className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center px-6 pb-4 @max-[640px]/pane:px-3 @max-[640px]/pane:pb-3"
     >
-      {/* Transcript text dissolves under the composer: a near-opaque scrim plus a blur that fades in from the top. */}
+      {/*
+        Transcript text dissolves under the composer: a near-opaque scrim plus a blur that fades in from the top.
+        macOS can draw the blur without its mask, which cuts a hard edge through the text: there the blur starts
+        where the scrim is already opaque.
+      */}
       <div
         aria-hidden
-        className="absolute inset-x-0 -top-14 bottom-0 backdrop-blur-[6px] [mask-image:linear-gradient(to_bottom,transparent,black_32px)]"
+        className={cn(
+          'absolute inset-x-0 bottom-0 backdrop-blur-[6px] [mask-image:linear-gradient(to_bottom,transparent,black_32px)]',
+          platform.os === 'darwin' ? '-top-4' : '-top-14'
+        )}
       />
       <div
         aria-hidden

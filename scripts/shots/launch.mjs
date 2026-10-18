@@ -2,6 +2,8 @@
 // the workspace launch-options editor (every section, extension flags discovered from the engine help),
 // and "New session with options…" pre-filled from the workspace defaults.
 // Mock mode: the engine config is a seeded temp agent dir; defaultProjectTrust is switched to "ask" here.
+import { join } from 'node:path'
+import { mockHomePath } from './lib/mock-paths.mjs'
 
 export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   const dialog = page.getByRole('dialog').last()
@@ -64,9 +66,7 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   await dialog.getByLabel('Load mcp servers').click()
   await dialog.getByPlaceholder('./tools/review.ts or builtin:mcp').fill('builtin:codemode')
   await dialog.getByPlaceholder('./tools/review.ts or builtin:mcp').press('Enter')
-  await dialog
-    .getByPlaceholder('Skill file or folder')
-    .fill('C:\\Users\\dev\\skills\\release-notes')
+  await dialog.getByPlaceholder('Skill file or folder').fill(mockHomePath('skills', 'release-notes'))
   await dialog.getByPlaceholder('Skill file or folder').press('Enter')
   await section('Resources', 'launch-options-resources')
 
@@ -76,7 +76,7 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
     .getByLabel('Appended prompt 1', { exact: true })
     .fill('Prefer small, reviewable commits. Explain risky changes before making them.')
   await dialog.getByRole('button', { name: 'Text' }).click()
-  await dialog.getByLabel('Appended prompt 2', { exact: true }).fill('.pi\\team-conventions.md')
+  await dialog.getByLabel('Appended prompt 2', { exact: true }).fill(join('.pi', 'team-conventions.md'))
   await section('System prompt', 'launch-options-system-prompt')
 
   await dialog.getByRole('navigation').getByRole('button', { name: 'Models' }).click()
@@ -142,9 +142,7 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
 
   // Light theme: the decide dialog for another folder.
   await test('setPrefs', { theme: 'light' })
-  await page.evaluate(
-    () => void window.__vengeanceTest.openWorkspace('C:\\Users\\dev\\projects\\nightshade')
-  )
+  await page.evaluate((cwd) => void window.__vengeanceTest.openWorkspace(cwd), mockHomePath('projects', 'nightshade'))
   await page.getByText('Trust “nightshade”?').waitFor({ timeout: 15_000 })
   await settle()
   await shot('launch-trust-dialog-light', { settleMs: 600 })
