@@ -18,14 +18,16 @@ const IMAGE_BASE64 = makePng(IMAGE_SIZE, IMAGE_SIZE, IMAGE_COLOR).toString('base
 const OUTPUT_DIRECTORY = reportShotsDir('open-feedback')
 const BASELINE_TITLE = 'Feedback baseline'
 const SHADOW_COMMAND_NOTICE = 'QA native new command ran'
-const SHADOW_COMMAND_EXTENSION = `
+function commandExtension(name) {
+  return `
 export default function (engine) {
-  engine.registerCommand('new', {
+  engine.registerCommand('${name}', {
     description: 'Verify native command precedence during history readiness',
     handler: (_arguments, context) => context.ui.notify('${SHADOW_COMMAND_NOTICE}', 'info')
   })
 }
 `
+}
 const TITLES = [
   'Mouse open',
   'Keyboard open',
@@ -46,11 +48,11 @@ const TITLES = [
   'Failed open'
 ]
 
-async function installDelays(application) {
-  await application.evaluate(({ ipcMain }) => {
+async function installDelays(application, existingAgents) {
+  await application.evaluate(({ ipcMain }, agents) => {
     const handlers = new Map()
     const gates = new Map()
-    const paths = new Map()
+    const paths = new Map(agents.map((agent) => [agent.agentId, agent.args.sessionPath]))
     for (const channel of ['engine:create', 'sessions:describe', 'engine:command']) {
       const original = ipcMain._invokeHandlers.get(channel)
       handlers.set(channel, original)
@@ -81,7 +83,7 @@ async function installDelays(application) {
       delete globalThis.__openFeedbackGates
       delete globalThis.__restoreOpenFeedback
     }
-  })
+  }, existingAgents)
 }
 
 async function hold(application, path, channel = 'engine:create') {
@@ -225,12 +227,13 @@ await runSuite(
       paths.set(title, await session.write(directory))
     }
     const baseline = await app.test('openSession', baselinePath, 'pi')
+    await agentDir.writeText('extensions/qa-opening-shadow.ts', commandExtension('new'))
     const row = (title) => app.page.locator('[data-session-row]', { hasText: title }).first()
     const opening = app.page.locator('[data-session-opening]')
     const answer = (title) =>
       app.page.locator('[data-transcript-scroll]').getByText(`Answer for ${title}`, { exact: true })
     const metrics = []
-    await installDelays(app.app)
+    await installDelays(app.app, await app.invoke('engine:list'))
 
     try {
       await step(
@@ -540,6 +543,11 @@ await runSuite(
           .filter({ hasText: 'QA command catalog unavailable' })
         await failure.getByRole('button', { name: 'Dismiss', exact: true }).click()
         await failure.waitFor({ state: 'hidden' })
+        const commandNotice = app.page
+          .getByRole('status')
+          .filter({ hasText: 'Commands could not be loaded' })
+        await commandNotice.getByRole('button', { name: 'Dismiss', exact: true }).click()
+        await commandNotice.waitFor({ state: 'hidden' })
       })
 
       await step('a ready cached conversation opens without a pending layer', async () => {
@@ -571,6 +579,32 @@ await runSuite(
           await observation.dispose()
         }
       })
+
+      await step(
+        'extension reload cannot route a newly shadowed command through a stale catalog',
+        async () => {
+          await app.test('openSession', baselinePath, 'pi')
+          assert.equal(
+            (await app.agentState()).commands.some((command) => command.name === 'new'),
+            false
+          )
+          const channel = 'engine:command:get_commands'
+          await hold(app.app, baselinePath, channel)
+          const composer = await app.composer()
+          await composer.fill('/reload')
+          await composer.press('Enter')
+          await entered(app.app, baselinePath, channel)
+          await rejectCatalog(app.app, baselinePath)
+          await app.page.getByText('Could not reload', { exact: true }).waitFor()
+          const count = (await app.invoke('engine:list')).length
+          await composer.fill('/new')
+          await composer.press('Enter')
+          await app.page.getByText('Commands could not be loaded', { exact: true }).waitFor()
+          assert.equal(await composer.inputValue(), '/new')
+          assert.equal((await app.invoke('engine:list')).length, count)
+          assert.equal(await app.activeAgentId(), baseline)
+        }
+      )
 
       await step(
         'the rename delay keeps deliberate sidebar focus through native opening',
@@ -693,7 +727,9 @@ await runSuite(
     }
   },
   {
-    agentDir: { files: { 'extensions/qa-opening-shadow.ts': SHADOW_COMMAND_EXTENSION } },
+    agentDir: {
+      files: { 'extensions/qa-opening-shadow.ts': commandExtension('qa-before-reload') }
+    },
     launch: { outDir: OUTPUT_DIRECTORY, exe: process.env.QA_PACKAGED_EXE }
   }
 )

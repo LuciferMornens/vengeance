@@ -239,6 +239,7 @@ export interface AgentState {
   liveUsage?: Usage
   commands: RpcSlashCommand[]
   commandsStatus: 'loading' | 'ready' | 'error'
+  commandsRevision: number
   retry: RetryState | null
   /** Final auto-retry failure message, cleared by the next run. */
   retryError?: string
@@ -281,6 +282,7 @@ export function createAgentState(info: AgentInfo): AgentState {
     sessionName: info.sessionName,
     commands: [],
     commandsStatus: 'loading',
+    commandsRevision: 0,
     retry: null,
     compaction: null,
     summarizationRetry: null,

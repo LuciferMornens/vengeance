@@ -4,16 +4,14 @@ import type {
   EngineEvent,
   ImageContent,
   RpcExtensionUIResponse,
-  RpcSessionState,
-  RpcSlashCommand,
   ThinkingLevel
 } from '@shared/engine-types'
 import { clientCommandId, rpc } from '../lib/engine'
 import { invoke, on } from '../lib/ipc'
 import { samePath } from '../lib/paths'
 import { hydrateMessages, landBashRuns, pruneBashRuns, reduceAgentEvent } from './agent-reducer'
+import { refreshAgentCapabilities } from './agent-capabilities'
 import {
-  capabilityStatePatch,
   createAgentState,
   hasReadyHistory,
   restartedRuntime,
@@ -366,27 +364,7 @@ export const useAgents = create<AgentsStore>()((set, get) => ({
     return request
   },
 
-  async refreshCapabilities(agentId) {
-    const generation = get().agents[agentId]?.engineGeneration
-    const revision = get().agents[agentId]?.snapshotRevision
-    const modelRevision = get().agents[agentId]?.modelRevision
-    if (generation === undefined) return
-    const [state, levels, commands] = await Promise.all([
-      rpc(agentId, { type: 'get_state' }),
-      rpc(agentId, { type: 'get_available_thinking_levels' }),
-      rpc(agentId, { type: 'get_commands' })
-    ]).catch((error) => {
-      if (
-        isCurrentGeneration(agentId, generation, revision) &&
-        get().agents[agentId]?.commandsStatus !== 'ready'
-      ) {
-        get().patchAgent(agentId, { commandsStatus: 'error' })
-      }
-      throw error
-    })
-    if (!isCurrentGeneration(agentId, generation, revision)) return
-    applyCapabilities(agentId, state, levels.levels, commands.commands, modelRevision)
-  },
+  refreshCapabilities: refreshAgentCapabilities,
 
   async refreshStats(agentId) {
     const generation = get().agents[agentId]?.engineGeneration
@@ -461,25 +439,7 @@ async function refreshAgent(agentId: string): Promise<void> {
     }
   )
   // Extension discovery can be slow; committed history does not depend on the command catalog.
-  const capabilities = Promise.all([
-    stateRequest,
-    rpc(agentId, { type: 'get_available_thinking_levels' }),
-    rpc(agentId, { type: 'get_commands' })
-  ])
-    .then(([state, levels, commands]) => {
-      if (isCurrentGeneration(agentId, generation, revision)) {
-        applyCapabilities(agentId, state, levels.levels, commands.commands, modelRevision)
-      }
-    })
-    .catch((error) => {
-      if (
-        isCurrentGeneration(agentId, generation, revision) &&
-        get().agents[agentId]?.commandsStatus !== 'ready'
-      ) {
-        get().patchAgent(agentId, { commandsStatus: 'error' })
-      }
-      throw error
-    })
+  const capabilities = refreshAgentCapabilities(agentId, stateRequest)
   await Promise.all([history, capabilities])
 }
 
@@ -603,21 +563,6 @@ function dropIdleDialogsSince(agentId: string, since: number): void {
   )
   if (dialogs.length !== agent.ext.dialogs.length)
     useAgents.getState().patchAgent(agentId, { ext: { ...agent.ext, dialogs } })
-}
-
-/** Apply engine capabilities (state, levels, commands) without touching the transcript. */
-function applyCapabilities(
-  agentId: string,
-  state: RpcSessionState,
-  levels: ThinkingLevel[],
-  commands: RpcSlashCommand[],
-  modelRevision: number | undefined
-): void {
-  const agent = useAgents.getState().agents[agentId]
-  if (!agent) return
-  useAgents
-    .getState()
-    .patchAgent(agentId, capabilityStatePatch(agent, state, levels, commands, modelRevision))
 }
 
 const pending = new Map<string, EngineEvent[]>()
