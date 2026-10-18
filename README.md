@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/LuciferMornens/vengeance/releases/latest"><img alt="Version 0.3.1" src="https://img.shields.io/badge/version-0.3.1-FF4D3D?style=flat-square"></a>
+  <a href="https://github.com/LuciferMornens/vengeance/releases/latest"><img alt="Version 0.3.2" src="https://img.shields.io/badge/version-0.3.2-FF4D3D?style=flat-square"></a>
   <a href="https://github.com/LuciferMornens/vengeance/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/LuciferMornens/vengeance/actions/workflows/ci.yml/badge.svg"></a>
   <a href="#download"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-0078D4?style=flat-square"></a>
   <a href="#download"><img alt="macOS arm64 and x64" src="https://img.shields.io/badge/macOS-arm64%20%7C%20x64-000000?style=flat-square"></a>
@@ -527,7 +527,7 @@ The app version is defined in [package.json](package.json).
 
 ### Release notes
 
-**Latest: [Vengeance 0.3.1](docs/RELEASE-0.3.1.md)** covers the changes and checks for the current
+**Latest: [Vengeance 0.3.2](docs/RELEASE-0.3.2.md)** covers the changes and checks for the current
 version. The packages themselves are on the
 [GitHub release](https://github.com/LuciferMornens/vengeance/releases/latest).
 
@@ -539,6 +539,7 @@ They are evidence, not current installation status or promises that local genera
 exist. Use the lockfile and current guides for maintenance instructions. Reports before 0.3.0 cover
 local Windows x64 builds only.
 
+- [Release 0.3.1](docs/RELEASE-0.3.1.md): app self-update works again; Vengeance License 1.0.
 - [Release 0.3.0](docs/RELEASE-0.3.0.md): first published release, and the first for macOS and
   Linux.
 - [Release 0.2.15](docs/RELEASE-0.2.15.md): Engine extension gallery and restart offers that name
