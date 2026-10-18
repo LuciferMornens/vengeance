@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm, unlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import fileSystem from 'node:fs'
+import { mkdir, unlink, writeFile } from 'node:fs/promises'
+import { syncBuiltinESMExports } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
+import { tempRoot } from '../qa/lib/tmp.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
-const temporaryRoot = await mkdtemp(join(tmpdir(), 'vengeance-instruction-watcher-'))
+const fixture = await tempRoot('vengeance-instruction-watcher-')
+const temporaryRoot = fixture.dir
 const account = join(temporaryRoot, 'account')
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR
 const BLOCKED_MAIN_MS = 1800
@@ -28,6 +31,27 @@ function delayMainThread() {
 async function expectEvents(expected) {
   await delay(WATCHER_SETTLE_MS)
   assert.deepEqual(events.splice(0), expected)
+}
+
+// Simulate a Windows sharing lock for one replacement while allowing overlapping writes to finish.
+async function withBlockedReplacement(path, operation) {
+  const nativeRename = fileSystem.renameSync
+  let blockedSource
+  fileSystem.renameSync = (source, destination) => {
+    if (destination === path && (blockedSource === undefined || source === blockedSource)) {
+      blockedSource = source
+      throw Object.assign(new Error('Simulated Windows sharing violation'), { code: 'EPERM' })
+    }
+    return nativeRename(source, destination)
+  }
+  syncBuiltinESMExports()
+  try {
+    await operation()
+    assert.notEqual(blockedSource, undefined, 'The replacement must reach the rename boundary')
+  } finally {
+    fileSystem.renameSync = nativeRename
+    syncBuiltinESMExports()
+  }
 }
 
 try {
@@ -119,9 +143,52 @@ try {
   await writeFile(instructionPath, SAVED_TEXT)
   await expectEvents([{ area: 'instructions', cwd: null, fromRun: false }])
   console.log('PASS delayed owned removal stays quiet; external recreation still notifies')
+
+  await writeFileAtomic(instructionPath, SAVED_TEXT)
+  watcher.noteSelfChange('instructions')
+  await expectEvents([])
+  const rejectedText = 'Rejected by a sharing lock\n'
+  await withBlockedReplacement(instructionPath, () =>
+    assert.rejects(writeFileAtomic(instructionPath, rejectedText), { code: 'EPERM' })
+  )
+  fileSystem.writeFileSync(instructionPath, SAVED_TEXT, 'utf8')
+  await expectEvents([])
+  fileSystem.writeFileSync(instructionPath, rejectedText, 'utf8')
+  await expectEvents([{ area: 'instructions', cwd: null, fromRun: false }])
+  console.log(
+    'PASS failed replacement keeps the saved ownership and exposes attempted text as external'
+  )
+
+  const appendPath = join(account, 'APPEND_SYSTEM.md')
+  await withBlockedReplacement(appendPath, () =>
+    assert.rejects(writeFileAtomic(appendPath, rejectedText), { code: 'EPERM' })
+  )
+  fileSystem.writeFileSync(appendPath, rejectedText, 'utf8')
+  await expectEvents([{ area: 'instructions', cwd: null, fromRun: false }])
+  console.log('PASS failed creation does not suppress a matching external creation')
+
+  await writeFileAtomic(instructionPath, SAVED_TEXT)
+  watcher.noteSelfChange('instructions')
+  await expectEvents([])
+  const concurrentText = 'Saved by an overlapping write\n'
+  await withBlockedReplacement(instructionPath, async () => {
+    const failedWrite = assert.rejects(writeFileAtomic(instructionPath, concurrentText), {
+      code: 'EPERM'
+    })
+    try {
+      await delay(OWNED_WRITE_SETTLE_MS)
+      await writeFileAtomic(instructionPath, concurrentText)
+    } finally {
+      await failedWrite
+    }
+  })
+  await expectEvents([])
+  fileSystem.writeFileSync(instructionPath, SAVED_TEXT, 'utf8')
+  await expectEvents([{ area: 'instructions', cwd: null, fromRun: false }])
+  console.log('PASS failed replacement cannot undo ownership of a concurrent same-text save')
 } finally {
   watcher?.stop()
   if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR
   else process.env.PI_CODING_AGENT_DIR = previousAgentDir
-  await rm(temporaryRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  await fixture.cleanup()
 }

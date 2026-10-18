@@ -123,9 +123,9 @@ export async function writeFileAtomic(
   text: string,
   options: ReplaceFileOptions = {}
 ): Promise<void> {
-  // Recorded before the rename: the watcher's event for it can only arrive afterwards.
-  rememberWrittenText(path, text)
   await replaceFile(path, text, options)
+  // This continuation runs before fs.watch observes the successful synchronous rename.
+  rememberWrittenText(path, text)
 }
 
 /**
