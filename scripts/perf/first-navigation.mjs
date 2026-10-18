@@ -26,6 +26,7 @@ const CLOSE_TIMEOUT_MS = 5000
 const CLOSE_POLL_MS = 50
 const HISTORY_SCROLL_STABILITY_MS = 800
 const HISTORY_READY_TIMEOUT_MS = 5000
+const HISTORY_ENTRY_SCROLL_SCREENS = 4
 const OUTPUT_DIRECTORY = join(ROOT, '.shots', 'perf', 'first-navigation')
 const label = argument('--label') ?? 'sample'
 const runs = Number(argument('--runs') ?? DEFAULT_RUNS)
@@ -249,6 +250,26 @@ async function saveTimeline(profiler, path) {
 }
 
 async function verifyHistoryScrolling(page) {
+  const transcript = page.locator('[data-transcript-scroll]')
+  const rectangle = await transcript.boundingBox()
+  await page.mouse.move(rectangle.x + rectangle.width / 2, rectangle.y + rectangle.height / 2)
+  await page.mouse.wheel(0, -rectangle.height * HISTORY_ENTRY_SCROLL_SCREENS)
+  await page.waitForFunction(
+    () => {
+      const scroller = document.querySelector('[data-transcript-scroll]')
+      const viewport = scroller.getBoundingClientRect()
+      return [...scroller.querySelectorAll('[data-virtual-segments] > [data-index]')].some(
+        (row) => {
+          const rectangle = row.getBoundingClientRect()
+          return (
+            rectangle.bottom > viewport.top && rectangle.top < viewport.bottom && row.textContent
+          )
+        }
+      )
+    },
+    null,
+    { timeout: HISTORY_READY_TIMEOUT_MS }
+  )
   await page.evaluate(() => {
     const transcript = document.querySelector('[data-transcript-scroll]')
     transcript.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }))
@@ -287,6 +308,7 @@ async function verifyHistoryScrolling(page) {
     const transcript = document.querySelector('[data-transcript-scroll]')
     return transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 1
   })
+  return { firstUpwardScroll: true, oldestHistory: true, stableReader: true, jumpToLatest: true }
 }
 
 async function visit(page, path, engine, title) {
@@ -410,7 +432,7 @@ async function sample(workspace, paths, engine, run) {
     )
     const screenshot = join(OUTPUT_DIRECTORY, `${label}-${engine}-${run}.png`)
     await page.screenshot({ path: screenshot })
-    await verifyHistoryScrolling(page)
+    const scrolling = await verifyHistoryScrolling(page)
     const identity = await bundledIdentity(page, engine, first.agentId)
     assert.deepEqual(errors, [])
     return {
@@ -424,6 +446,7 @@ async function sample(workspace, paths, engine, run) {
       paints,
       workerUrls,
       screenshot,
+      scrolling,
       identity
     }
   } catch (error) {

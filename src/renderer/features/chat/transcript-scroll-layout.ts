@@ -4,6 +4,7 @@ import { elementScroll, useVirtualizer, type VirtualItem } from '@tanstack/react
 /** The transcript column's pt-8 padding is above the virtual list. */
 export const TRANSCRIPT_TOP_PADDING = 32
 const ESTIMATED_SEGMENT_HEIGHT = 180
+const HISTORY_OVERSCAN = 6
 
 export interface ScrollLayoutSnapshot {
   sizes: Map<string, number>
@@ -77,7 +78,8 @@ export function useTranscriptVirtualizer({
       followsLatest.current
         ? segments.length * ESTIMATED_SEGMENT_HEIGHT + TRANSCRIPT_TOP_PADDING
         : (initial.offset ?? scrollElement?.scrollTop ?? 0),
-    overscan: 6,
+    // Following the bottom needs no offscreen history buffer; readers get one for upward scrolling.
+    overscan: followsLatest.current ? 0 : HISTORY_OVERSCAN,
     scrollMargin: TRANSCRIPT_TOP_PADDING,
     scrollToFn: (offset, options, instance) => {
       // The follow policy owns the full transcript bottom, including its plain live tail.
