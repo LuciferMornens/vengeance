@@ -24,8 +24,9 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 `763094e1b6a7c17450ee8399b06cda1853847ca5`. The builds identify as `1.3.0+vengeance.2` and
 `0.10.0+vengeance.11`. Never reuse a Vengeance build version for different shipped behavior.
 
-The current Prime source comparison and patch decisions are recorded in
-[PRIME-STABLE-AUDIT-2026-10-16.md](docs/PRIME-STABLE-AUDIT-2026-10-16.md).
+The current stable-release verification and Prime patch decisions are recorded in
+[ENGINE-STABLE-AUDIT-2026-10-18.md](docs/ENGINE-STABLE-AUDIT-2026-10-18.md), with the preceding
+source comparison in [PRIME-STABLE-AUDIT-2026-10-16.md](docs/PRIME-STABLE-AUDIT-2026-10-16.md).
 The [pi patch guide](patches/pi/README.md) records the 1.3.0 reconciliation and retired catalog
 fallback. The [14 October audit](docs/ENGINE-AUDIT-2026-10-14.md) records earlier integration
 evidence and gaps. Engine 2 settings preservation and rustls maintenance are identified upstream
@@ -352,6 +353,21 @@ Linux the pi runner uses the system `bash`.
 `QA_PI_SOURCE` and `QA_PRIME_SOURCE` select an authoring checkout while
 developing a patch; release qualification must also reconstruct and build the exported patch series.
 
+On Windows, cargo-fmt's single invocation can exceed the command-line limit after canonicalizing all
+workspace targets. The Prime runner checks each metadata-discovered package and recursively declared
+path dependency separately, with the same formatter and checks; it reports package and target counts.
+For native qualification on a memory-limited host, omit debug symbols and bound test concurrency:
+
+```sh
+CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 RUST_TEST_THREADS=4 \
+  node scripts/checks/prime-workspace.mjs --with-kernel
+```
+
+These settings change symbol output and scheduling, not assertions or runtime lock budgets. Record
+them with the run. Debug executables can be large enough to make the packaging fixture's archive and
+checksum work costly. A run requiring external process cleanup is diagnostic evidence; repeat it
+without intervention before reporting a clean native pass.
+
 Retain the Windows regressions for session cache invalidation, file leases, named-pipe cancellation,
 fragmented daemon commands interrupted by events, npm launching and edit errors. A fragmented command
 must keep its prefix when another event wins the daemon's select loop; test the actual socket protocol,
@@ -432,3 +448,22 @@ text. The stable builder's direct guideline API remains available. Retire the ba
 base contains the upstream fix and the provider-payload and diagnostic regressions pass on that base.
 No session format, account schema, or helper protocol revision changes. Rebuild the helper against the
 new engine fingerprint, and qualify an idle resident transition from the complete `.10` package.
+
+The `.11` lock now carries 22 ordered Prime patches. Patches `0021` and `0022` are test-only
+qualification changes after runtime backport `0020`; the upstream base and protocol revisions remain
+pinned. The first native attempt exposed both a Windows ACP cleanup hang and refinement-fixture lock
+starvation. Its ACP EOF assertion had passed before a stderr-reader join stalled; stopping that
+identified temporary daemon released the reader, so the intervened run is not a clean qualification.
+Patch `0021` uses anonymous-file diagnostics and bounded, acknowledged native shutdown. Keep its
+session creation/EOF assertions and verify the fixture leaves no native processes. Retire it after the
+equivalent upstream fixture passes repeated Windows runs and the full native suite without cleanup
+intervention.
+
+Patch `0022` takes only the refinement fixture from upstream
+[`f0d9c09676a1e6bb2782ad73eb3025ffdf2061d4`](https://github.com/PrimeIntellect-ai/prime-agent/commit/f0d9c09676a1e6bb2782ad73eb3025ffdf2061d4).
+Five isolated stable-fixture failures confirmed repeated reacquisition can exhaust the intentional
+bounded lock wait. The correction races two fresh writers per round, retaining the 80-update check;
+it changes no runtime lock or timeout and excludes the unrelated abort-test change. Retire it when
+the stable candidate includes that hunk and passes repeated isolated and full-workspace checks.
+The final 22-patch reconstruction succeeded; its clean full native run is pending. Record final
+results with the release evidence rather than inferring them from reconstruction or focused passes.

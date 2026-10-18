@@ -59,7 +59,9 @@
       "patches/prime-agent/0017-rustls-maintenance.patch",
       "patches/prime-agent/0018-oauth-refresh-persistence-flight.patch",
       "patches/prime-agent/0019-native-fixture-coordination.patch",
-      "patches/prime-agent/0020-native-append-system-prompt.patch"
+      "patches/prime-agent/0020-native-append-system-prompt.patch",
+      "patches/prime-agent/0021-acp-fixture-cleanup.patch",
+      "patches/prime-agent/0022-upstream-harness-lock-fixture.patch"
     ],
     "catalogRevision": "b90e08807c37ccdfab04eb31b23de6a86dd6e7fe",
     "rustVersion": "1.98.1",

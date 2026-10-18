@@ -29,6 +29,8 @@ The exact source, catalog revision, toolchain and patch order live in
 | 0018  | Keep each OAuth refresh flight through credential persistence so waiting callers reuse its token.         |
 | 0019  | Coordinate native timing/lifecycle fixtures and expose a private receive seam for piped-input tests.      |
 | 0020  | Include native APPEND_SYSTEM sources in session prompts and prompt dumps, preserving raw text.            |
+| 0021  | Bound ACP fixture shutdown and collect stderr without waiting for inherited Windows pipe handles.         |
+| 0022  | Backport upstream's bounded-lock concurrency fixture while asserting all 80 writes land.                  |
 
 Patch 0014 comes from upstream commit
 [`7b89c111da0f1d9e67849b34f10552bbb4bd1bd1`](https://github.com/PrimeIntellect-ai/prime-agent/commit/7b89c111da0f1d9e67849b34f10552bbb4bd1bd1).
@@ -63,6 +65,25 @@ provider regressions cover independent SYSTEM/APPEND scope precedence, explicit 
 empty overrides, raw Markdown and whitespace, default foundation layers, and a live model switch.
 Retirement requires those regressions and the CLI diagnostic case to pass on the candidate upstream
 base; the newer core fix alone does not qualify the CLI dump or the app's saved-worker restart path.
+
+Patch 0021 is test-only. The ACP fixture captures stderr in an anonymous temporary file, so
+descendants holding inherited Windows handles cannot stall its diagnostic reader. Cleanup requires
+the fixture socket's native shutdown acknowledgement, connection closure and supervisor process exit
+within a bounded asynchronous operation. Its child cleanup is also bounded. Cleanup errors fail the
+test visibly, or print alongside an active assertion failure without causing a second panic. The
+session/new and successful ACP EOF-exit assertions remain intact. The regression must pass without
+external process intervention before this fixture is qualified on a new upstream base.
+
+Patch 0022 backports only the refinement-test hunk from upstream
+[`f0d9c09676a1e6bb2782ad73eb3025ffdf2061d4`](https://github.com/PrimeIntellect-ai/prime-agent/commit/f0d9c09676a1e6bb2782ad73eb3025ffdf2061d4);
+its unrelated abort-boundary fixture hunk is excluded. The runtime lock intentionally has a bounded,
+unfair wait: repeated writer reacquisition can exhaust a waiter's retry budget without losing an
+accepted update. The stable fixture failed five isolated runs on Windows; the logs remain in
+`.cache/prime-refinement-repeat-{1..5}.log`. The upstream fixture races two fresh writers in each of
+40 rounds and still asserts all 80 updates, avoiding repeated reacquisition by one writer within a
+round. This is a test-only backport, not a runtime lock fix; lock behavior and timeouts do not change.
+Retire it when a candidate upstream base incorporates the hunk and passes repeated isolated runs
+and the full native suite. Qualification of this local backport is recorded with the release checks.
 
 The first three patches originated on development commit
 `fa20be8e487b1889c2395ea33906149aef983ca0`. Patch 0002 was rebased onto stable source:

@@ -12,8 +12,8 @@ backport described below; its build identity changes while the upstream revision
 | pi          | `v1.3.0`      | 15 October 2026, 19:17:33 | `71023aec1546d6d677a65669c5665c0927ce0dd0` | `1.3.0+vengeance.2`   |
 | Prime Agent | `v0.10.0`     | 9 October 2026, 21:28:57  | `763094e1b6a7c17450ee8399b06cda1853847ca5` | `0.10.0+vengeance.11` |
 
-The Vengeance identities above are the current lock entries. The new Prime build requires the
-final reconstruction, native build and runtime qualification described below before release.
+The Vengeance identities above are the current lock entries. Prime's complete 22-patch series has
+been reconstructed; its clean full native run and final runtime qualification are pending.
 
 The official GitHub `releases/latest` responses identify these releases as non-prereleases.
 Independent `git ls-remote --tags` checks, sorting numbered stable tags as versions, find the
@@ -42,7 +42,8 @@ There is no new stable source or session-format transition to qualify in this au
 Every active source patch remains listed in [the engine lock](../engines.lock.json). An unchanged
 upstream base supplies no new evidence for retiring a patch. pi's historical catalog patch `0004`
 stays retired; its active seven-patch series and Prime's first nineteen patches are unchanged.
-Prime patch `0020` extends the series. The helper keeps the same upstream revision and protocol;
+Prime patch `0020` extends runtime behavior, and test-only qualification patches `0021` and `0022`
+bring the ordered series to 22 patches. The helper keeps the same upstream revision and protocol;
 its changed engine inputs require a rebuild and qualification against the final patched source.
 
 Development source was checked without changing the stable base:
@@ -100,6 +101,41 @@ and its public API changes are reviewed. Recheck the separate native CLI diagnos
 retiring the whole patch. Running residents keep their current prompt until an explicit guarded
 restart; a successful native `reload` response does not rebuild their prompt.
 
+## Native qualification fixture corrections
+
+The initial full native attempt exposed two fixture failures. The refinement concurrency case failed
+with a held-lock error; five subsequent isolated runs reproduced it. Separately, ACP's
+`acp_daemon_attached_eof_during_session_new_exits` reached its successful EOF-exit assertion but then
+hung during fixture teardown. A debugger found the test joining a stderr reader whose pipe still had
+inherited Windows writers. Stopping the identified temporary daemon tree released that join. This
+intervention makes the initial run unsuitable as a clean qualification result.
+
+[`0021-acp-fixture-cleanup.patch`](../patches/prime-agent/0021-acp-fixture-cleanup.patch) is a local
+test-only correction. Anonymous-file stderr retains diagnostics without depending on inherited pipe
+EOF. Cleanup uses bounded child waiting and an asynchronous native shutdown request, requiring its
+acknowledgement, connection closure and supervisor exit. Failures remain visible without double panic
+during an existing assertion unwind. The session creation and successful ACP-exit assertions stay
+intact. Retire it only after the equivalent upstream fixture repeatedly passes on Windows without
+orphan processes or external cleanup, together with the complete native suite.
+
+[`0022-upstream-harness-lock-fixture.patch`](../patches/prime-agent/0022-upstream-harness-lock-fixture.patch)
+backports only the refinement-test hunk from upstream
+[`f0d9c09676a1e6bb2782ad73eb3025ffdf2061d4`](https://github.com/PrimeIntellect-ai/prime-agent/commit/f0d9c09676a1e6bb2782ad73eb3025ffdf2061d4).
+The native lock has an intentional bounded wait and does not guarantee writer fairness. The stable
+fixture repeatedly reacquired it until other writers exhausted that budget. Upstream instead races
+two fresh writers in 40 rounds and still checks
+all 80 updates. Runtime locking and timeouts stay unchanged; the unrelated upstream abort-test hunk is
+excluded. Retirement requires that correction in a stable base, repeated isolated passes and a clean
+full native run.
+
+Patch SHA-256 values are `3ec4e10dd800cd438de6af187272564c5445b3ff48460a54c19ee37a6314464c`
+for `0021` and `51d3e0483882c6abd4aa58d45fd2d0e474395a743eb4a8ab5450c332da855566` for `0022`.
+The fresh source is `prime-763094e1-927fe293`; its receipt records patch hash
+`927fe2934cf44bb6fb2719b7e4a9e47592ffbf6b0c8636fcf339b339e7f6c767` and source hash
+`492a542aecb87ef7c8d3e13393934b8f13195b1b573eddbaac41779f188806fd`.
+The reconstructed full run is underway with debug symbols disabled, four test threads and an isolated
+kernel. No final pass is claimed here; its results belong in the final qualification record.
+
 ## Qualification scope
 
 The release audit and independent patch review were read-only; this audit worker performed no native
@@ -107,7 +143,7 @@ build, account write, provider request or migration. The focused source-owner re
 separate from that review. Neither establishes final release qualification or qualifies an unreleased
 upstream head.
 
-The final local backport needs reconstruction from the exported series, an engine/helper rebuild,
+The reconstructed series needs its clean full native result, an engine/helper rebuild,
 native regressions and the public app provider test in
 `scripts/qa/settings/system-prompts.qa.mjs`. Verify a real saved-worker PID transition, held-stream
 save behavior, model-switch retention, mixed-version resident notices and the helper's static-only
