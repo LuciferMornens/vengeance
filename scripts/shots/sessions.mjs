@@ -65,8 +65,15 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   ) {
     throw new Error(`child subagent session row reads "${childText}"`)
   }
-  await child.locator('span.truncate').first().hover()
-  await page.getByRole('tooltip').waitFor()
+  const childTitle = child.locator('span.truncate').first()
+  await childTitle.hover()
+  // On the macOS runner the first hover sometimes opens no tooltip; leave the row and hover again once.
+  const tooltip = page.getByRole('tooltip')
+  if (!(await tooltip.waitFor({ timeout: 3_000 }).then(() => true, () => false))) {
+    await page.mouse.move(760, 520)
+    await childTitle.hover()
+    await tooltip.waitFor()
+  }
   await shot('sessions-child-subagent', { settleMs: 600 })
   await settle()
 
