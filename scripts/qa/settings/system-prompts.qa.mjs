@@ -223,10 +223,21 @@ async function checkEngine(engine) {
 console.log(`▶ ${SUITE_NAME} (both real engines; local providers and temporary accounts)`)
 try {
   application = await launchApp({
+    exe: process.env.QA_PACKAGED_EXE,
     agentDir: fixture.piDirectory.dir,
-    env: fixture.environment,
+    env: {
+      ...fixture.environment,
+      ...(process.env.QA_PACKAGED_EXE
+        ? { VENGEANCE_PRIME_EXECUTABLE: undefined, VENGEANCE_BUNDLED_ENGINES: undefined }
+        : {})
+    },
     outDir: reportShotsDir(SUITE_NAME)
   })
+  if (process.env.QA_PACKAGED_EXE) {
+    for (const engine of ['pi', 'prime']) {
+      assert.equal((await application.invoke('engine:describe', engine)).source, 'bundled')
+    }
+  }
   const state = await application.appState()
   await application.test('setPrefs', {
     features: {

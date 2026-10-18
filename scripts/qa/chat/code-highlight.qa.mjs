@@ -45,24 +45,31 @@ async function coloredRuns(app, marker) {
   )
 }
 
-await runSuite('chat-code-highlight', async ({ server, app, step }) => {
-  await step('open a workspace', () => app.openWorkspace())
+await runSuite(
+  'chat-code-highlight',
+  async ({ server, app, step }) => {
+    await step('open a workspace', () => app.openWorkspace())
 
-  await step('a TypeScript block gets keyword, string and comment colors', async () => {
-    server.queue(turn.text(TYPESCRIPT_ANSWER))
-    await app.send('Show the loader')
-    await app.waitForSettle()
-    const classes = (await coloredRuns(app, 'loadStore')).join(' ')
-    for (const kind of ['syn-keyword', 'syn-string', 'syn-comment']) {
-      assert.ok(classes.includes(kind), `${kind} in the TypeScript block (got: ${classes})`)
-    }
-  })
+    await step('a TypeScript block gets keyword, string and comment colors', async () => {
+      server.queue(turn.text(TYPESCRIPT_ANSWER))
+      await app.send('Show the loader')
+      await app.waitForSettle()
+      const classes = (await coloredRuns(app, 'loadStore')).join(' ')
+      for (const kind of ['syn-keyword', 'syn-string', 'syn-comment']) {
+        assert.ok(classes.includes(kind), `${kind} in the TypeScript block (got: ${classes})`)
+      }
+    })
 
-  await step('a Python block gets colors too', async () => {
-    server.queue(turn.text(PYTHON_ANSWER))
-    await app.send('And in Python?')
-    await app.waitForSettle()
-    const classes = (await coloredRuns(app, 'load_store')).join(' ')
-    assert.ok(classes.includes('syn-keyword'), `syn-keyword in the Python block (got: ${classes})`)
-  })
-})
+    await step('a Python block gets colors too', async () => {
+      server.queue(turn.text(PYTHON_ANSWER))
+      await app.send('And in Python?')
+      await app.waitForSettle()
+      const classes = (await coloredRuns(app, 'load_store')).join(' ')
+      assert.ok(
+        classes.includes('syn-keyword'),
+        `syn-keyword in the Python block (got: ${classes})`
+      )
+    })
+  },
+  { launch: { exe: process.env.QA_PACKAGED_EXE } }
+)
