@@ -27,11 +27,15 @@ const CLOSE_POLL_MS = 50
 const HISTORY_SCROLL_STABILITY_MS = 800
 const HISTORY_READY_TIMEOUT_MS = 5000
 const HISTORY_ENTRY_SCROLL_SCREENS = 4
+const DIAGNOSTIC_WARM_FRAMES = 12
 const OUTPUT_DIRECTORY = join(ROOT, '.shots', 'perf', 'first-navigation')
 const label = argument('--label') ?? 'sample'
 const runs = Number(argument('--runs') ?? DEFAULT_RUNS)
 const engines = (argument('--engines') ?? 'pi,prime').split(',')
 const traceEnabled = process.argv.includes('--trace')
+const diagnoseFrames = process.argv.includes('--diagnose-frames')
+const focusWindow = process.argv.includes('--focus-window')
+const warmFrames = process.argv.includes('--warm-frames')
 for (const variable of ['QA_PRIME_EXECUTABLE', 'QA_PRIME_SHA256']) {
   assert.equal(
     process.env[variable],
@@ -53,6 +57,13 @@ const report = {
   label,
   runs,
   historyTurns: HISTORY_TURNS,
+  diagnostics: {
+    traceEnabled,
+    diagnoseFrames,
+    focusWindow,
+    warmFrames,
+    warmFrameCount: warmFrames ? DIAGNOSTIC_WARM_FRAMES : 0
+  },
   engineBuilds: Object.fromEntries(
     Object.entries(manifest.engines).map(([engine, { version, revision, payloadHash }]) => [
       engine,
@@ -313,30 +324,50 @@ async function verifyHistoryScrolling(page) {
 
 async function visit(page, path, engine, title) {
   return page.evaluate(
-    async ({ sessionPath, selectedEngine, expectedText }) => {
+    async ({ sessionPath, selectedEngine, expectedText, diagnostic }) => {
       const started = performance.now()
       const gaps = []
       const longTasks = []
+      const frames = []
+      const taskDetails = []
+      if (diagnostic) performance.mark(`${expectedText}:start`)
       let lastFrame = started
       let sampling = true
       let paintedAt
       const observer = new PerformanceObserver((entries) => {
         longTasks.push(...entries.getEntries().map((entry) => entry.duration))
+        if (diagnostic) {
+          taskDetails.push(
+            ...entries
+              .getEntries()
+              .map((entry) => ({ at: entry.startTime, duration: entry.duration }))
+          )
+        }
       })
       observer.observe({ type: 'longtask' })
       const sample = () => {
         const now = performance.now()
         gaps.push(now - lastFrame)
+        if (diagnostic) {
+          frames.push({
+            at: now,
+            gap: now - lastFrame,
+            visibility: document.visibilityState,
+            focused: document.hasFocus()
+          })
+        }
         lastFrame = now
         const transcript = document.querySelector('[data-transcript-scroll]')
         if (paintedAt === undefined && transcript?.textContent.includes(expectedText)) {
           paintedAt = now
+          if (diagnostic) performance.mark(`${expectedText}:mounted`)
         }
         if (sampling) requestAnimationFrame(sample)
       }
       requestAnimationFrame(sample)
       const agentId = await window.__vengeanceTest.openSession(sessionPath, selectedEngine)
       const readyAt = performance.now()
+      if (diagnostic) performance.mark(`${expectedText}:ready`)
       const deadline = started + 60_000
       while (paintedAt === undefined && performance.now() < deadline) {
         await new Promise((resolveFrame) => requestAnimationFrame(resolveFrame))
@@ -351,10 +382,16 @@ async function visit(page, path, engine, title) {
         completeMs: readyAt - started,
         maximumFrameGapMs: Math.max(0, ...gaps),
         blockingMs: longTasks.reduce((total, duration) => total + Math.max(0, duration - 50), 0),
-        longTasks
+        longTasks,
+        diagnostic: diagnostic ? { started, readyAt, frames, taskDetails } : undefined
       }
     },
-    { sessionPath: path, selectedEngine: engine, expectedText: `${title} final benchmark marker.` }
+    {
+      sessionPath: path,
+      selectedEngine: engine,
+      expectedText: `${title} final benchmark marker.`,
+      diagnostic: diagnoseFrames
+    }
   )
 }
 
@@ -387,12 +424,48 @@ async function sample(workspace, paths, engine, run) {
     )
     await page.evaluate(() => document.fonts.ready)
     const shellMs = performance.now() - started
+    if (focusWindow) {
+      await application.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows()[0]
+        window.show()
+        window.focus()
+      })
+      await page.bringToFront()
+      await page.waitForFunction(
+        () => document.visibilityState === 'visible' && document.hasFocus()
+      )
+    }
+    const windowState = diagnoseFrames
+      ? await application.evaluate(({ BrowserWindow }) => {
+          const window = BrowserWindow.getAllWindows()[0]
+          return {
+            visible: window.isVisible(),
+            focused: window.isFocused(),
+            minimized: window.isMinimized(),
+            backgroundThrottling: window.webContents.getBackgroundThrottling()
+          }
+        })
+      : undefined
+    const warmup = warmFrames
+      ? await page.evaluate(async (count) => {
+          const frames = []
+          let previous = performance.now()
+          for (let index = 0; index < count; index++) {
+            await new Promise((resolveFrame) => requestAnimationFrame(resolveFrame))
+            const at = performance.now()
+            frames.push({ at, gap: at - previous, focused: document.hasFocus() })
+            previous = at
+          }
+          return frames
+        }, DIAGNOSTIC_WARM_FRAMES)
+      : undefined
     await attachIpcProbe(application)
     const profiler = await page.context().newCDPSession(page)
     await profiler.send('Profiler.enable')
     if (traceEnabled) {
       await profiler.send('Tracing.start', {
-        categories: 'devtools.timeline,v8,blink.user_timing',
+        categories:
+          'devtools.timeline,v8,blink.user_timing,toplevel,disabled-by-default-devtools.timeline',
         transferMode: 'ReturnAsStream'
       })
     }
@@ -439,6 +512,8 @@ async function sample(workspace, paths, engine, run) {
       engine,
       run,
       shellMs,
+      windowState,
+      warmup,
       first,
       second,
       cached,
