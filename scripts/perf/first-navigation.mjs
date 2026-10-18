@@ -36,6 +36,7 @@ const traceEnabled = process.argv.includes('--trace')
 const diagnoseFrames = process.argv.includes('--diagnose-frames')
 const focusWindow = process.argv.includes('--focus-window')
 const warmFrames = process.argv.includes('--warm-frames')
+const recordScrollFailures = process.argv.includes('--record-scroll-failures')
 for (const variable of ['QA_PRIME_EXECUTABLE', 'QA_PRIME_SHA256']) {
   assert.equal(
     process.env[variable],
@@ -57,6 +58,16 @@ const report = {
   label,
   runs,
   historyTurns: HISTORY_TURNS,
+  build: {
+    mainSha256: await executableHash(join(ROOT, 'out', 'main', 'index.js')),
+    rendererIndexSha256: await executableHash(join(ROOT, 'out', 'renderer', 'index.html'))
+  },
+  recordScrollFailures,
+  endpoints: {
+    paintedMs: 'Expected marker mounted in transcript DOM; retained for baseline comparison',
+    visibleMs: 'Expected marker visible inside transcript and window, without inert/opening layers',
+    summary: 'Visible marker latency; mounted marker medians are reported separately'
+  },
   diagnostics: {
     traceEnabled,
     diagnoseFrames,
@@ -334,6 +345,7 @@ async function visit(page, path, engine, title) {
       let lastFrame = started
       let sampling = true
       let paintedAt
+      let visibleAt
       const observer = new PerformanceObserver((entries) => {
         longTasks.push(...entries.getEntries().map((entry) => entry.duration))
         if (diagnostic) {
@@ -358,9 +370,32 @@ async function visit(page, path, engine, title) {
         }
         lastFrame = now
         const transcript = document.querySelector('[data-transcript-scroll]')
-        if (paintedAt === undefined && transcript?.textContent.includes(expectedText)) {
+        const markerMounted = transcript?.textContent.includes(expectedText)
+        if (paintedAt === undefined && markerMounted) {
           paintedAt = now
           if (diagnostic) performance.mark(`${expectedText}:mounted`)
+        }
+        if (
+          visibleAt === undefined &&
+          markerMounted &&
+          !transcript.closest('[inert]') &&
+          !document.querySelector('[data-session-opening]')
+        ) {
+          const marker = [...transcript.querySelectorAll('p')].find(
+            (paragraph) => paragraph.textContent === expectedText
+          )
+          if (marker?.checkVisibility({ visibilityProperty: true, opacityProperty: true })) {
+            const rectangle = marker.getBoundingClientRect()
+            const viewport = transcript.getBoundingClientRect()
+            const left = Math.max(0, rectangle.left, viewport.left)
+            const right = Math.min(innerWidth, rectangle.right, viewport.right)
+            const top = Math.max(0, rectangle.top, viewport.top)
+            const bottom = Math.min(innerHeight, rectangle.bottom, viewport.bottom)
+            if (right > left && bottom > top) {
+              visibleAt = now
+              if (diagnostic) performance.mark(`${expectedText}:visible`)
+            }
+          }
         }
         if (sampling) requestAnimationFrame(sample)
       }
@@ -369,16 +404,17 @@ async function visit(page, path, engine, title) {
       const readyAt = performance.now()
       if (diagnostic) performance.mark(`${expectedText}:ready`)
       const deadline = started + 60_000
-      while (paintedAt === undefined && performance.now() < deadline) {
+      while (visibleAt === undefined && performance.now() < deadline) {
         await new Promise((resolveFrame) => requestAnimationFrame(resolveFrame))
       }
       await new Promise((resolveFrame) => requestAnimationFrame(resolveFrame))
       sampling = false
       observer.disconnect()
-      if (paintedAt === undefined) throw new Error('Saved transcript never became visible')
+      if (visibleAt === undefined) throw new Error('Saved transcript never became visible')
       return {
         agentId,
         paintedMs: paintedAt - started,
+        visibleMs: visibleAt - started,
         completeMs: readyAt - started,
         maximumFrameGapMs: Math.max(0, ...gaps),
         blockingMs: longTasks.reduce((total, duration) => total + Math.max(0, duration - 50), 0),
@@ -505,7 +541,16 @@ async function sample(workspace, paths, engine, run) {
     )
     const screenshot = join(OUTPUT_DIRECTORY, `${label}-${engine}-${run}.png`)
     await page.screenshot({ path: screenshot })
-    const scrolling = await verifyHistoryScrolling(page)
+    let scrolling
+    try {
+      scrolling = { passed: true, ...(await verifyHistoryScrolling(page)) }
+    } catch (error) {
+      if (!recordScrollFailures) throw error
+      scrolling = { passed: false, error: error.stack ?? String(error) }
+      await page.screenshot({
+        path: join(OUTPUT_DIRECTORY, `${label}-${engine}-${run}-SCROLL-FAILED.png`)
+      })
+    }
     const identity = await bundledIdentity(page, engine, first.agentId)
     assert.deepEqual(errors, [])
     return {
@@ -552,9 +597,10 @@ try {
       report.samples.push(measurement)
       console.log(
         `${engine} ${run}: shell ${measurement.shellMs.toFixed(0)}ms; ` +
-          `first ${measurement.first.paintedMs.toFixed(0)}ms; ` +
-          `second ${measurement.second.paintedMs.toFixed(0)}ms; ` +
-          `cached ${measurement.cached.paintedMs.toFixed(0)}ms`
+          `first visible ${measurement.first.visibleMs.toFixed(0)}ms ` +
+          `(mounted ${measurement.first.paintedMs.toFixed(0)}ms); ` +
+          `second visible ${measurement.second.visibleMs.toFixed(0)}ms; ` +
+          `cached visible ${measurement.cached.visibleMs.toFixed(0)}ms`
       )
     }
   }
@@ -563,15 +609,24 @@ try {
     return {
       engine,
       shellMs: median(samples.map((entry) => entry.shellMs)),
-      firstMs: median(samples.map((entry) => entry.first.paintedMs)),
-      secondMs: median(samples.map((entry) => entry.second.paintedMs)),
-      cachedMs: median(samples.map((entry) => entry.cached.paintedMs))
+      firstMs: median(samples.map((entry) => entry.first.visibleMs)),
+      secondMs: median(samples.map((entry) => entry.second.visibleMs)),
+      cachedMs: median(samples.map((entry) => entry.cached.visibleMs)),
+      firstMountedMs: median(samples.map((entry) => entry.first.paintedMs)),
+      secondMountedMs: median(samples.map((entry) => entry.second.paintedMs)),
+      cachedMountedMs: median(samples.map((entry) => entry.cached.paintedMs))
     }
   })
   const output = resolve(OUTPUT_DIRECTORY, `${label}.json`)
+  report.scrollFailures = report.samples.filter((entry) => !entry.scrolling.passed).length
+  report.qualified = report.scrollFailures === 0
   await writeFile(output, JSON.stringify(report, null, 2))
   console.log(JSON.stringify(report.summary, null, 2))
   console.log(`Report: ${output}`)
+  if (!report.qualified) {
+    console.error(`Series is NOT qualified: ${report.scrollFailures} samples failed scroll checks`)
+    process.exitCode = 1
+  }
 } finally {
   await fixture.cleanup()
 }
