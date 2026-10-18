@@ -31,6 +31,7 @@ function isolateEnvironment(agentDirectory, temporaryRoot) {
   }
   process.env.PRIME_AGENT_CODING_AGENT_DIR = agentDirectory
   process.env.PRIME_AGENT_KERNEL_VENV = path.join(temporaryRoot, 'kernel-venv')
+  process.env.PYTHONPYCACHEPREFIX = path.join(temporaryRoot, 'pycache')
   delete process.env.PRIME_AGENT_KERNEL_PYTHON
   process.env.PI_PACKAGE_DIR = path.dirname(executablePath)
   process.env.PI_OFFLINE = '1'
