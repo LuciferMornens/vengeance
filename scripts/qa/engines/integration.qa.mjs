@@ -602,7 +602,7 @@ try {
             application.invoke('engine:restart', ephemeral.agentId, {
               launch: { prime: { systemPrompt: 'Temporary restart must be refused.' } }
             }),
-            /Temporary sessions cannot be restarted/i
+            /Temporary conversations with messages cannot be restarted safely/i
           )
           const unchanged = (await application.invoke('engine:list')).find(
             (agent) => agent.agentId === ephemeral.agentId
