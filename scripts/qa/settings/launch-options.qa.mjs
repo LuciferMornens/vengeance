@@ -209,7 +209,7 @@ await runSuite(
       )
       const prefs = (await app.test('appState')).prefs
       const env = Object.values(prefs.features.launch.workspaces)[0].env
-      assert.equal(env.QA_SECRET_TOKEN, '\u2022\u2022\u2022\u20226789')
+      assert.equal(env.QA_SECRET_TOKEN, `\u2022\u2022\u2022\u2022${SECRET.slice(-4)}`)
       assert.equal(env.QA_PLAIN, '\u2022\u2022\u2022\u2022')
       assert.ok(!JSON.stringify(prefs).includes(SECRET), 'renderer state holds no secret')
     })
