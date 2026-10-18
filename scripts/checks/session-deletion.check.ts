@@ -29,6 +29,7 @@ interface SessionActions {
       agents: Record<string, { info: AgentInfo }>
       activeAgentId: string | null
       createAgent(args: CreateAgentArgs, activationRevision?: number): Promise<string>
+      requestActivation(): number
       applyEvents(events: Map<string, EngineEvent[]>): void
     }
   }
@@ -83,6 +84,8 @@ await check(
                     : `
                       export const newSession = (...args) => globalThis.newSession(...args);
                       export const spawnAgent = (...args) => globalThis.createSession(...args);
+                      export const requestSessionActivation = () => globalThis.reserveActivation();
+                      export const withSessionOpening = async (_revision, open) => open();
                     `
             }))
           }
@@ -104,6 +107,9 @@ await check(
       crypto: { randomUUID },
       setTimeout,
       clearTimeout,
+      reserveActivation() {
+        return actions.useAgents.getState().requestActivation()
+      },
       createSession(args: CreateAgentArgs, options: { activationRevision: number }) {
         return actions.useAgents.getState().createAgent(args, options.activationRevision)
       },
