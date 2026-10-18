@@ -1,17 +1,12 @@
 /**
  * Lazy Shiki syntax highlighting (code blocks, tool previews, diffs).
  *
- * Shiki, its JavaScript regex engine and every grammar are dynamically imported on first use, so none of
- * it is in the main bundle. Colors are CSS variables (`--syn-*`, defined in markdown.css per theme), so one
+ * A worker loads Shiki and its grammars on demand, keeping first-language compilation and tokenization
+ * off the renderer's input thread. Colors use CSS variables (`--syn-*` in markdown.css), so one
  * tokenization serves both Obsidian (dark) and Bone (light) and theme switches never re-highlight.
  */
 import { useEffect, useState } from 'react'
-import type {
-  HighlighterCore,
-  LanguageRegistration,
-  ThemeRegistration,
-  ThemedToken
-} from 'shiki/core'
+import type { HighlightRequest, HighlightResponse } from './highlight-worker'
 
 /**
  * A run of equally styled code. `className` holds the `syn-*` classes from markdown.css; undefined means
@@ -24,47 +19,45 @@ export interface CodeToken {
 
 export type HighlightedLines = CodeToken[][]
 
-type GrammarLoader = () => Promise<{ default: LanguageRegistration[] }>
-
-const GRAMMARS: Record<string, GrammarLoader> = {
-  typescript: () => import('shiki/langs/typescript.mjs'),
-  tsx: () => import('shiki/langs/tsx.mjs'),
-  javascript: () => import('shiki/langs/javascript.mjs'),
-  jsx: () => import('shiki/langs/jsx.mjs'),
-  json: () => import('shiki/langs/json.mjs'),
-  jsonc: () => import('shiki/langs/jsonc.mjs'),
-  shellscript: () => import('shiki/langs/shellscript.mjs'),
-  powershell: () => import('shiki/langs/powershell.mjs'),
-  bat: () => import('shiki/langs/bat.mjs'),
-  python: () => import('shiki/langs/python.mjs'),
-  rust: () => import('shiki/langs/rust.mjs'),
-  go: () => import('shiki/langs/go.mjs'),
-  java: () => import('shiki/langs/java.mjs'),
-  kotlin: () => import('shiki/langs/kotlin.mjs'),
-  swift: () => import('shiki/langs/swift.mjs'),
-  c: () => import('shiki/langs/c.mjs'),
-  cpp: () => import('shiki/langs/cpp.mjs'),
-  csharp: () => import('shiki/langs/csharp.mjs'),
-  css: () => import('shiki/langs/css.mjs'),
-  scss: () => import('shiki/langs/scss.mjs'),
-  html: () => import('shiki/langs/html.mjs'),
-  xml: () => import('shiki/langs/xml.mjs'),
-  vue: () => import('shiki/langs/vue.mjs'),
-  svelte: () => import('shiki/langs/svelte.mjs'),
-  yaml: () => import('shiki/langs/yaml.mjs'),
-  toml: () => import('shiki/langs/toml.mjs'),
-  ini: () => import('shiki/langs/ini.mjs'),
-  dotenv: () => import('shiki/langs/dotenv.mjs'),
-  markdown: () => import('shiki/langs/markdown.mjs'),
-  sql: () => import('shiki/langs/sql.mjs'),
-  graphql: () => import('shiki/langs/graphql.mjs'),
-  diff: () => import('shiki/langs/diff.mjs'),
-  docker: () => import('shiki/langs/docker.mjs'),
-  make: () => import('shiki/langs/make.mjs'),
-  ruby: () => import('shiki/langs/ruby.mjs'),
-  php: () => import('shiki/langs/php.mjs'),
-  lua: () => import('shiki/langs/lua.mjs')
-}
+const GRAMMARS = new Set([
+  'typescript',
+  'tsx',
+  'javascript',
+  'jsx',
+  'json',
+  'jsonc',
+  'shellscript',
+  'powershell',
+  'bat',
+  'python',
+  'rust',
+  'go',
+  'java',
+  'kotlin',
+  'swift',
+  'c',
+  'cpp',
+  'csharp',
+  'css',
+  'scss',
+  'html',
+  'xml',
+  'vue',
+  'svelte',
+  'yaml',
+  'toml',
+  'ini',
+  'dotenv',
+  'markdown',
+  'sql',
+  'graphql',
+  'diff',
+  'docker',
+  'make',
+  'ruby',
+  'php',
+  'lua'
+])
 
 const ALIASES: Record<string, string> = {
   ts: 'typescript',
@@ -113,7 +106,7 @@ export function resolveLanguage(lang: string | null | undefined): string | null 
   if (!lang) return null
   const key = lang.toLowerCase().trim()
   const id = ALIASES[key] ?? key
-  return id in GRAMMARS ? id : null
+  return GRAMMARS.has(id) ? id : null
 }
 
 const EXTENSION_LANGS: Record<string, string> = {
@@ -229,153 +222,6 @@ export function languageLabel(lang: string | null | undefined): string {
   return labels[id] ?? (id ? id : 'Text')
 }
 
-const s = (scope: string | string[], foreground: string, fontStyle?: string) => ({
-  scope,
-  settings: fontStyle ? { foreground, fontStyle } : { foreground }
-})
-
-/** Obsidian & Ember / Bone syntax theme — every color resolves through a CSS variable. */
-const THEME: ThemeRegistration = {
-  name: 'vengeance',
-  type: 'dark',
-  fg: 'var(--syn-fg)',
-  bg: 'transparent',
-  colors: { 'editor.foreground': 'var(--syn-fg)', 'editor.background': 'transparent' },
-  tokenColors: [
-    s(
-      ['comment', 'punctuation.definition.comment', 'string.comment'],
-      'var(--syn-comment)',
-      'italic'
-    ),
-    s(
-      [
-        'punctuation',
-        'meta.brace',
-        'keyword.operator',
-        'punctuation.separator',
-        'punctuation.terminator'
-      ],
-      'var(--syn-punct)'
-    ),
-    s(
-      [
-        'keyword',
-        'storage',
-        'storage.type',
-        'storage.modifier',
-        'keyword.control',
-        'keyword.operator.new',
-        'keyword.operator.expression',
-        'keyword.operator.logical.python',
-        'keyword.operator.wordlike',
-        'variable.language.this',
-        'variable.language.self'
-      ],
-      'var(--syn-keyword)'
-    ),
-    s(
-      [
-        'string',
-        'string.quoted',
-        'string.template',
-        'punctuation.definition.string',
-        'string.unquoted.plain'
-      ],
-      'var(--syn-string)'
-    ),
-    s(
-      ['string.regexp', 'constant.other.character-class.regexp', 'constant.character.escape'],
-      'var(--syn-regex)'
-    ),
-    s(
-      [
-        'constant.numeric',
-        'constant.language',
-        'constant.character',
-        'support.constant',
-        'constant.other.color',
-        'keyword.other.unit'
-      ],
-      'var(--syn-number)'
-    ),
-    s(
-      ['variable.other.constant', 'variable.other.enummember', 'entity.name.constant'],
-      'var(--syn-constant)'
-    ),
-    s(
-      [
-        'entity.name.function',
-        'support.function',
-        'meta.function-call entity.name.function',
-        'variable.function',
-        'entity.name.method'
-      ],
-      'var(--syn-function)'
-    ),
-    s(
-      [
-        'entity.name.type',
-        'entity.name.class',
-        'entity.name.namespace',
-        'support.type',
-        'support.class',
-        'entity.other.inherited-class',
-        'storage.type.primitive',
-        'storage.type.built-in',
-        'entity.name.type.module'
-      ],
-      'var(--syn-type)'
-    ),
-    s(['variable.parameter', 'meta.parameter variable'], 'var(--syn-param)'),
-    s(
-      [
-        'variable.other.property',
-        'variable.other.object.property',
-        'support.variable.property',
-        'meta.object-literal.key',
-        'support.type.property-name',
-        'entity.name.tag.yaml',
-        'support.type.property-name.json'
-      ],
-      'var(--syn-property)'
-    ),
-    s(['entity.name.tag', 'punctuation.definition.tag'], 'var(--syn-tag)'),
-    s(
-      [
-        'entity.other.attribute-name',
-        'entity.other.attribute-name.id',
-        'entity.other.attribute-name.class'
-      ],
-      'var(--syn-attr)'
-    ),
-    s(
-      ['support.type.property-name.css', 'support.type.vendored.property-name'],
-      'var(--syn-property)'
-    ),
-    s(
-      ['markup.heading', 'entity.name.section', 'markup.heading punctuation.definition.heading'],
-      'var(--syn-keyword)',
-      'bold'
-    ),
-    s(['markup.bold'], 'var(--syn-fg)', 'bold'),
-    s(['markup.italic'], 'var(--syn-fg)', 'italic'),
-    s(['markup.inline.raw', 'markup.fenced_code'], 'var(--syn-string)'),
-    s(['markup.underline.link', 'string.other.link'], 'var(--syn-function)'),
-    s(['markup.inserted', 'punctuation.definition.inserted'], 'var(--syn-inserted)'),
-    s(['markup.deleted', 'punctuation.definition.deleted'], 'var(--syn-deleted)'),
-    s(
-      ['meta.diff.header', 'meta.diff.range', 'punctuation.definition.range.diff'],
-      'var(--syn-comment)'
-    ),
-    s(['variable.other.readwrite', 'variable', 'meta.definition.variable'], 'var(--syn-fg)'),
-    s(['support.variable', 'variable.other.object'], 'var(--syn-fg)'),
-    s(
-      ['entity.name.function.decorator', 'meta.decorator', 'punctuation.decorator'],
-      'var(--syn-attr)'
-    )
-  ]
-}
-
 /** Above this size highlighting is skipped (plain text renders instantly). */
 const MAX_HIGHLIGHT_CHARS = 120_000
 const CACHE_LIMIT = 400
@@ -384,12 +230,85 @@ const CACHE_BYTE_BUDGET = 8 * 1024 * 1024
 const ESTIMATED_TOKEN_BYTES = 96
 const ESTIMATED_LINE_BYTES = 32
 const UTF16_BYTES = 2
+const WORKER_IDLE_MS = 30_000
+const HIGHLIGHT_TIMEOUT_MS = 30_000
 
-let highlighterPromise: Promise<HighlighterCore> | null = null
-const loadedLangs = new Map<string, Promise<void>>()
+interface WorkerRequest {
+  resolve: (lines: HighlightedLines | null) => void
+  timeout: ReturnType<typeof setTimeout>
+}
+
+let highlightWorker: Worker | null = null
+let workerIdleTimer: ReturnType<typeof setTimeout> | null = null
+let nextRequestId = 0
+const workerRequests = new Map<number, WorkerRequest>()
+
 const cache = new Map<string, { lines: HighlightedLines; bytes: number }>()
 const pendingHighlights = new Map<string, Promise<HighlightedLines | null>>()
 let cacheBytes = 0
+
+function stopHighlightWorker(): void {
+  if (workerIdleTimer !== null) clearTimeout(workerIdleTimer)
+  workerIdleTimer = null
+  highlightWorker?.terminate()
+  highlightWorker = null
+  for (const request of workerRequests.values()) {
+    clearTimeout(request.timeout)
+    request.resolve(null)
+  }
+  workerRequests.clear()
+}
+
+function getHighlightWorker(): Worker {
+  if (workerIdleTimer !== null) clearTimeout(workerIdleTimer)
+  workerIdleTimer = null
+  if (highlightWorker) return highlightWorker
+  const worker = new Worker(new URL('./highlight-worker.ts', import.meta.url), { type: 'module' })
+  worker.onmessage = ({ data }: MessageEvent<HighlightResponse>) => {
+    if (highlightWorker !== worker) return
+    const request = workerRequests.get(data.id)
+    if (!request) return
+    clearTimeout(request.timeout)
+    workerRequests.delete(data.id)
+    request.resolve(data.lines)
+    if (workerRequests.size === 0) {
+      workerIdleTimer = setTimeout(stopHighlightWorker, WORKER_IDLE_MS)
+    }
+  }
+  worker.onerror = (event) => {
+    event.preventDefault()
+    if (highlightWorker === worker) stopHighlightWorker()
+  }
+  worker.onmessageerror = () => {
+    if (highlightWorker === worker) stopHighlightWorker()
+  }
+  highlightWorker = worker
+  return worker
+}
+
+function requestHighlight(code: string, language: string): Promise<HighlightedLines | null> {
+  return new Promise((resolve) => {
+    let worker: Worker
+    try {
+      worker = getHighlightWorker()
+    } catch {
+      resolve(null)
+      return
+    }
+    const id = ++nextRequestId
+    workerRequests.set(id, {
+      resolve,
+      timeout: setTimeout(stopHighlightWorker, HIGHLIGHT_TIMEOUT_MS)
+    })
+    try {
+      worker.postMessage({ id, code, language } satisfies HighlightRequest)
+    } catch {
+      stopHighlightWorker()
+    }
+  })
+}
+
+import.meta.hot?.dispose(stopHighlightWorker)
 
 function cachedHighlight(key: string): HighlightedLines | null {
   const cached = cache.get(key)
@@ -412,89 +331,6 @@ function cacheHighlight(key: string, lines: HighlightedLines): void {
   }
   cache.set(key, { lines, bytes })
   cacheBytes += bytes
-}
-
-/** Shiki font style bit flags. */
-const FONT_ITALIC = 1
-const FONT_BOLD = 2
-const FONT_UNDERLINE = 4
-
-const SYNTAX_COLOR = /^var\(--syn-([a-z]+)\)$/
-
-function tokenClass(token: ThemedToken): string | undefined {
-  const classes: string[] = []
-  const color = token.color ? SYNTAX_COLOR.exec(token.color)?.[1] : undefined
-  if (color && color !== 'fg') classes.push(`syn-${color}`)
-  const fontStyle = token.fontStyle ?? 0
-  if (fontStyle > 0) {
-    if (fontStyle & FONT_ITALIC) classes.push('syn-italic')
-    if (fontStyle & FONT_BOLD) classes.push('syn-bold')
-    if (fontStyle & FONT_UNDERLINE) classes.push('syn-underline')
-  }
-  return classes.length > 0 ? classes.join(' ') : undefined
-}
-
-/** Blank text shows no color, so it can take its neighbor's style unless an underline would show. */
-function blendsIn(content: string, className: string | undefined, neighbor: string | undefined) {
-  return (
-    content.trim() === '' &&
-    !className?.includes('syn-underline') &&
-    !neighbor?.includes('syn-underline')
-  )
-}
-
-/**
- * One line of Shiki tokens as the fewest equally styled runs: each run is one element (or text node),
- * about 60% of Shiki's token count for typical code, and every element costs DOM and layout memory.
- */
-function codeTokens(line: ThemedToken[]): CodeToken[] {
-  const runs: CodeToken[] = []
-  for (const token of line) {
-    const className = tokenClass(token)
-    const last = runs[runs.length - 1]
-    if (!last) {
-      runs.push({ content: token.content, className })
-    } else if (last.className === className || blendsIn(token.content, className, last.className)) {
-      last.content += token.content
-    } else if (blendsIn(last.content, last.className, className)) {
-      last.content += token.content
-      last.className = className
-    } else {
-      runs.push({ content: token.content, className })
-    }
-  }
-  return runs
-}
-
-function getHighlighter(): Promise<HighlighterCore> {
-  if (!highlighterPromise) {
-    highlighterPromise = Promise.all([
-      import('shiki/core'),
-      import('shiki/engine/javascript')
-    ]).then(([core, engine]) =>
-      core.createHighlighterCore({
-        themes: [THEME],
-        langs: [],
-        engine: engine.createJavaScriptRegexEngine({ forgiving: true })
-      })
-    )
-    highlighterPromise.catch(() => {
-      highlighterPromise = null
-    })
-  }
-  return highlighterPromise
-}
-
-function ensureLanguage(highlighter: HighlighterCore, lang: string): Promise<void> {
-  let pending = loadedLangs.get(lang)
-  if (!pending) {
-    const loader = GRAMMARS[lang]
-    if (!loader) return Promise.reject(new Error(`No grammar for ${lang}`))
-    pending = loader().then((mod) => highlighter.loadLanguage(...mod.default))
-    pending.catch(() => loadedLangs.delete(lang))
-    loadedLangs.set(lang, pending)
-  }
-  return pending
 }
 
 function cacheKey(code: string, lang: string): string {
@@ -521,12 +357,8 @@ export async function highlightCode(
   if (pending) return pending
   const result = (async () => {
     try {
-      const highlighter = await getHighlighter()
-      await ensureLanguage(highlighter, id)
-      const lines = highlighter
-        .codeToTokensBase(code, { lang: id, theme: 'vengeance' })
-        .map(codeTokens)
-      cacheHighlight(key, lines)
+      const lines = await requestHighlight(code, id)
+      if (lines) cacheHighlight(key, lines)
       return lines
     } catch {
       return null
