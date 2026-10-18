@@ -12,7 +12,6 @@ import {
 } from 'react'
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { ArrowDown } from 'lucide-react'
-import { useVirtualizer } from '@tanstack/react-virtual'
 import { cn } from '../../lib/cn'
 import { rpc } from '../../lib/engine'
 import { spring } from '../../lib/motion'
@@ -56,11 +55,15 @@ import {
   type TurnInfo
 } from './transcript-items'
 import { UserMessageView } from './UserMessage'
+import {
+  captureScrollLayout,
+  TRANSCRIPT_TOP_PADDING,
+  useTranscriptVirtualizer,
+  type ScrollLayoutSnapshot
+} from './transcript-scroll-layout'
 
 /** Settled segments above this count are virtualized (≈40 turns); shorter sessions render as plain DOM. */
 const VIRTUALIZE_AFTER = 80
-/** Top padding of the transcript column (pt-8): where the virtual list starts inside the scroller. */
-const LIST_TOP = 32
 
 const ItemView = memo(function ItemView({
   agentId,
@@ -127,6 +130,7 @@ const SegmentView = memo(function SegmentView({
 }) {
   return (
     <div
+      data-segment-key={seg.key}
       className={cn(
         'pb-7',
         seg.muted && 'opacity-60',
@@ -153,22 +157,24 @@ const SegmentView = memo(function SegmentView({
 const VirtualSegments = memo(function VirtualSegments({
   agentId,
   segments,
-  scrollRef
+  scrollElement,
+  followsLatest,
+  follow,
+  snapshot
 }: {
   agentId: string
   segments: Segment[]
-  scrollRef: RefObject<HTMLDivElement | null>
+  scrollElement: HTMLDivElement | null
+  followsLatest: RefObject<boolean>
+  follow: () => void
+  snapshot: ScrollLayoutSnapshot | null
 }) {
-  const getScrollElement = useCallback(() => scrollRef.current, [scrollRef])
-  const getItemKey = useCallback((index: number) => segments[index]!.key, [segments])
-  const virtualizer = useVirtualizer({
-    count: segments.length,
-    getScrollElement,
-    estimateSize: () => 180,
-    getItemKey,
-    overscan: 6,
-    scrollMargin: LIST_TOP,
-    useFlushSync: false
+  const virtualizer = useTranscriptVirtualizer({
+    segments,
+    scrollElement,
+    followsLatest,
+    follow,
+    snapshot
   })
   return (
     <div
@@ -182,7 +188,7 @@ const VirtualSegments = memo(function VirtualSegments({
           data-index={row.index}
           ref={virtualizer.measureElement}
           className="absolute top-0 left-0 w-full"
-          style={{ transform: `translateY(${row.start - LIST_TOP}px)` }}
+          style={{ transform: `translateY(${row.start - TRANSCRIPT_TOP_PADDING}px)` }}
         >
           <SegmentView
             agentId={agentId}
@@ -255,8 +261,14 @@ function isEditable(target: EventTarget | null): boolean {
  */
 function useStickToBottom(agentId: string) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+  const attachScrollElement = useCallback((element: HTMLDivElement | null) => {
+    scrollRef.current = element
+    setScrollElement(element)
+  }, [])
   const observer = useRef<ResizeObserver | null>(null)
   const pinned = useRef(true)
+  const scrollSnapshot = useRef<ScrollLayoutSnapshot | null>(null)
   const jumping = useRef(false)
   const lastScrollTop = useRef(0)
   const lastScrollHeight = useRef(0)
@@ -451,6 +463,7 @@ function useStickToBottom(agentId: string) {
    * anchoring) instead of following the bottom.
    */
   const hold = useCallback(() => {
+    scrollSnapshot.current = captureScrollLayout(scrollRef.current)
     jumping.current = false
     pinned.current = false
   }, [])
@@ -472,8 +485,12 @@ function useStickToBottom(agentId: string) {
   }, [markIntent])
 
   return {
-    scrollRef,
+    scrollElement,
+    attachScrollElement,
     contentRef,
+    followsLatest: pinned,
+    scrollSnapshot,
+    follow,
     detached,
     scrollToBottom,
     onScroll,
@@ -629,8 +646,12 @@ function AgentTranscript({ agentId }: { agentId: string }) {
   }, [settledTail, streamingItems])
 
   const {
-    scrollRef,
+    scrollElement,
+    attachScrollElement,
     contentRef,
+    followsLatest,
+    scrollSnapshot,
+    follow,
     detached,
     scrollToBottom,
     onScroll,
@@ -682,7 +703,7 @@ function AgentTranscript({ agentId }: { agentId: string }) {
       <MermaidModeProvider value={mermaid}>
         <div className="relative min-h-0 flex-1">
           <div
-            ref={scrollRef}
+            ref={attachScrollElement}
             data-transcript-scroll
             onScroll={onScroll}
             onScrollEnd={onScrollEnd}
@@ -704,7 +725,10 @@ function AgentTranscript({ agentId }: { agentId: string }) {
                     <VirtualSegments
                       agentId={agentId}
                       segments={settledHead}
-                      scrollRef={scrollRef}
+                      scrollElement={scrollElement}
+                      followsLatest={followsLatest}
+                      follow={follow}
+                      snapshot={scrollSnapshot.current}
                     />
                   )}
                   {plain.map((seg, i) => (
