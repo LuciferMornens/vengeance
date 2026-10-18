@@ -156,8 +156,33 @@ type Filter = 'all' | 'errors'
 
 export function Timeline({ agent }: { agent: AgentState }) {
   const { entries, streaming, tools } = agent
-  const activities = useMemo(() => toolActivity({ entries, streaming, tools }), [entries, streaming, tools])
+  const streamingWithTools =
+    streaming?.message.role === 'assistant' &&
+    streaming.message.content.some((b) => b.type === 'toolCall')
+      ? streaming
+      : null
+  const activities = useMemo(
+    () => toolActivity({ entries, streaming: streamingWithTools, tools }),
+    [entries, Boolean(streamingWithTools), tools]
+  )
   const [filter, setFilter] = useState<Filter>('all')
+  const { errors, shown, maxDuration, total } = useMemo(() => {
+    let errCount = 0
+    let maxDur = 1
+    let sumDur = 0
+    for (const a of activities) {
+      if (a.isError) errCount++
+      const d = a.durationMs ?? 0
+      if (d > maxDur) maxDur = d
+      sumDur += d
+    }
+    return {
+      errors: errCount,
+      shown: filter === 'errors' ? activities.filter((a) => a.isError) : activities,
+      maxDuration: maxDur,
+      total: sumDur
+    }
+  }, [activities, filter])
   if (activities.length === 0) {
     return (
       <TabEmpty icon={<Activity />} title="No tool calls yet">
@@ -165,10 +190,6 @@ export function Timeline({ agent }: { agent: AgentState }) {
       </TabEmpty>
     )
   }
-  const errors = activities.filter((a) => a.isError).length
-  const shown = filter === 'errors' ? activities.filter((a) => a.isError) : activities
-  const maxDuration = Math.max(...activities.map((a) => a.durationMs ?? 0), 1)
-  const total = activities.reduce((n, a) => n + (a.durationMs ?? 0), 0)
 
   return (
     <div className="flex flex-col gap-3 px-3 pt-3 pb-6">

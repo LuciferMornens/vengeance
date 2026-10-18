@@ -79,7 +79,15 @@ function FileRow({ file, onOpen }: { file: FileActivity; onOpen: () => void }) {
 export function Files({ agent }: { agent: AgentState }) {
   const { entries, streaming, tools } = agent
   const cwd = agent.info.cwd
-  const files = useMemo(() => fileActivity(cwd, toolActivity({ entries, streaming, tools })), [cwd, entries, streaming, tools])
+  const streamingWithTools =
+    streaming?.message.role === 'assistant' &&
+    streaming.message.content.some((b) => b.type === 'toolCall')
+      ? streaming
+      : null
+  const files = useMemo(
+    () => fileActivity(cwd, toolActivity({ entries, streaming: streamingWithTools, tools })),
+    [cwd, entries, Boolean(streamingWithTools), tools]
+  )
   const [preview, setPreview] = useState<FileActivity | null>(null)
   const previewLoaded = filePreviewDialog.useLoaded(preview !== null)
 

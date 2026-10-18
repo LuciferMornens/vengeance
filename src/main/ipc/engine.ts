@@ -15,7 +15,6 @@ import { piConfig } from '../features/settings/pi-modules'
 import { engineBackends, PI_CAPABILITIES } from '../engine/backends'
 import { invokePrimeSettings } from '../engine/prime/configuration'
 import { getPrimeAgentDir, primeEngineInfo } from '../engine/prime/locate'
-import { PrimeMockEngineProcess } from '../engine/prime/mock'
 import { sanitizeNativeModels } from '../engine/prime/normalize'
 import { asRecord } from '../engine/prime/transport'
 import {
@@ -172,6 +171,7 @@ export function registerEngineIpc(manager: EngineManager): void {
         })
       )
     }
+    const { PrimeMockEngineProcess } = await import('../engine/prime/mock')
     const service = new PrimeMockEngineProcess({ engine: 'prime', cwd: workspace, noSession: true })
     try {
       await service.start()
@@ -277,7 +277,9 @@ export function registerEngineIpc(manager: EngineManager): void {
     ) {
       throw new Error('Invalid engine settings request')
     }
-    if (request.engine === 'pi') return invokeRegistered(request.channel, request.args, event)
+    if (request.engine === 'pi' || request.channel === 'settings:release') {
+      return invokeRegistered(request.channel, request.args, event)
+    }
     const cwd = settingsWorkspace(request, appState.getPrefs().activeWorkspace)
     return invokePrimeSettings(request, {
       overridePath: engineOverridePath('prime'),

@@ -488,6 +488,8 @@ export interface SettingsInvokeMap {
    * call any time and repeatedly; nothing for engines that need no warm-up.
    */
   'settings:prewarm': [result: void]
+  /** Settings closed: shorten the interactive keep-alive window of warm SDK/provider hosts so they exit promptly. */
+  'settings:release': [result: void]
   'settings:set': [args: SetSettingArgs, result: SettingsSnapshot]
   /** Validate raw settings.json text without saving. */
   'settings:validate': [text: string, scope: SettingsScope, result: ValidationIssue[]]

@@ -9,6 +9,7 @@ import { EngineManager } from './engine/manager'
 import { env } from './env'
 import { maskAgentInfo } from './features/launch/env-vault'
 import { accountModelFilter } from './features/settings/account-models'
+import { prepareAgentDir } from './features/settings/agent-dir'
 import { broadcast, handle } from './ipc/handle'
 import { registerIpc } from './ipc'
 import { physicalPath } from './paths'
@@ -246,7 +247,8 @@ if (!singleInstance) {
     if (folder) openFolder(folder)
   })
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
+    if (env.mock) await prepareAgentDir()
     session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) =>
       callback(ALLOWED_PERMISSIONS.has(permission))
     )

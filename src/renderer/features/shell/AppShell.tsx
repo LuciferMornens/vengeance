@@ -21,6 +21,7 @@ import { registerCoreActions } from './core-actions'
 import { EngineErrorState } from './EngineErrorState'
 import { EngineUpgradeNotice } from './EngineUpgradeNotice'
 import { fitPanels, useWindowWidth } from './panel-layout'
+import { settingsSheet } from './settings-sheet'
 import { SidePanel } from './SidePanel'
 import { Titlebar } from './Titlebar'
 import { newSession, openWorkspace, useEngineSpawns } from './workspace'
@@ -29,7 +30,6 @@ import { newSession, openWorkspace, useEngineSpawns } from './workspace'
 // without a Suspense fallback (see lazyWithPreload). Onboarding shows only on a first run.
 const onboardingPanel = lazyWithPreload(() => import('../onboarding').then((m) => m.Onboarding))
 const Onboarding = onboardingPanel.Component
-const settingsSheet = lazyWithPreload(() => import('../settings').then((m) => m.SettingsSheet))
 const SettingsSheet = settingsSheet.Component
 const inspectorPanel = lazyWithPreload(() => import('../inspector').then((m) => m.Inspector))
 const Inspector = inspectorPanel.Component

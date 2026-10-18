@@ -22,22 +22,7 @@ import { isEngineId, normalizeEngineId, type EngineId } from '@shared/api/engine
 import { appState } from '../app-state'
 import { env } from '../env'
 import type { EngineManager } from '../engine/manager'
-import {
-  branchMockSession,
-  findMockSession,
-  importMockSession,
-  listMockSessions,
-  MOCK_SESSIONS_ROOT,
-  mockForkPoints,
-  renameMockSession,
-  trashMockSession
-} from '../engine/mock-sessions'
 import { importSession, inspectImport } from '../features/sessions/import'
-import {
-  mockImportCandidate,
-  mockSessionTree,
-  setMockSessionLabel
-} from '../features/sessions/mock'
 import {
   branchOf,
   branchSession,
@@ -295,9 +280,16 @@ async function savedShareScope(context: IpcContext, cwd: string) {
   return { cwd, agentDir: agentDir(), projectTrusted: trust.engineDefault }
 }
 
-function mockShareDestination(context: IpcContext, args: ShareSessionArgs): 'gist' | 'radius' {
+const loadMockSessions = () => import('../engine/mock-sessions')
+const loadFeaturesMock = () => import('../features/sessions/mock')
+
+async function mockShareDestination(
+  context: IpcContext,
+  args: ShareSessionArgs
+): Promise<'gist' | 'radius'> {
   const agent = args.agentId ? context.manager.get(args.agentId) : undefined
   if ((agent?.engine ?? args.engine) === 'prime') return 'gist'
+  const { findMockSession } = await loadMockSessions()
   const cwd = agent?.cwd ?? findMockSession(args.sessionPath)?.cwd
   const global = readJsonFile(globalSettingsPath()).data
   const project = cwd ? readJsonFile(projectSettingsPath(cwd)).data : {}
@@ -310,7 +302,7 @@ async function sessionShareReadiness(
   context: IpcContext,
   args: ShareSessionArgs
 ): Promise<ShareReadiness> {
-  if (env.mock) return { ready: true, destination: mockShareDestination(context, args) }
+  if (env.mock) return { ready: true, destination: await mockShareDestination(context, args) }
   const target = await shareTarget(context, args)
   if (target.engine === 'prime') return shareReadiness()
   if (target.agentId) {
@@ -334,7 +326,7 @@ async function shareSession(
     throw new Error('Review the sharing destination before creating a link')
   }
   if (env.mock) {
-    const destination = mockShareDestination(context, args)
+    const destination = await mockShareDestination(context, args)
     if (args.destination !== destination) {
       throw new Error('The share destination changed. Review the destination and try again.')
     }
@@ -388,7 +380,10 @@ export function registerSessionsIpc(context: IpcContext): void {
   onQuit('before-quit', () => {
     for (const watcher of Object.values(watchers)) watcher.close()
   })
-  const changed = () => broadcast('sessions:changed', { root: MOCK_SESSIONS_ROOT })
+  const changed = async (): Promise<void> => {
+    const { MOCK_SESSIONS_ROOT } = await loadMockSessions()
+    broadcast('sessions:changed', { root: MOCK_SESSIONS_ROOT })
+  }
   const override = () => context.engineOverridePath()
   const pendingRoots = new Map<string, Promise<string[]>>()
   const rootsFor = (engine: EngineId, cwds: string[]): Promise<string[]> => {
@@ -407,7 +402,10 @@ export function registerSessionsIpc(context: IpcContext): void {
   }
   const inspectCandidate = async (engine: EngineId, path: string): Promise<ImportCandidate> => {
     if (!isEngineId(engine)) throw new Error('Choose a supported engine')
-    if (env.mock) return { ...mockImportCandidate(), sourcePath: path, engine }
+    if (env.mock) {
+      const { mockImportCandidate } = await loadFeaturesMock()
+      return { ...mockImportCandidate(), sourcePath: path, engine }
+    }
     return engine === 'prime'
       ? inspectPrimeImport(path)
       : { ...(await inspectImport(override(), path)), engine }
@@ -417,7 +415,10 @@ export function registerSessionsIpc(context: IpcContext): void {
     event: IpcMainInvokeEvent
   ): Promise<ImportCandidate | null> => {
     if (!isEngineId(engine)) throw new Error('Choose a supported engine')
-    if (env.mock) return { ...mockImportCandidate(), engine }
+    if (env.mock) {
+      const { mockImportCandidate } = await loadFeaturesMock()
+      return { ...mockImportCandidate(), engine }
+    }
     const path = await showOpen(event, {
       title: 'Import a session',
       properties: ['openFile'],
@@ -428,6 +429,7 @@ export function registerSessionsIpc(context: IpcContext): void {
 
   handle('sessions:workspaces', async () => {
     if (env.mock) {
+      const { listMockSessions } = await loadMockSessions()
       const discovered = new Map<string, { path: string; lastActivityAt: number; engine: 'pi' }>()
       for (const session of listMockSessions(null)) {
         const key = session.cwd.toLowerCase()
@@ -462,6 +464,7 @@ export function registerSessionsIpc(context: IpcContext): void {
     const saved = appState.getPrefs().openSessions.some((session) => samePath(session.path, path))
     let cwd: string
     if (env.mock) {
+      const { listMockSessions } = await loadMockSessions()
       cwd = listMockSessions(null).find((session) => samePath(session.path, path))?.cwd ?? ''
     } else if (saved) {
       cwd = (await readSessionHeader(path)).cwd
@@ -485,7 +488,7 @@ export function registerSessionsIpc(context: IpcContext): void {
       await rootsFor(args.engine, knownWorkspacePaths())
     }
     const sessions = env.mock
-      ? listMockSessions(null)
+      ? (await loadMockSessions()).listMockSessions(null)
       : args.engine === 'prime'
         ? (
             await listPrimeSessions(
@@ -519,6 +522,7 @@ export function registerSessionsIpc(context: IpcContext): void {
     const { cwd } = query
     const engine = normalizeEngineId(query.engine)
     if (env.mock) {
+      const { listMockSessions, MOCK_SESSIONS_ROOT } = await loadMockSessions()
       return {
         sessions:
           engine === 'prime'
@@ -541,8 +545,9 @@ export function registerSessionsIpc(context: IpcContext): void {
 
   handle('sessions:rename', async (path, name) => {
     if (env.mock) {
+      const { renameMockSession } = await loadMockSessions()
       renameMockSession(path, name)
-      changed()
+      await changed()
       return
     }
     assertClosed(context.manager, path)
@@ -554,8 +559,9 @@ export function registerSessionsIpc(context: IpcContext): void {
 
   handle('sessions:trash', async (path) => {
     if (env.mock) {
+      const { trashMockSession } = await loadMockSessions()
       trashMockSession(path)
-      changed()
+      await changed()
       return
     }
     if ((await sessionEngine(context, path)) === 'prime') {
@@ -566,8 +572,9 @@ export function registerSessionsIpc(context: IpcContext): void {
 
   handle('sessions:branch', async ({ sessionPath, entryId, engine }) => {
     if (env.mock) {
+      const { branchMockSession } = await loadMockSessions()
       const created = branchMockSession(sessionPath)
-      changed()
+      await changed()
       return created
     }
     if ((await sessionEngine(context, sessionPath, engine)) === 'prime') {
@@ -582,14 +589,14 @@ export function registerSessionsIpc(context: IpcContext): void {
   })
 
   handle('sessions:fork-points', async (path) => {
-    if (env.mock) return mockForkPoints(path)
+    if (env.mock) return (await loadMockSessions()).mockForkPoints(path)
     return (await sessionEngine(context, path)) === 'prime'
       ? primeForkPoints(path, context.engineOverridePath('prime'))
       : forkPoints(override(), path)
   })
 
   handle('sessions:tree', async (path) => {
-    if (env.mock) return mockSessionTree(path)
+    if (env.mock) return (await loadFeaturesMock()).mockSessionTree(path)
     return (await sessionEngine(context, path)) === 'prime'
       ? primeSessionTree(path, context.engineOverridePath('prime'))
       : sessionTree(override(), path)
@@ -597,6 +604,7 @@ export function registerSessionsIpc(context: IpcContext): void {
 
   handle('sessions:set-label', async ({ sessionPath, entryId, label, engine }) => {
     if (env.mock) {
+      const { setMockSessionLabel } = await loadFeaturesMock()
       setMockSessionLabel(sessionPath, entryId, label)
       return
     }
@@ -608,8 +616,10 @@ export function registerSessionsIpc(context: IpcContext): void {
   })
 
   handle('sessions:cwd', async (path) => {
-    if (env.mock)
+    if (env.mock) {
+      const { listMockSessions } = await loadMockSessions()
       return listMockSessions(null).find((session) => samePath(session.path, path))?.cwd ?? ''
+    }
     return (await sessionEngine(context, path)) === 'prime'
       ? primeSessionCwd(path)
       : sessionCwd(override(), path)
@@ -648,6 +658,10 @@ export function registerSessionsIpc(context: IpcContext): void {
 
   handle('sessions:import', async (args) => {
     if (env.mock) {
+      const [{ importMockSession }, { mockImportCandidate }] = await Promise.all([
+        loadMockSessions(),
+        loadFeaturesMock()
+      ])
       const candidate = mockImportCandidate()
       const path = importMockSession(
         args.fallbackCwd,
@@ -655,7 +669,7 @@ export function registerSessionsIpc(context: IpcContext): void {
         candidate.firstMessage,
         candidate.messageCount
       )
-      changed()
+      await changed()
       return {
         path,
         cwd: args.fallbackCwd,

@@ -378,13 +378,20 @@ function applyAssistantUpdate(
       break
     }
     case 'toolcall_delta': {
-      const text = (streaming.toolArgsText[update.contentIndex] ?? '') + update.delta
+      const prevText = streaming.toolArgsText[update.contentIndex] ?? ''
+      const text = prevText + update.delta
       next.toolArgsText = { ...streaming.toolArgsText, [update.contentIndex]: text }
       const block = message.content[update.contentIndex]
       if (block?.type === 'toolCall') {
-        const args = parsePartialJson(text)
-        if (args) {
+        const shouldParse =
+          text.length <= 4_096 ||
+          Object.keys(block.arguments).length === 0 ||
+          Math.floor(text.length / 16_384) !== Math.floor(prevText.length / 16_384)
+        const args = shouldParse ? parsePartialJson(text) : block.arguments
+        if (args && args !== block.arguments) {
           message.content[update.contentIndex] = { ...block, arguments: args }
+        }
+        if (args && tools[block.id]?.args !== args) {
           tools = upsertTool(tools, block.id, { toolName: block.name, args })
         }
       }

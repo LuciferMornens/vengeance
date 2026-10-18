@@ -9,7 +9,11 @@ import { lazy, useEffect, useState, type ComponentType } from 'react'
  */
 export function lazyWithPreload<Props extends object>(
   load: () => Promise<ComponentType<Props>>
-): { Component: ComponentType<Props>; useLoaded: (wanted: boolean) => boolean } {
+): {
+  Component: ComponentType<Props>
+  useLoaded: (wanted: boolean) => boolean
+  preload: () => Promise<ComponentType<Props>>
+} {
   let loaded: ComponentType<Props> | undefined
   let loading: Promise<ComponentType<Props>> | undefined
   const preload = () =>
@@ -28,8 +32,14 @@ export function lazyWithPreload<Props extends object>(
   /** True once the chunk is loaded, or failed to (rendering then raises the error); loads it while `wanted`. */
   function useLoaded(wanted: boolean): boolean {
     const [settled, setSettled] = useState(() => loaded !== undefined)
+    if (loaded !== undefined && !settled) {
+      setSettled(true)
+    }
+    if (wanted && loaded === undefined) {
+      void preload()
+    }
     useEffect(() => {
-      if (!wanted || settled) return
+      if (!wanted || settled || loaded !== undefined) return
       let current = true
       const settle = () => current && setSettled(true)
       preload().then(settle, settle)
@@ -37,8 +47,8 @@ export function lazyWithPreload<Props extends object>(
         current = false
       }
     }, [wanted, settled])
-    return settled
+    return settled || loaded !== undefined
   }
 
-  return { Component: Preloaded, useLoaded }
+  return { Component: Preloaded, useLoaded, preload }
 }

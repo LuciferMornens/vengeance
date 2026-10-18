@@ -25,6 +25,15 @@ import {
 const LAUNCH_DELAY_MS = 8_000
 const PRIME_CHANGELOG_URL = 'https://github.com/PrimeIntellect-ai/prime-agent/releases'
 
+function isPrimeConfigured(prefs = appState.getPrefs()): boolean {
+  return (
+    prefs.defaultEngine === 'prime' ||
+    Boolean(prefs.engineOverridePaths?.prime) ||
+    prefs.workspaces.some((workspace) => workspace.engine === 'prime') ||
+    (prefs.openSessions ?? []).some((session) => session.engine === 'prime')
+  )
+}
+
 export class PrimeUpdatesService {
   private state: UpdatesState
   private nextCheck?: NodeJS.Timeout
@@ -55,6 +64,10 @@ export class PrimeUpdatesService {
     this.scheduleCheck()
     this.stopPrefsListener = appState.onPrefsChange((next, previous) => {
       if (updatesScheduleChanged(next, previous)) this.scheduleCheck()
+      // A background check skipped while Prime was unused left nothing scheduled: resume once it is in use.
+      else if (!this.nextCheck && !isPrimeConfigured(previous) && isPrimeConfigured(next)) {
+        this.scheduleCheck()
+      }
     })
   }
 
@@ -72,7 +85,10 @@ export class PrimeUpdatesService {
     if (!this.checksFrom) return
     const delay = nextCheckDelay(this.state.lastChecked, this.checksFrom)
     if (delay === null) return
-    this.nextCheck = setTimeout(() => void this.check(), delay)
+    this.nextCheck = setTimeout(() => {
+      this.nextCheck = undefined
+      void this.check(false)
+    }, delay)
   }
 
   getState(): UpdatesState {
@@ -94,11 +110,12 @@ export class PrimeUpdatesService {
 
   async load(): Promise<UpdatesState> {
     if (this.state.engine) return this.getState()
-    return this.check()
+    return this.check(true)
   }
 
-  async check(): Promise<UpdatesState> {
+  async check(force = true): Promise<UpdatesState> {
     if (this.state.checking) return this.getState()
+    if (!force && !this.override() && !isPrimeConfigured()) return this.getState()
     this.publish({ checking: true, error: undefined })
     try {
       const location = env.mock

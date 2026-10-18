@@ -1,10 +1,9 @@
-import { cn } from '../../../lib/cn'
+import { useMemo } from 'react'
 import { useAgents } from '../../../store/agents'
-import { CodeView } from '../../../ui/CodeView'
 import { languageFromPath } from '../../../ui/highlight'
 import { PathChip, useDisplayPath } from '../PathChip'
 import { registerToolRenderer, type ToolRendererProps } from '../registry'
-import { DetailNote, RowDetail, ShowMore, ToolRow, usePreviewExpanded } from '../ToolRow'
+import { DetailNote, PreviewCode, RowDetail, ShowMore, ToolRow, usePreviewExpanded } from '../ToolRow'
 import { fileErrorReason, isActive, lineCount, num, payloadImages, payloadText, resultPayload, splitTrailingNotes, str, toolPhase } from '../tool-utils'
 
 const PREVIEW_LINES = 60
@@ -32,15 +31,14 @@ function ReadRow({ agentId, call, execution }: ToolRendererProps) {
   const relative = useDisplayPath(agentId, path)
   const offset = num(call.arguments.offset)
   const payload = resultPayload(execution)
-  const { body, notes } = splitTrailingNotes(payloadText(payload))
-  const images = payloadImages(payload)
+  const { body, notes } = useMemo(() => splitTrailingNotes(payloadText(payload)), [payload])
+  const images = useMemo(() => payloadImages(payload), [payload])
   const failed = phase === 'error'
   const imageOnly = images.length > 0 && /^Read image file/.test(body.trim())
-  const returned = failed || imageOnly ? 0 : lineCount(body)
-  const range = lineRange(offset, returned, notes)
+  const returned = useMemo(() => (failed || imageOnly ? 0 : lineCount(body)), [failed, imageOnly, body])
+  const range = useMemo(() => lineRange(offset, returned, notes), [offset, returned, notes])
   const [expanded, setExpanded] = usePreviewExpanded('content')
   const folded = !expanded && returned > PREVIEW_LINES + 10
-  const shown = folded ? body.split('\n').slice(0, PREVIEW_LINES).join('\n') : body
   const thumb = images[0]
   return (
     <ToolRow
@@ -76,15 +74,7 @@ function ReadRow({ agentId, call, execution }: ToolRendererProps) {
               </div>
             ))}
             {returned > 0 && (
-              <div className="overflow-x-auto bg-[var(--code-bg)] px-3 py-2.5">
-                <CodeView
-                  code={shown}
-                  lang={languageFromPath(path)}
-                  lineNumbers
-                  startLine={offset ?? 1}
-                  className={cn(folded && '[mask-image:linear-gradient(to_bottom,black_calc(100%-44px),transparent)]')}
-                />
-              </div>
+              <PreviewCode code={body} folded={folded} previewLines={PREVIEW_LINES} lang={languageFromPath(path)} lineNumbers startLine={offset ?? 1} />
             )}
             {returned > PREVIEW_LINES + 10 && <ShowMore expanded={expanded} onToggle={() => setExpanded(!expanded)} hidden={returned - PREVIEW_LINES} />}
             {notes.map((note) => (

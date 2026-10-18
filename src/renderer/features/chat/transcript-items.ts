@@ -89,10 +89,16 @@ class ItemBuilder {
   private turnText: string[] = []
   private turnOpen = false
   private prompt: UserMessage | undefined
+  private readonly hasPrecedingItems: boolean
   /** Index of a failed response in the current turn; a later response means an automatic retry recovered it. */
   private failedAt: number | null = null
   /** A compaction followed the failed response (the Engine's context-overflow recovery). */
   private compactedSinceFailure = false
+
+  constructor(prompt?: UserMessage, hasPrecedingItems = false) {
+    this.prompt = prompt
+    this.hasPrecedingItems = hasPrecedingItems
+  }
 
   private push(item: TranscriptItem): void {
     // Consecutive tool calls (across messages; tool results are invisible) form one activity group,
@@ -154,7 +160,12 @@ class ItemBuilder {
       case 'compactionSummary':
         this.closeTurn(key, undefined)
         if (this.failedAt !== null) this.compactedSinceFailure = true
-        this.items.push({ kind: 'compaction', key, message, leading: this.items.length === 0 })
+        this.items.push({
+          kind: 'compaction',
+          key,
+          message,
+          leading: !this.hasPrecedingItems && this.items.length === 0
+        })
         return
       case 'branchSummary':
         this.closeTurn(key, undefined)
@@ -364,8 +375,57 @@ export interface SettledTranscript {
   tail: TurnInfo | null
 }
 
+interface TranscriptCheckpoint {
+  entryCount: number
+  prompt: UserMessage
+  segments: Segment[]
+}
+
+interface SessionTranscriptState {
+  entries: TranscriptEntry[]
+  settled: SettledTranscript
+  checkpoint: TranscriptCheckpoint | null
+}
+
 // Entries are immutable store snapshots. Weak keys let closed sessions and superseded snapshots go.
 const settledTranscripts = new WeakMap<TranscriptEntry[], SettledTranscript>()
+const settledByFirstEntry = new WeakMap<TranscriptEntry, SessionTranscriptState>()
+
+function hasEntryPrefix(
+  entries: TranscriptEntry[],
+  prefix: TranscriptEntry[],
+  count = prefix.length
+): boolean {
+  if (entries.length < count) return false
+  if (count === 0) return true
+  if (entries[count - 1] !== prefix[count - 1] || entries[0] !== prefix[0]) return false
+  for (let i = 1; i < count - 1; i++) {
+    if (entries[i] !== prefix[i]) return false
+  }
+  return true
+}
+
+function isIgnoredEntry(entry: TranscriptEntry): boolean {
+  const { message } = entry
+  return (
+    message.role === 'toolResult' ||
+    message.role === 'system' ||
+    (message.role === 'custom' && !message.display)
+  )
+}
+
+function isTurnBoundaryUser(message: AgentMessage): message is UserMessage {
+  if (message.role !== 'user') return false
+  const text = userText(message)
+  return !text.startsWith(SUBAGENT_WAKE_PREFIX) && !parseSupervisorReplyPrompt(text)
+}
+
+function reuseFromOffset(previous: Segment[], next: Segment[], offset: number): Segment[] {
+  if (previous.length === 0 || next.length === 0) return next
+  const slice =
+    offset > 0 && previous.length >= offset ? previous.slice(offset) : previous
+  return reuseSegments(slice, next)
+}
 
 /** Reuse the derived history when an unchanged conversation mounts again after a tab switch. */
 export function settledTranscript(
@@ -375,11 +435,95 @@ export function settledTranscript(
   const cached = settledTranscripts.get(entries)
   if (cached) return cached
 
-  const model = buildEntryItems(entries)
-  const settled = {
-    segments: reuseSegments(previous, segmentItems(model.items)),
-    tail: model.tail
+  if (entries.length === 0) {
+    const empty: SettledTranscript = { segments: [], tail: null }
+    settledTranscripts.set(entries, empty)
+    return empty
+  }
+
+  const firstEntry = entries[0]!
+  const prior = settledByFirstEntry.get(firstEntry)
+
+  if (prior && entries.length > prior.entries.length && hasEntryPrefix(entries, prior.entries)) {
+    let allIgnored = true
+    for (let i = prior.entries.length; i < entries.length; i++) {
+      if (!isIgnoredEntry(entries[i]!)) {
+        allIgnored = false
+        break
+      }
+    }
+    if (allIgnored && (previous.length === 0 || previous === prior.settled.segments)) {
+      settledTranscripts.set(entries, prior.settled)
+      settledByFirstEntry.set(firstEntry, {
+        entries,
+        settled: prior.settled,
+        checkpoint: prior.checkpoint
+      })
+      return prior.settled
+    }
+  }
+
+  let checkpoint: TranscriptCheckpoint | null = null
+  if (prior?.checkpoint && hasEntryPrefix(entries, prior.entries, prior.checkpoint.entryCount)) {
+    const priorSegments = prior.checkpoint.segments
+    const matchesPrevious =
+      previous.length === 0 ||
+      (previous.length >= priorSegments.length &&
+        previous[0] === priorSegments[0] &&
+        previous[priorSegments.length - 1] === priorSegments[priorSegments.length - 1])
+    checkpoint = matchesPrevious
+      ? prior.checkpoint
+      : {
+          ...prior.checkpoint,
+          segments: reuseSegments(previous, priorSegments)
+        }
+  }
+
+  const startIndex = checkpoint?.entryCount ?? 0
+  let lastUserIdx = -1
+  for (let i = entries.length - 1; i >= startIndex; i--) {
+    if (isTurnBoundaryUser(entries[i]!.message)) {
+      lastUserIdx = i
+      break
+    }
+  }
+
+  if (lastUserIdx >= startIndex) {
+    const midBuilder = new ItemBuilder(checkpoint?.prompt, checkpoint !== null)
+    for (let i = startIndex; i <= lastUserIdx; i++) {
+      const entry = entries[i]!
+      midBuilder.add(entry.key, entry.message, false)
+    }
+    const baseSegmentCount = checkpoint?.segments.length ?? 0
+    const midSegments = reuseFromOffset(
+      previous,
+      segmentItems(midBuilder.items),
+      baseSegmentCount
+    )
+    checkpoint = {
+      entryCount: lastUserIdx + 1,
+      prompt: entries[lastUserIdx]!.message as UserMessage,
+      segments: checkpoint ? [...checkpoint.segments, ...midSegments] : midSegments
+    }
+  }
+
+  const tailStart = checkpoint?.entryCount ?? 0
+  const tailBuilder = new ItemBuilder(checkpoint?.prompt, checkpoint !== null)
+  for (let i = tailStart; i < entries.length; i++) {
+    const entry = entries[i]!
+    tailBuilder.add(entry.key, entry.message, false)
+  }
+  const baseSegmentCount = checkpoint?.segments.length ?? 0
+  const tailSegments = reuseFromOffset(
+    previous,
+    segmentItems(tailBuilder.items),
+    baseSegmentCount
+  )
+  const settled: SettledTranscript = {
+    segments: checkpoint ? [...checkpoint.segments, ...tailSegments] : tailSegments,
+    tail: tailBuilder.tail()
   }
   settledTranscripts.set(entries, settled)
+  settledByFirstEntry.set(firstEntry, { entries, settled, checkpoint })
   return settled
 }

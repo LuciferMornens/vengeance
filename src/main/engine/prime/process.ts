@@ -11,7 +11,8 @@ import type {
   RpcCommand,
   RpcExtensionUIResponse,
   RpcResponse,
-  RpcResponseDataMap
+  RpcResponseDataMap,
+  RpcSessionState
 } from '@shared/engine-types'
 import {
   Emitter,
@@ -72,6 +73,7 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
   private currentStatus: EngineStatus = 'starting'
   private lastError: string | undefined
   private state: PrimeRecord = {}
+  private initialState: RpcSessionState | null = null
   private selectedVersion: string | undefined
   private cursor: PrimeRecord | undefined
   private unsubscribers: Array<() => void> = []
@@ -122,6 +124,12 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
 
   get error(): string | undefined {
     return this.lastError
+  }
+
+  consumeInitialState(): RpcSessionState | null {
+    const state = this.initialState
+    this.initialState = null
+    return state
   }
 
   start(): Promise<void> {
@@ -446,6 +454,7 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
     timeoutMs: number
   ): Promise<RpcResponseDataMap[RpcCommand['type']]> {
     const { id: _id, type, ...payload } = command
+    if (type !== 'get_commands') this.initialState = null
     if (type === 'get_state') {
       const state = await this.nativeCommand('get_state')
       return this.sessionLineage.apply(normalizeState(this.state, state))
@@ -587,6 +596,10 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
       nativeAgentId: this.activeSessionId,
       sessionPath: stringValue(this.state.sessionFile)
     }
+    const normalizedState = this.sessionLineage.apply(normalizeState(this.state, {}))
+    if (this.currentStatus !== 'ready') {
+      this.initialState = normalizedState
+    }
     const incomingCursor = cursor ?? snapshot.lastEventCursor
     if (incomingCursor) this.cursor = asRecord(incomingCursor)
     if (!Array.isArray(snapshot.messages)) return true
@@ -599,7 +612,7 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
       name: 'session_snapshot',
       data: {
         messages,
-        state: this.sessionLineage.apply(normalizeState(this.state, {})),
+        state: normalizedState,
         cursor: this.cursor,
         steering: Array.isArray(actions.steering) ? actions.steering : [],
         followUp: Array.isArray(actions.followUps) ? actions.followUps : [],

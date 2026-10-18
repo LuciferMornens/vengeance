@@ -53,14 +53,16 @@ function containsActive(node: PrimeFamilyNode, activeAgentId: string | null): bo
 }
 
 function FamilyRow({ node }: { node: PrimeFamilyNode }) {
-  const live = useAgents((state) => (node.open ? state.agents[node.open.agentId] : undefined))
-  const active = useAgents((state) => state.activeAgentId === node.open?.agentId)
+  const openId = node.open?.agentId
+  const ownTitle = useAgents((s) => (openId && s.agents[openId] ? agentOwnTitle(s.agents[openId]) : null))
+  const live = useAgents((s) => (openId && s.agents[openId] ? liveState(s.agents[openId]) : null))
+  const active = useAgents((state) => state.activeAgentId === openId)
   const { pinned: pinnedPaths } = useSessionsPrefs()
   const pinned =
     !!node.path &&
     pinnedPaths.some((path) => sessionIdentityPath(path) === sessionIdentityPath(node.path!))
-  const title = (live ? agentOwnTitle(live) : undefined) || primeFamilyTitle(node)
-  const state = live ? liveState(live) : node.background?.busy ? 'running' : 'idle'
+  const title = ownTitle || primeFamilyTitle(node)
+  const state = live ?? (node.background?.busy ? 'running' : 'idle')
   const target = {
     agentId: node.open?.agentId,
     path: node.path,

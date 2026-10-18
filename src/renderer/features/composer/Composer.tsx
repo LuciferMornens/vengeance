@@ -137,16 +137,19 @@ export function Composer({ agentId }: { agentId: string }) {
   )
 
   // ─── Suggestion menus ──────────────────────────────────────────────────────
-  const hints = useCommandHints(cwd, commands)
   const trigger = useMemo(() => detectTrigger(text, caret), [text, caret])
   const menuOpen = !compacting && trigger !== null && dismissedAt !== text
-  const offeredCommands = useOfferedCommands(commands, cwd || null, engine)
+  const slashMenuOpen = menuOpen && trigger?.kind === 'slash'
+  // Loaded up front (once per workspace + command set): a picked `<required>` command must complete, not run bare.
+  const hints = useCommandHints(cwd, commands)
+  const offeredCommands = useOfferedCommands(commands, cwd || null, engine, slashMenuOpen)
   const slashItems = useSlashSuggestions(
     offeredCommands,
     trigger?.kind === 'slash' ? trigger.query : '',
     hints,
     engine,
-    bridge
+    bridge,
+    slashMenuOpen
   )
   const mentions = useFileMentions(
     cwd,

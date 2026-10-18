@@ -10,7 +10,8 @@ import type {
   RpcCommand,
   RpcCommandType,
   RpcExtensionUIResponse,
-  RpcResponse
+  RpcResponse,
+  RpcSessionState
 } from '@shared/engine-types'
 
 export interface EngineExit {
@@ -41,6 +42,8 @@ export interface EngineHandle {
   /** Last spawn/crash error message, if any. */
   readonly error: string | undefined
   start(): Promise<void>
+  /** Take the initial `get_state` snapshot captured during `start()`, if any, to avoid a duplicate startup round-trip. */
+  consumeInitialState?(): RpcSessionState | null
   /** `command.id` is optional; supply one (prefix `r-`) only to correlate streamed events. */
   send(command: RpcCommand, options?: SendOptions): Promise<RpcResponse>
   respondUi(response: RpcExtensionUIResponse): void

@@ -153,6 +153,19 @@ export class PrimeEventAdapter {
             }
           : { type: 'thinking_end', contentIndex, content: block.thinking }
       } else if (block.type === 'toolCall') {
+        const prevRaw =
+          previous?.type === 'toolCall' ? (previous as { rawArgs?: unknown }).rawArgs : undefined
+        const nextRaw = (block as { rawArgs?: unknown }).rawArgs
+        if (
+          previous?.type === 'toolCall' &&
+          previous.id === block.id &&
+          previous.name === block.name &&
+          (prevRaw !== undefined || nextRaw !== undefined
+            ? prevRaw === nextRaw
+            : JSON.stringify(previous.arguments) === JSON.stringify(block.arguments))
+        ) {
+          continue
+        }
         if (previous?.type !== 'toolCall') {
           this.emit({
             type: 'message_update',

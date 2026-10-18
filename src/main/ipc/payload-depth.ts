@@ -32,8 +32,21 @@ function exceedsBridgeDepth(value: Container, limit: number): boolean {
   while (stack.length > 0) {
     const { container, depth } = stack.pop()!
     if (depth > limit) return true
-    for (const child of Object.values(container)) {
-      if (isContainer(child)) stack.push({ container: child, depth: depth + bridgeSteps(child) })
+    if (Array.isArray(container)) {
+      for (let i = 0; i < container.length; i++) {
+        const child = container[i]
+        if (typeof child === 'object' && child !== null && isContainer(child)) {
+          stack.push({ container: child, depth: depth + bridgeSteps(child) })
+        }
+      }
+    } else {
+      for (const key in container) {
+        if (!Object.prototype.hasOwnProperty.call(container, key)) continue
+        const child = container[key]
+        if (typeof child === 'object' && child !== null && isContainer(child)) {
+          stack.push({ container: child, depth: depth + bridgeSteps(child) })
+        }
+      }
     }
   }
   return false
@@ -44,22 +57,32 @@ function truncateBridgeDepth(value: Container, limit: number): Container {
   const emptyLike = (container: Container): Container => (Array.isArray(container) ? [] : {})
   const root = emptyLike(value)
   const stack: Array<{ source: Container; target: Container; depth: number }> = [{ source: value, target: root, depth: bridgeSteps(value) }]
+  const visitChild = (slots: Record<string, unknown>, key: string | number, child: unknown, depth: number): void => {
+    if (typeof child !== 'object' || child === null || !isContainer(child)) {
+      slots[key] = child
+      return
+    }
+    const childDepth = depth + bridgeSteps(child)
+    if (childDepth > limit) {
+      slots[key] = TOO_DEEP_PLACEHOLDER
+      return
+    }
+    const copy = emptyLike(child)
+    slots[key] = copy
+    stack.push({ source: child, target: copy, depth: childDepth })
+  }
   while (stack.length > 0) {
     const { source, target, depth } = stack.pop()!
     const slots = target as Record<string, unknown>
-    for (const [key, child] of Object.entries(source)) {
-      if (!isContainer(child)) {
-        slots[key] = child
-        continue
+    if (Array.isArray(source)) {
+      for (let i = 0; i < source.length; i++) {
+        visitChild(slots, i, source[i], depth)
       }
-      const childDepth = depth + bridgeSteps(child)
-      if (childDepth > limit) {
-        slots[key] = TOO_DEEP_PLACEHOLDER
-        continue
+    } else {
+      for (const key in source) {
+        if (!Object.prototype.hasOwnProperty.call(source, key)) continue
+        visitChild(slots, key, source[key], depth)
       }
-      const copy = emptyLike(child)
-      slots[key] = copy
-      stack.push({ source: child, target: copy, depth: childDepth })
     }
   }
   return root

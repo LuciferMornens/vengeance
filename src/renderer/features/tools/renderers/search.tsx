@@ -7,13 +7,17 @@ import { DetailEmpty, DetailNote, MonoSubject, RowDetail, ShowMore, ToolRow, use
 import { bool, firstLine, isActive, payloadText, plural, resultPayload, splitPath, splitTrailingNotes, str, toolPhase, type ToolPhase } from '../tool-utils'
 
 const LIST_LIMIT = 60
+const GREP_GROUP_LIMIT = 30
 const EMPTY_RESULTS = /^(No matches found|No files found matching pattern|\(empty directory\))$/
 
 function useSearchResult(agentId: string, props: ToolRendererProps): { phase: ToolPhase; body: string; notes: string[]; empty: boolean } {
   const running = useAgents((s) => s.agents[agentId]?.phase === 'running')
   const phase = toolPhase(props.execution, running)
-  const { body, notes } = splitTrailingNotes(payloadText(resultPayload(props.execution)))
-  const trimmed = body.trim()
+  const payload = resultPayload(props.execution)
+  const { trimmed, notes } = useMemo(() => {
+    const split = splitTrailingNotes(payloadText(payload))
+    return { trimmed: split.body.trim(), notes: split.notes }
+  }, [payload])
   return { phase, body: trimmed, notes, empty: phase === 'done' && (trimmed === '' || EMPTY_RESULTS.test(trimmed)) }
 }
 
@@ -62,6 +66,38 @@ interface GrepLine {
   match: boolean
 }
 
+function countGrep(body: string): { matches: number; files: number } {
+  let matches = 0
+  let files = 0
+  let lastFile = ''
+  for (const raw of body.split('\n')) {
+    const match = /^(.+?):(\d+):/.exec(raw)
+    const context = match ? null : /^(.+?)-(\d+)-/.exec(raw)
+    const m = match ?? context
+    if (!m) continue
+    if (match) matches++
+    const file = m[1]!
+    if (file !== lastFile) {
+      lastFile = file
+      files++
+    }
+  }
+  return { matches, files }
+}
+
+function countNonEmptyLines(text: string): number {
+  if (!text) return 0
+  let count = 0
+  let lineStart = 0
+  for (let i = 0; i <= text.length; i++) {
+    if (i === text.length || text.charCodeAt(i) === 10) {
+      if (i > lineStart) count++
+      lineStart = i + 1
+    }
+  }
+  return count
+}
+
 function parseGrep(body: string): Array<{ file: string; lines: GrepLine[] }> {
   const files: Array<{ file: string; lines: GrepLine[] }> = []
   for (const raw of body.split('\n')) {
@@ -104,15 +140,64 @@ function Scope({ where }: { where: string }) {
   )
 }
 
+function GrepFiles({ files, re }: { files: Array<{ file: string; lines: GrepLine[] }>; re: RegExp | null }) {
+  const [all, setAll] = usePreviewExpanded('files')
+  const shown = all ? files : files.slice(0, GREP_GROUP_LIMIT)
+  return (
+    <>
+      <div className="py-1.5">
+        {shown.map((f) => (
+          <div key={f.file} className="pb-1">
+            <FileHeading path={f.file} count={f.lines.filter((l) => l.match).length} />
+            {f.lines.map((l, i) => (
+              <div key={i} className={cn('flex font-mono text-[12px] leading-[1.65]', !l.match && 'opacity-55')}>
+                <span className="w-14 shrink-0 pr-3 text-right text-fg-3 tabular select-none">{l.line}</span>
+                <span className="selectable min-w-0 pr-3 break-all whitespace-pre-wrap text-fg-2">{highlightMatches(l.text.trimEnd(), l.match ? re : null)}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+      {files.length > GREP_GROUP_LIMIT && (
+        <ShowMore expanded={all} onToggle={() => setAll(!all)} hidden={files.length - GREP_GROUP_LIMIT} unit="files" />
+      )}
+    </>
+  )
+}
+
+/** The grep detail (mounted only while open): parses the matches into file groups and highlights them. */
+function GrepDetail({ phase, body, notes, empty, pattern, literal, ignoreCase }: { phase: ToolPhase; body: string; notes: string[]; empty: boolean; pattern: string; literal: boolean; ignoreCase: boolean }) {
+  const failed = phase === 'error'
+  const re = useMemo(() => matcher(pattern, literal, ignoreCase), [pattern, literal, ignoreCase])
+  const files = useMemo(() => (failed || empty ? [] : parseGrep(body)), [failed, empty, body])
+  return (
+    <RowDetail copy={body}>
+      {failed ? (
+        <DetailNote tone="danger">{body || 'Search failed'}</DetailNote>
+      ) : empty ? (
+        <DetailEmpty>No matches for “{pattern}”.</DetailEmpty>
+      ) : files.length > 0 ? (
+        <GrepFiles files={files} re={re} />
+      ) : (
+        body && <pre className="selectable px-3.5 py-2.5 font-mono text-[12px] whitespace-pre-wrap text-fg-2">{body}</pre>
+      )}
+      {notes.map((note) => (
+        <DetailNote key={note}>{note}</DetailNote>
+      ))}
+    </RowDetail>
+  )
+}
+
 function GrepRow(props: ToolRendererProps) {
   const { agentId, call, execution } = props
   const { phase, body, notes, empty } = useSearchResult(agentId, props)
   const pattern = str(call.arguments.pattern) ?? ''
   const glob = str(call.arguments.glob)
   const where = useDisplayPath(agentId, str(call.arguments.path))
-  const re = useMemo(() => matcher(pattern, bool(call.arguments.literal) ?? false, bool(call.arguments.ignoreCase) ?? false), [call.arguments, pattern])
-  const files = useMemo(() => (phase === 'error' ? [] : parseGrep(body)), [body, phase])
-  const matches = files.reduce((n, f) => n + f.lines.filter((l) => l.match).length, 0)
+  const counts = useMemo(
+    () => (phase === 'error' || empty ? { matches: 0, files: 0 } : countGrep(body)),
+    [body, phase, empty]
+  )
   const failed = phase === 'error'
   return (
     <ToolRow
@@ -123,7 +208,7 @@ function GrepRow(props: ToolRendererProps) {
           <Scope where={[where, glob].filter(Boolean).join(' \u00b7 ')} />
         </>
       }
-      meta={phase === 'done' ? <span>{empty ? 'no matches' : `${plural(matches, 'match', 'matches')} \u00b7 ${plural(files.length, 'file')}`}</span> : null}
+      meta={phase === 'done' ? <span>{empty ? 'no matches' : `${plural(counts.matches, 'match', 'matches')} \u00b7 ${plural(counts.files, 'file')}`}</span> : null}
       phase={phase}
       durationMs={execution?.durationMs}
       startedAt={execution?.startedAt}
@@ -131,32 +216,15 @@ function GrepRow(props: ToolRendererProps) {
       sublineTone="danger"
       detail={
         isActive(phase) ? undefined : (
-          <RowDetail copy={body}>
-            {failed ? (
-              <DetailNote tone="danger">{body || 'Search failed'}</DetailNote>
-            ) : empty ? (
-              <DetailEmpty>No matches for “{pattern}”.</DetailEmpty>
-            ) : files.length > 0 ? (
-              <div className="py-1.5">
-                {files.map((f) => (
-                  <div key={f.file} className="pb-1">
-                    <FileHeading path={f.file} count={f.lines.filter((l) => l.match).length} />
-                    {f.lines.map((l, i) => (
-                      <div key={i} className={cn('flex font-mono text-[12px] leading-[1.65]', !l.match && 'opacity-55')}>
-                        <span className="w-14 shrink-0 pr-3 text-right text-fg-3 tabular select-none">{l.line}</span>
-                        <span className="selectable min-w-0 pr-3 break-all whitespace-pre-wrap text-fg-2">{highlightMatches(l.text.trimEnd(), l.match ? re : null)}</span>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              body && <pre className="selectable px-3.5 py-2.5 font-mono text-[12px] whitespace-pre-wrap text-fg-2">{body}</pre>
-            )}
-            {notes.map((note) => (
-              <DetailNote key={note}>{note}</DetailNote>
-            ))}
-          </RowDetail>
+          <GrepDetail
+            phase={phase}
+            body={body}
+            notes={notes}
+            empty={empty}
+            pattern={pattern}
+            literal={bool(call.arguments.literal) ?? false}
+            ignoreCase={bool(call.arguments.ignoreCase) ?? false}
+          />
         )
       }
     />
@@ -187,7 +255,9 @@ function PathRows({ paths }: { paths: string[] }) {
   )
 }
 
-function PathListDetail({ phase, body, notes, empty, paths, emptyText }: { phase: ToolPhase; body: string; notes: string[]; empty: boolean; paths: string[]; emptyText: string }) {
+/** A find/ls detail (mounted only while open): one row per returned path. */
+function PathListDetail({ phase, body, notes, empty, emptyText }: { phase: ToolPhase; body: string; notes: string[]; empty: boolean; emptyText: string }) {
+  const paths = useMemo(() => (phase === 'done' && !empty ? body.split('\n').filter(Boolean) : []), [phase, empty, body])
   if (isActive(phase)) return null
   return (
     <RowDetail copy={body}>
@@ -211,7 +281,7 @@ function FindRow(props: ToolRendererProps) {
   const { phase, body, empty } = result
   const pattern = str(call.arguments.pattern) ?? ''
   const where = useDisplayPath(agentId, str(call.arguments.path))
-  const paths = useMemo(() => (phase === 'done' && !empty ? body.split('\n').filter(Boolean) : []), [body, phase, empty])
+  const count = useMemo(() => (phase === 'done' && !empty ? countNonEmptyLines(body) : 0), [body, phase, empty])
   return (
     <ToolRow
       verb={isActive(phase) ? 'Finding' : 'Found'}
@@ -221,13 +291,13 @@ function FindRow(props: ToolRendererProps) {
           <Scope where={where} />
         </>
       }
-      meta={phase === 'done' ? <span>{empty ? 'no files' : plural(paths.length, 'file')}</span> : null}
+      meta={phase === 'done' ? <span>{empty ? 'no files' : plural(count, 'file')}</span> : null}
       phase={phase}
       durationMs={execution?.durationMs}
       startedAt={execution?.startedAt}
       subline={phase === 'error' ? firstLine(body) || 'Find failed' : undefined}
       sublineTone="danger"
-      detail={<PathListDetail {...result} paths={paths} emptyText={`No files match “${pattern}”.`} />}
+      detail={<PathListDetail {...result} emptyText={`No files match “${pattern}”.`} />}
     />
   )
 }
@@ -237,18 +307,18 @@ function LsRow(props: ToolRendererProps) {
   const result = useSearchResult(agentId, props)
   const { phase, body, empty } = result
   const path = str(call.arguments.path) ?? '.'
-  const entries = useMemo(() => (phase === 'done' && !empty ? body.split('\n').filter(Boolean) : []), [body, phase, empty])
+  const count = useMemo(() => (phase === 'done' && !empty ? countNonEmptyLines(body) : 0), [body, phase, empty])
   return (
     <ToolRow
       verb={isActive(phase) ? 'Listing' : 'Listed'}
       subject={<PathChip agentId={agentId} path={/[\\/]$/.test(path) ? path : `${path}/`} />}
-      meta={phase === 'done' ? <span>{empty ? 'empty' : plural(entries.length, 'entry', 'entries')}</span> : null}
+      meta={phase === 'done' ? <span>{empty ? 'empty' : plural(count, 'entry', 'entries')}</span> : null}
       phase={phase}
       durationMs={execution?.durationMs}
       startedAt={execution?.startedAt}
       subline={phase === 'error' ? firstLine(body) || 'Listing failed' : undefined}
       sublineTone="danger"
-      detail={<PathListDetail {...result} paths={entries} emptyText="This folder is empty." />}
+      detail={<PathListDetail {...result} emptyText="This folder is empty." />}
     />
   )
 }

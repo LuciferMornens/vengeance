@@ -4,6 +4,7 @@ import { callWithSignIn, HostProcess, spawnHost, type HostFailureTexts } from '.
 import { locateEngine } from '../../engine/locate'
 import { trustPreflight } from '../launch/trust'
 import { agentDir, projectRoot } from './agent-dir'
+import { hasEnabledUserExtensions, invalidateConfiguredPackagesCache } from './packages'
 import type { AuthInteractionLike } from './pi-modules'
 import type { ExtensionProviders, HostCall, ProviderHostConfig } from './provider-host-protocol'
 
@@ -68,6 +69,14 @@ function call(target: HostProcess, request: HostCall, timeoutMs: number): Promis
 export async function refreshExtensionProviders(override: string | null): Promise<void> {
   const scope = scopeOf(override)
   const run = (async () => {
+    if (!host?.alive) {
+      const cwd = appState.getPrefs().activeWorkspace ?? null
+      const projectTrusted = cwd !== null && (await trustPreflight(override, cwd)).engineDefault
+      if (!(await hasEnabledUserExtensions(override, cwd, projectTrusted))) {
+        cached = { scope, providers: { providers: [], models: [], modifiedBy: {} } }
+        return
+      }
+    }
     const target = await startedHost(override)
     // SAFETY: protocol boundary — the host answers `extension-providers` with ExtensionProviders.
     const providers = (await call(target, { type: 'extension-providers' }, LIST_TIMEOUT_MS)) as ExtensionProviders | undefined
@@ -103,12 +112,20 @@ export async function logoutThroughHost(override: string | null, providerId: str
  * read loads the new settings, and the list is kept until then.
  */
 export function noteProviderConfigChange(area: SettingsChangeArea): void {
+  if (area === 'settings' || EXTENSION_AREAS.has(area)) {
+    invalidateConfiguredPackagesCache()
+  }
   if (area === 'settings' && !host?.busy) {
     disposeProviderHost()
   } else if (EXTENSION_AREAS.has(area)) {
     cached = null
     disposeProviderHost()
   }
+}
+
+/** Settings closed: shorten the interactive keep-alive window so an idle host exits promptly. */
+export function releaseProviderHost(): void {
+  host?.trimIdle(1_500)
 }
 
 /** Stop the host and everything it started (app quit). */

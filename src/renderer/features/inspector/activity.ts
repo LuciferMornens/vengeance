@@ -1,6 +1,7 @@
 import type { ToolCall } from '@shared/engine-types'
 import { isWindowsPath } from '../../lib/path-kind'
 import type { AgentState, ToolExecution, ToolStatus } from '../../store/agent-state'
+import { lineCount, str } from '../tools/tool-utils'
 
 /** One tool call of the session in transcript order, joined with its execution record. */
 export interface ToolActivity {
@@ -110,13 +111,19 @@ export function relativeTo(cwd: string, path: string): string {
   return path.replace(/\\/g, '/')
 }
 
-function lineCount(text: unknown): number {
-  return typeof text === 'string' && text.length > 0 ? text.replace(/\n$/, '').split('\n').length : 0
-}
+const editStatsCache = new WeakMap<ToolExecution, { added: number; removed: number }>()
+const writeLinesCache = new WeakMap<ToolExecution, number>()
 
 /** +/− for an edit: pi's display diff (`+12 line` / `-12 line` rows) when present, else the edit arguments. */
 function editStats(activity: ToolActivity): { added: number; removed: number } {
-  const details = activity.execution?.result?.details as { diff?: unknown } | undefined
+  const execution = activity.execution
+  const cacheable = execution && (activity.status === 'done' || activity.status === 'error')
+  if (cacheable) {
+    const cached = editStatsCache.get(execution)
+    if (cached) return cached
+  }
+  const details = execution?.result?.details as { diff?: unknown } | undefined
+  let result: { added: number; removed: number }
   if (typeof details?.diff === 'string') {
     let added = 0
     let removed = 0
@@ -124,16 +131,31 @@ function editStats(activity: ToolActivity): { added: number; removed: number } {
       if (/^\+\s*\d/.test(line)) added++
       else if (/^-\s*\d/.test(line)) removed++
     }
-    return { added, removed }
+    result = { added, removed }
+  } else {
+    const edits = Array.isArray(activity.args.edits) ? (activity.args.edits as Array<Record<string, unknown>>) : [activity.args]
+    let added = 0
+    let removed = 0
+    for (const edit of edits) {
+      added += lineCount(str(edit.newText ?? edit.new_string) ?? '')
+      removed += lineCount(str(edit.oldText ?? edit.old_string) ?? '')
+    }
+    result = { added, removed }
   }
-  const edits = Array.isArray(activity.args.edits) ? (activity.args.edits as Array<Record<string, unknown>>) : [activity.args]
-  let added = 0
-  let removed = 0
-  for (const edit of edits) {
-    added += lineCount(edit.newText ?? edit.new_string)
-    removed += lineCount(edit.oldText ?? edit.old_string)
+  if (cacheable) editStatsCache.set(execution, result)
+  return result
+}
+
+function writeAddedLines(activity: ToolActivity): number {
+  const execution = activity.execution
+  const cacheable = execution && (activity.status === 'done' || activity.status === 'error')
+  if (cacheable) {
+    const cached = writeLinesCache.get(execution)
+    if (cached !== undefined) return cached
   }
-  return { added, removed }
+  const lines = lineCount(str(activity.args.content) ?? '')
+  if (cacheable) writeLinesCache.set(execution, lines)
+  return lines
 }
 
 /** Files read / edited / written this session (paths resolved against `cwd`), most recently touched first. */
@@ -155,7 +177,7 @@ export function fileActivity(cwd: string, activities: ToolActivity[]): FileActiv
       file.added += stats.added
       file.removed += stats.removed
     } else if (op === 'write' && activity.status === 'done') {
-      file.added += lineCount(activity.args.content)
+      file.added += writeAddedLines(activity)
     }
     file.live = file.live || activity.status === 'running' || activity.status === 'streaming'
     if (activity.at >= file.lastAt) {

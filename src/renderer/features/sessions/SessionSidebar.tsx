@@ -12,6 +12,7 @@ import { normalizePath, samePath } from '../../lib/paths'
 import { useAgents, type AgentsStore } from '../../store/agents'
 import { useApp } from '../../store/app'
 import { Button, IconButton, Tooltip } from '../../ui'
+import { preloadSettingsSheet } from '../shell/settings-sheet'
 import { chooseWorkspace } from '../shell/workspace'
 import {
   activateAgent,
@@ -64,6 +65,7 @@ import {
 } from './PrimeSessionFamilies'
 
 const WORKSPACE_GROUP_HEIGHT = 294
+const EMPTY_STRINGS: string[] = []
 
 /** Ids of agents that exist (order can briefly name one being disposed). */
 function openIdsOf(s: AgentsStore): string[] {
@@ -400,7 +402,7 @@ export function SessionSidebar() {
   // Transcript text only while searching (cached per transcript, so streaming frames stay cheap).
   const openSearchTexts = useAgents(
     useShallow((s) =>
-      query.trim() ? openIdsOf(s).map((id) => agentSearchText(s.agents[id]!)) : []
+      query.trim() ? openIdsOf(s).map((id) => agentSearchText(s.agents[id]!)) : EMPTY_STRINGS
     )
   )
   const load = useSessions((s) => s.load)
@@ -720,6 +722,8 @@ export function SessionSidebar() {
           label="Settings"
           hotkey="mod+comma"
           size="sm"
+          onPointerEnter={preloadSettingsSheet}
+          onFocus={preloadSettingsSheet}
           onClick={() => useApp.getState().openSettings()}
         >
           <Settings />

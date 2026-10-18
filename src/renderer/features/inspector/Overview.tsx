@@ -29,13 +29,21 @@ function tailPath(path: string): string {
   return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : path
 }
 
-function sessionDuration(agent: AgentState): number | null {
-  const times = agent.entries
-    .map((e) => e.message.timestamp)
-    .filter((t) => typeof t === 'number' && t > 0)
-  if (times.length < 2) return null
-  const end = agent.phase === 'running' ? Date.now() : Math.max(...times)
-  return end - Math.min(...times)
+function entryTimeBounds(
+  entries: AgentState['entries']
+): { min: number; max: number } | null {
+  let min = Infinity
+  let max = -Infinity
+  let count = 0
+  for (const e of entries) {
+    const t = e.message.timestamp
+    if (typeof t === 'number' && t > 0) {
+      if (t < min) min = t
+      if (t > max) max = t
+      count++
+    }
+  }
+  return count >= 2 ? { min, max } : null
 }
 
 /**
@@ -122,8 +130,12 @@ export function Overview({ agent }: { agent: AgentState }) {
     () => toolActivity({ entries, streaming: null, tools }),
     [entries, tools]
   )
-  const toolErrors = activity.filter((a) => a.isError).length
-  const duration = sessionDuration(agent)
+  const toolErrors = useMemo(() => activity.filter((a) => a.isError).length, [activity])
+  const timeBounds = useMemo(() => entryTimeBounds(entries), [entries])
+  const duration = timeBounds
+    ? (agent.phase === 'running' ? Date.now() : timeBounds.max) - timeBounds.min
+    : null
+  const messageCount = useMemo(() => agentMessageCount(agent), [entries])
   const sessionFile = agent.session?.sessionFile ?? agent.info.sessionFile
   const model = agent.model
   const speed = hasSpeedControl(agent.speed) ? speedSummary(agent.speed) : null
@@ -213,7 +225,7 @@ export function Overview({ agent }: { agent: AgentState }) {
           {[
             {
               label: 'Messages',
-              value: String(agentMessageCount(agent)),
+              value: String(messageCount),
               hint: stats ? `${stats.userMessages} from you` : ''
             },
             {

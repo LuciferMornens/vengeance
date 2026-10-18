@@ -54,8 +54,24 @@ function useExtensionToasts(): void {
   const seen = useRef(new Set<string>())
   const seenErrors = useRef(new WeakSet<ExtensionErrorEvent>())
   useEffect(() => {
-    const announce = (state: ReturnType<typeof useAgents.getState>) => {
-      for (const agent of Object.values(state.agents)) {
+    const announce = (
+      state: ReturnType<typeof useAgents.getState>,
+      previous?: ReturnType<typeof useAgents.getState>
+    ) => {
+      if (previous && state.agents === previous.agents) return
+      for (const id of state.order) {
+        const agent = state.agents[id]
+        if (!agent) continue
+        const prevAgent = previous?.agents[id]
+        if (
+          prevAgent &&
+          (agent === prevAgent ||
+            (agent.ext.notifications === prevAgent.ext.notifications &&
+              agent.extensionErrors === prevAgent.extensionErrors &&
+              agent.ext.dialogs === prevAgent.ext.dialogs))
+        ) {
+          continue
+        }
         const background = agent.id !== state.activeAgentId
         for (const n of agent.ext.notifications) {
           if (seen.current.has(n.id)) continue
@@ -103,11 +119,18 @@ function timedDialogs(): Array<{ agentId: string; id: string; at: number }> {
 
 /** Drop expired dialogs (receivedAt + timeout) for every agent, not just the visible one. */
 function useDialogExpiry(): void {
-  const key = useAgents((s) =>
-    Object.values(s.agents)
-      .flatMap((agent) => agent.ext.dialogs.map((d) => `${d.request.id}@${deadlineOf(d) ?? ''}`))
-      .join('|')
-  )
+  const key = useAgents((s) => {
+    let acc = ''
+    for (const id of s.order) {
+      const dialogs = s.agents[id]?.ext.dialogs
+      if (!dialogs?.length) continue
+      for (const d of dialogs) {
+        if (acc) acc += '|'
+        acc += `${d.request.id}@${deadlineOf(d) ?? ''}`
+      }
+    }
+    return acc
+  })
   useEffect(() => {
     const timers = timedDialogs().map((t) =>
       setTimeout(

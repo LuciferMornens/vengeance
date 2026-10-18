@@ -192,7 +192,10 @@ export function SettingsSheet() {
 
   useEffect(() => {
     void load()
-    return () => setQuery('')
+    return () => {
+      setQuery('')
+      void invoke('settings:release').catch(() => undefined)
+    }
   }, [load, setQuery])
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 })
