@@ -329,6 +329,10 @@ async function runningNativeTool(engine, agentId, workspace) {
     async () => !(await application.rpc({ type: 'get_state' }, agentId)).isStreaming,
     `${engine} completes the refused tool turn`
   )
+  await waitFor(
+    async () => (await application.agentState(agentId)).tools[toolId]?.status === 'done',
+    `${engine} publishes the completed native tool`
+  )
   assert.equal((await application.agentState(agentId)).tools[toolId].status, 'done')
   const messages = await application.rpc({ type: 'get_messages' }, agentId)
   const committed = messages.messages.find(
