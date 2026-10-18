@@ -12,6 +12,14 @@ export interface PrimeRestartCheckpoint {
   rosterPath: string
   backupDir: string
   configPatch: PrimeRecord
+  residentSelections: Record<string, PrimeResidentSelection>
+}
+
+export interface PrimeResidentSelection {
+  sessionPath: string
+  provider: string
+  model: string
+  thinking: string
 }
 
 const HELPER_TIMEOUT_MS = 15_000
@@ -33,7 +41,8 @@ export async function checkPrimeRestartHelper(): Promise<void> {
     metadata.protocol !== HELPER_PROTOCOL ||
     metadata.revision !== HELPER_REVISION ||
     metadata.restartConfig !== true ||
-    metadata.restartCapture !== true
+    metadata.restartCapture !== true ||
+    metadata.restartSelections !== true
   ) {
     throw new Error('Update Vengeance before restarting this Engine 2 session')
   }

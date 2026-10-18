@@ -480,6 +480,7 @@ async fn main() {
         "resources": true,
         "restartConfig": true,
         "restartCapture": true,
+        "restartSelections": true,
         "sessions": true,
         "sessionLineage": true,
         "sessionDelete": true,

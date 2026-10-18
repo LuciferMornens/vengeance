@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { turn } from '../qa/lib/fake-llm.mjs'
@@ -75,6 +75,171 @@ export async function runPrimeRestartIsolationQa({
   await goalPauseAndQueueAbort()
   await temporaryRestartRefusal()
   await encryptedEnvironmentRecovery()
+  await liveSelectionRestartRecovery()
+
+  async function liveSelectionRestartRecovery() {
+    const { restartPrimeSession, connectPrimeResident } = require(bundlePath)
+    const agentDirectory = path.join(restartRoot, 'live-selection-agent')
+    await mkdir(agentDirectory, { recursive: true })
+    await writeModelConfig(agentDirectory, fakeLlm.openaiBaseUrl)
+    const modelsPath = path.join(agentDirectory, 'models.json')
+    const models = JSON.parse(await readFile(modelsPath, 'utf8'))
+    models.providers['battery-peer'] = {
+      ...models.providers.battery,
+      headers: { 'X-QA-Restart-Provider': 'peer' }
+    }
+    await writeFile(modelsPath, JSON.stringify(models))
+    const initial = { provider: 'battery', model: 'mock-2', thinking: 'low' }
+    const handles = []
+    const open = async (args) => {
+      const handle = newEngine(PrimeEngineProcess, agentDirectory, workspaceDirectory, args)
+      handles.push(handle)
+      await handle.start()
+      return handle
+    }
+    const switchLive = async (handle) => {
+      const switched = await handle.send({
+        type: 'set_model',
+        provider: 'battery-peer',
+        modelId: 'mock-2'
+      })
+      assert.equal(switched.success, true, switched.error)
+      const thought = await handle.send({ type: 'set_thinking_level', level: 'high' })
+      assert.equal(thought.success, true, thought.error)
+    }
+    const assertSelection = async (handle, expected, prompt) => {
+      const state = await handle.nativeCommand('get_state')
+      assert.equal(state.model.provider, expected.provider)
+      assert.equal(state.model.id, expected.model)
+      assert.equal(state.thinkingLevel, expected.thinking)
+      const from = fakeLlm.requests.length
+      fakeLlm.queue(turn.text('The selected provider remains available.'))
+      await handle.nativeCommand('prompt_and_wait', { message: prompt })
+      const request = await fakeLlm.waitForRequest(undefined, { from })
+      assert.equal(request.body.model, expected.model)
+      assert.equal(request.body.reasoning_effort, expected.thinking)
+      assert.equal(
+        request.headers['x-qa-restart-provider'],
+        expected.provider === 'battery-peer' ? 'peer' : undefined
+      )
+    }
+    const live = { provider: 'battery-peer', model: 'mock-2', thinking: 'high' }
+    try {
+      const primary = await open(initial)
+      const peer = await open(initial)
+      const primaryId = primary.nativeAgentId
+      const peerId = peer.nativeAgentId
+      await assertSelection(primary, initial, 'Remember target selection history')
+      await assertSelection(peer, initial, 'Remember peer selection history')
+      await switchLive(primary)
+      await switchLive(peer)
+      const primaryHistory = await primary.nativeCommand('get_messages')
+      const peerHistory = await peer.nativeCommand('get_messages')
+      const before = await liveRoster(probePrimeDaemon, agentDirectory)
+      const carried = await primary.prepareRestart(
+        { ...initial, cwd: workspaceDirectory, engine: 'prime' },
+        executablePath,
+        {}
+      )
+      assert.ok(carried)
+      const restored = await open({ ...carried, nativeAgentId: primaryId })
+      const restoredPeer = await open({ ...initial, nativeAgentId: peerId })
+      const after = await liveRoster(probePrimeDaemon, agentDirectory)
+      for (const id of [primaryId, peerId]) {
+        assert.notEqual(
+          after.find((row) => row.id === id).workerPid,
+          before.find((row) => row.id === id).workerPid
+        )
+      }
+      assert.deepEqual(await restored.nativeCommand('get_messages'), primaryHistory)
+      assert.deepEqual(await restoredPeer.nativeCommand('get_messages'), peerHistory)
+      await assertSelection(restored, live, 'Target uses its live selection after restart')
+      await assertSelection(restoredPeer, live, 'Peer uses its live selection after restart')
+      const reset = await restored.prepareRestart(
+        { ...initial, cwd: workspaceDirectory, engine: 'prime' },
+        executablePath,
+        initial
+      )
+      assert.ok(reset)
+      const resetTarget = await open({ ...reset, nativeAgentId: primaryId })
+      const resetPeer = await open({ ...initial, nativeAgentId: peerId })
+      await assertSelection(resetTarget, initial, 'Explicit reset selects the initial provider')
+      await assertSelection(resetPeer, live, 'Peer keeps its provider through target reset')
+      const external = await connectPrimeResident(
+        { nativeAgentId: primaryId },
+        {
+          executablePath,
+          agentDir: agentDirectory
+        }
+      )
+      assert.ok(external)
+      try {
+        const initialArgs = { ...initial, engine: 'prime', cwd: workspaceDirectory }
+        const change = restartPrimeSession(
+          external.client,
+          primaryId,
+          initialArgs,
+          { ...initialArgs, ...live },
+          executablePath,
+          live
+        )
+        const restore = restartPrimeSession(
+          external.client,
+          primaryId,
+          initialArgs,
+          initialArgs,
+          executablePath,
+          initial
+        )
+        await Promise.all([change, restore])
+      } finally {
+        external.client.close()
+      }
+      const forcedTarget = await open({ ...initial, nativeAgentId: primaryId })
+      await assertSelection(
+        forcedTarget,
+        initial,
+        'Explicit values override a live change made by an earlier queued restart'
+      )
+      await switchLive(forcedTarget)
+      const rollbackTargetHistory = await forcedTarget.nativeCommand('get_messages')
+      const rollbackPeerHistory = await resetPeer.nativeCommand('get_messages')
+      await assert.rejects(
+        forcedTarget.prepareRestart(
+          {
+            ...initial,
+            cwd: workspaceDirectory,
+            engine: 'prime',
+            launch: { prime: { systemPrompt: 'Rejected successor prompt' } }
+          },
+          process.execPath,
+          {}
+        ),
+        /previous engine and launch configuration were restored/i
+      )
+      const recoveredTarget = await open({ ...initial, nativeAgentId: primaryId })
+      const recoveredPeer = await open({ ...initial, nativeAgentId: peerId })
+      assert.deepEqual(await recoveredTarget.nativeCommand('get_messages'), rollbackTargetHistory)
+      assert.deepEqual(await recoveredPeer.nativeCommand('get_messages'), rollbackPeerHistory)
+      assert.ok(
+        !(await recoveredTarget.nativeCommand('get_system_prompt')).systemPrompt.includes(
+          'Rejected successor prompt'
+        )
+      )
+      await assertSelection(
+        recoveredTarget,
+        live,
+        'Rollback target uses its captured live provider'
+      )
+      await assertSelection(recoveredPeer, live, 'Rollback peer uses its captured live provider')
+      console.log(
+        'restart live selections: target, same-ID peer, explicit reset and failed-successor rollback passed'
+      )
+    } finally {
+      for (const handle of handles.reverse()) await handle.stop().catch(() => {})
+      await shutdownQaDaemon(probePrimeDaemon, agentDirectory)
+    }
+  }
 
   async function goalPauseAndQueueAbort() {
     const agentDirectory = path.join(restartRoot, 'goal-pause-agent')

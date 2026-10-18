@@ -323,7 +323,8 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
         this.activeSessionId,
         previousArgs,
         nextArgs,
-        executablePath
+        executablePath,
+        patch
       )
       this.retired = true
       this.unwire()

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { isDeepStrictEqual } from 'node:util'
 import type { CreateAgentArgs } from '@shared/api/engine'
+import { samePath } from '../../paths'
 import {
   beginPrimeDaemonRestart,
   connectPrimeResident,
@@ -19,7 +20,8 @@ import { thinkingLevel } from './normalize'
 import {
   checkPrimeRestartHelper,
   nativePrimeRestartCommand,
-  type PrimeRestartCheckpoint
+  type PrimeRestartCheckpoint,
+  type PrimeResidentSelection
 } from './restart-native'
 import {
   asRecord,
@@ -99,11 +101,12 @@ export function restartPrimeSession(
   nativeAgentId: string,
   previousArgs: CreateAgentArgs,
   nextArgs: CreateAgentArgs,
-  executablePath?: string | null
+  executablePath?: string | null,
+  selectionPatch?: Partial<CreateAgentArgs>
 ): Promise<void> {
   const pending = pendingRestarts.get(source.socketPath)
   const environment = restartEnvironment(source, previousArgs, nextArgs)
-  const configPatch = changedConfiguration(previousArgs, nextArgs)
+  const configPatch = changedConfiguration(previousArgs, nextArgs, selectionPatch)
   if (pending) {
     const sameRuntime =
       pending.executablePath === (executablePath ?? null) &&
@@ -126,7 +129,8 @@ export function restartPrimeSession(
           resident.nativeAgentId,
           previousArgs,
           nextArgs,
-          executablePath
+          executablePath,
+          selectionPatch
         )
       } finally {
         resident.client.close()
@@ -138,6 +142,7 @@ export function restartPrimeSession(
     nativeAgentId,
     previousArgs,
     nextArgs,
+    configPatch,
     executablePath
   ).finally(() => {
     if (pendingRestarts.get(source.socketPath)?.task === task) {
@@ -159,6 +164,7 @@ async function performPrimeRestart(
   nativeAgentId: string,
   previousArgs: CreateAgentArgs,
   nextArgs: CreateAgentArgs,
+  configPatch: PrimeRecord,
   executablePath?: string | null
 ): Promise<void> {
   const releaseBarrier = beginPrimeDaemonRestart(source.socketPath)
@@ -217,6 +223,7 @@ async function performPrimeRestart(
     assertPrimeSideQuestionsIdle(source.socketPath)
     const roster = await readPreparedRoster(prepared)
     assertPreparedIdle(roster)
+    const selections = await captureResidentSelections(control, roster)
     const restartRoot = join(source.agentDir, 'vengeance-restarts')
     await mkdir(restartRoot, { recursive: true, mode: 0o700 })
     temporaryDirectory = await mkdtemp(join(restartRoot, 'restart-'))
@@ -230,7 +237,8 @@ async function performPrimeRestart(
       sessionPath,
       rosterPath,
       backupDir: join(temporaryDirectory, 'backup'),
-      configPatch: changedConfiguration(previousArgs, nextArgs)
+      configPatch,
+      residentSelections: selections
     }
     const captured = await nativePrimeRestartCommand('capture', checkpoint)
     const capturedWorkers = captured.workerPids
@@ -285,6 +293,7 @@ async function performPrimeRestart(
         }
         if (patchAttempted && (await hasRestartBackup(checkpoint.backupDir))) {
           await nativePrimeRestartCommand('rollback', checkpoint)
+          await nativePrimeRestartCommand('patch', { ...checkpoint, configPatch: {} })
         }
         replacement = await launchPrimeDaemonReplacement(
           source,
@@ -320,7 +329,11 @@ async function performPrimeRestart(
   }
 }
 
-function changedConfiguration(previous: CreateAgentArgs, next: CreateAgentArgs): PrimeRecord {
+function changedConfiguration(
+  previous: CreateAgentArgs,
+  next: CreateAgentArgs,
+  selectionPatch?: Partial<CreateAgentArgs>
+): PrimeRecord {
   const before: PrimeRecord = {
     provider: previous.provider,
     model: previous.model,
@@ -335,7 +348,13 @@ function changedConfiguration(previous: CreateAgentArgs, next: CreateAgentArgs):
   }
   const patch: PrimeRecord = {}
   for (const key of CONFIG_KEYS) {
-    if (!isDeepStrictEqual(before[key], after[key])) patch[key] = after[key] ?? null
+    const explicitSelection =
+      selectionPatch &&
+      (key === 'provider' || key === 'model' || key === 'thinking') &&
+      Object.hasOwn(selectionPatch, key)
+    if (explicitSelection || !isDeepStrictEqual(before[key], after[key])) {
+      patch[key] = after[key] ?? null
+    }
   }
   return patch
 }
@@ -479,6 +498,44 @@ async function readPreparedRoster(prepared: PreparedRestart): Promise<PrimeRecor
     throw new Error('Engine 2 returned an incompatible native recovery snapshot')
   }
   return roster
+}
+
+async function captureResidentSelections(
+  client: PrimeTransport,
+  roster: PrimeRecord
+): Promise<Record<string, PrimeResidentSelection>> {
+  const identities = new Set<string>()
+  const entries = await Promise.all(
+    asRecords(roster.sessions).map(async (session) => {
+      const nativeAgentId = stringValue(session.active_session_id)
+      const sessionPath = stringValue(session.session_file)
+      if (!nativeAgentId || !sessionPath || identities.has(nativeAgentId)) {
+        throw new Error('Engine 2 could not uniquely identify every resident before restarting')
+      }
+      identities.add(nativeAgentId)
+      const state = await client.request('get_connection_state', { activeSessionId: nativeAgentId })
+      const model = asRecord(state.model)
+      const provider = stringValue(model.provider)
+      const modelId = stringValue(model.id)
+      const thinking = state.thinkingLevel
+      const currentPath = stringValue(state.sessionFile)
+      if (
+        state.activeSessionId !== nativeAgentId ||
+        !currentPath ||
+        !samePath(currentPath, sessionPath) ||
+        state.isStreaming !== false ||
+        state.isCompacting !== false ||
+        !provider ||
+        !modelId ||
+        typeof thinking !== 'string' ||
+        thinkingLevel(thinking) !== thinking
+      ) {
+        throw new Error('Engine 2 could not verify every resident’s live model and reasoning')
+      }
+      return [nativeAgentId, { sessionPath, provider, model: modelId, thinking }] as const
+    })
+  )
+  return Object.fromEntries(entries)
 }
 
 function assertPreparedIdle(roster: PrimeRecord): void {

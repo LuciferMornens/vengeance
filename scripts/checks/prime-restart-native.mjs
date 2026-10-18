@@ -31,6 +31,15 @@ const descriptorDir = join(
 const descriptorPath = join(descriptorDir, 'worker-a.json')
 const secondDescriptorPath = join(descriptorDir, 'worker-b.json')
 const sessionBytes = Buffer.from('{"type":"session","id":"fixture-a"}\n')
+const residentSelections = {
+  'active-a': { sessionPath, provider: 'live-provider', model: 'live-model', thinking: 'medium' },
+  'active-b': {
+    sessionPath: secondSessionPath,
+    provider: 'peer-provider',
+    model: 'peer-model',
+    thinking: 'xhigh'
+  }
+}
 
 function descriptor(workerId, activeSessionId, sessionFile) {
   return {
@@ -110,6 +119,7 @@ function callHelper(operation, overrides = {}) {
       thinking: 'high',
       systemPrompt: 'fixture system'
     },
+    residentSelections,
     ...overrides
   }
   const child = spawnSync(executable, ['--restart-config'], {
@@ -205,6 +215,79 @@ try {
   assert.deepEqual(await readFile(descriptorPath), originalDescriptor)
   assert.deepEqual(await readFile(rosterPath), originalRoster)
 
+  for (const invalidSelections of [
+    undefined,
+    {},
+    { 'active-a': residentSelections['active-a'] },
+    { ...residentSelections, 'active-b': { ...residentSelections['active-b'], model: '' } },
+    {
+      ...residentSelections,
+      'active-b': { ...residentSelections['active-b'], thinking: 'unknown' }
+    },
+    {
+      ...residentSelections,
+      'active-b': { ...residentSelections['active-b'], provider: undefined }
+    },
+    { ...residentSelections, 'active-b': { ...residentSelections['active-b'], sessionPath } },
+    { 'active-a': residentSelections['active-a'], unmatched: residentSelections['active-b'] },
+    { ...residentSelections, unmatched: residentSelections['active-b'] }
+  ]) {
+    const refused = callHelper('capture', { residentSelections: invalidSelections })
+    assert.equal(refused.ok, false)
+    assert.equal(existsSync(backupDir), false, 'invalid captures create no destructive checkpoint')
+    assert.deepEqual(await readFile(descriptorPath), originalDescriptor)
+    assert.deepEqual(await readFile(secondDescriptorPath), originalSecondDescriptor)
+    assert.deepEqual(await readFile(rosterPath), originalRoster)
+  }
+  const duplicateRoster = structuredClone(roster)
+  duplicateRoster.sessions[1].active_session_id = 'active-a'
+  await writeFile(rosterPath, JSON.stringify(duplicateRoster))
+  assert.equal(callHelper('capture').ok, false)
+  assert.equal(existsSync(backupDir), false)
+  await writeFile(rosterPath, originalRoster)
+
+  for (const invalidCreate of [
+    undefined,
+    'invalid-create',
+    {
+      ...roster.sessions[1].runtime_config.create,
+      config: 'invalid-config'
+    }
+  ]) {
+    const invalidRoster = structuredClone(roster)
+    invalidRoster.sessions[1].runtime_config.create = invalidCreate
+    await writeFile(rosterPath, JSON.stringify(invalidRoster))
+    assert.equal(callHelper('capture').ok, false, 'all peer creates are preflighted before capture')
+    assert.equal(existsSync(backupDir), false)
+    assert.deepEqual(await readFile(descriptorPath), originalDescriptor)
+    assert.deepEqual(await readFile(secondDescriptorPath), originalSecondDescriptor)
+  }
+  await writeFile(rosterPath, originalRoster)
+  const invalidPeer = structuredClone(secondDescriptor)
+  invalidPeer.createCommand.config = 'invalid-config'
+  await writeFile(secondDescriptorPath, JSON.stringify(invalidPeer))
+  assert.equal(callHelper('capture').ok, false)
+  assert.equal(existsSync(backupDir), false)
+  assert.deepEqual(await readFile(rosterPath), originalRoster)
+  await writeFile(secondDescriptorPath, originalSecondDescriptor)
+
+  async function assertPeerSelection() {
+    const peerDescriptor = JSON.parse(await readFile(secondDescriptorPath, 'utf8'))
+    const peerRoster = JSON.parse(await readFile(rosterPath, 'utf8')).sessions[1]
+    for (const create of [peerDescriptor.createCommand, peerRoster.runtime_config.create]) {
+      for (const fields of [create, create.config]) {
+        assert.equal(fields.provider, 'peer-provider')
+        assert.equal(fields.model, 'peer-model')
+        assert.equal(fields.thinking, 'xhigh')
+        assert.equal('systemPrompt' in fields, false, 'target launch options cannot leak to peers')
+      }
+      assert.deepEqual(create.futureCreateField, { preserved: true })
+    }
+    assert.deepEqual(peerDescriptor.futureDescriptorField, { preserved: true })
+    assert.deepEqual(peerRoster.futureSessionField, { preserved: true })
+    assert.equal(peerRoster.runtime_config.futureRuntimeField, 'preserved')
+  }
+
   const patched = callHelper('patch')
   assert.equal(patched.ok, true, JSON.stringify(patched))
   assert.deepEqual(patched.result.workerPids, [4242, 4343])
@@ -227,8 +310,7 @@ try {
   assert.deepEqual(patchedDescriptor.futureDescriptorField, { preserved: true })
   assert.deepEqual(patchedRoster.futureRosterField, { preserved: true })
   assert.deepEqual(patchedRoster.sessions[0].futureSessionField, { preserved: true })
-  assert.deepEqual(patchedRoster.sessions[1], roster.sessions[1])
-  assert.deepEqual(await readFile(secondDescriptorPath), originalSecondDescriptor)
+  await assertPeerSelection()
   assert.deepEqual(await readFile(sessionPath), sessionBytes)
   assert.deepEqual(await readFile(secondSessionPath), originalSecondSession)
   assert.deepEqual(await readFile(join(backupDir, 'descriptor.json')), originalDescriptor)
@@ -274,8 +356,7 @@ try {
     JSON.parse(await readFile(rosterPath, 'utf8')).sessions[0].runtime_config.create.model,
     'new-model'
   )
-  assert.deepEqual(await readFile(secondDescriptorPath), originalSecondDescriptor)
-  assert.deepEqual(JSON.parse(await readFile(rosterPath, 'utf8')).sessions[1], roster.sessions[1])
+  await assertPeerSelection()
   for (const [path, bytes] of presentJournals) assert.deepEqual(await readFile(path), bytes)
   assert.equal(existsSync(absentJournalPath), false)
   assert.deepEqual(await readFile(sessionPath), sessionBytes)
@@ -289,8 +370,25 @@ try {
   for (const [path, bytes] of presentJournals) assert.deepEqual(await readFile(path), bytes)
   assert.equal(existsSync(absentJournalPath), false)
   assert.deepEqual(await readFile(sessionPath), sessionBytes)
+  const recovery = callHelper('patch', { backupDir: captureBackupDir, configPatch: {} })
+  assert.equal(recovery.ok, true, JSON.stringify(recovery))
+  const recovered = JSON.parse(await readFile(descriptorPath, 'utf8')).createCommand
+  assert.equal(recovered.provider, 'live-provider')
+  assert.equal(recovered.model, 'live-model')
+  assert.equal(recovered.thinking, 'medium')
+  assert.equal(
+    'systemPrompt' in recovered,
+    false,
+    'failed target options are excluded from recovery'
+  )
+  await assertPeerSelection()
+  assert.deepEqual(await readFile(join(captureBackupDir, 'descriptor.json')), originalDescriptor)
+  assert.deepEqual(await readFile(join(captureBackupDir, 'roster.json')), originalRoster)
+  assert.equal(callHelper('rollback', { backupDir: captureBackupDir }).ok, true)
+  assert.deepEqual(await readFile(descriptorPath), originalDescriptor)
+  assert.deepEqual(await readFile(secondDescriptorPath), originalSecondDescriptor)
   console.log(
-    'Native restart inspect, capture, scoped patch and rollback preserved peer workers, journals and sessions'
+    'Native restart validated every live selection; target overrides, peer choices and rollback recovery passed'
   )
 } finally {
   const resolvedTempRoot = await realpath(tempRoot)
