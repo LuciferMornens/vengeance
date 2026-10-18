@@ -41,11 +41,40 @@ const residentSelections = {
   }
 }
 
+async function processStartId() {
+  if (process.platform === 'linux') {
+    const stat = await readFile(join('/proc', String(process.pid), 'stat'), 'utf8')
+    const startTimeFieldIndex = 19
+    return `proc:${stat.slice(stat.lastIndexOf(')') + 2).split(' ')[startTimeFieldIndex]}`
+  }
+  const command = process.platform === 'win32' ? 'powershell.exe' : 'ps'
+  const arguments_ =
+    process.platform === 'win32'
+      ? [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `(Get-Process -Id ${process.pid}).StartTime.ToFileTimeUtc()`
+        ]
+      : ['-p', String(process.pid), '-o', 'lstart=']
+  const result = spawnSync(command, arguments_, {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 15_000,
+    env: { ...process.env, LC_ALL: 'C', LC_TIME: 'C', LANG: 'C', TZ: 'UTC' }
+  })
+  assert.equal(result.error, undefined)
+  assert.equal(result.status, 0, result.stderr)
+  const value = result.stdout.trim()
+  assert.ok(value)
+  return `${process.platform === 'win32' ? 'win' : 'ps'}:${value}`
+}
+
 function descriptor(workerId, activeSessionId, sessionFile) {
   return {
     version: 2,
     workerId,
-    pid: 4242,
+    pid: process.pid,
     socketPath: join(tempRoot, `${workerId}.sock`),
     recoveryJournalPath: join(tempRoot, `${workerId}.journal`),
     orphanProcessJournalPath: join(tempRoot, `${workerId}.orphan-journal`),
@@ -146,8 +175,25 @@ try {
 
   const firstDescriptor = descriptor('worker-a', 'active-a', sessionPath)
   const secondDescriptor = descriptor('worker-b', 'active-b', secondSessionPath)
-  firstDescriptor.pid = 4343
-  secondDescriptor.pid = 4242
+  const startId = await processStartId()
+  firstDescriptor.processStartId = startId
+  secondDescriptor.processStartId = startId
+  const departed = spawnSync(
+    process.execPath,
+    ['-e', 'process.stdout.write(String(process.pid))'],
+    {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 15_000
+    }
+  )
+  assert.equal(departed.error, undefined)
+  assert.equal(departed.status, 0, departed.stderr)
+  const terminalDescriptor = {
+    ...descriptor('worker-c', 'active-c', join(tempRoot, 'imported.jsonl')),
+    pid: Number(departed.stdout),
+    stopRequestedAt: '2026-10-01T12:01:00Z'
+  }
   const roster = {
     format_version: 1,
     update_id: '018f1234-abcd-7abc-8def-0123456789ab',
@@ -181,7 +227,7 @@ try {
   const originalRoster = await readFile(rosterPath)
   const originalSecondSession = await readFile(secondSessionPath)
 
-  const siblingPath = join(descriptorDir, 'other-worker.json')
+  const siblingPath = join(descriptorDir, 'worker-c.json')
   for (const invalid of [
     '{',
     JSON.stringify({ ...descriptor('worker-c', 'active-c', secondSessionPath), version: 999 }),
@@ -200,6 +246,34 @@ try {
     await rm(siblingPath)
   }
 
+  for (const unsafeDescriptor of [
+    { ...terminalDescriptor, stopRequestedAt: undefined },
+    { ...terminalDescriptor, pid: process.pid, processStartId: startId },
+    { ...terminalDescriptor, pid: process.pid },
+    { ...terminalDescriptor, pid: process.pid, processStartId: 'unreadable' },
+    { ...terminalDescriptor, workerId: 'worker-a' },
+    { ...terminalDescriptor, rootActiveSessionId: 'active-a' }
+  ]) {
+    await writeFile(siblingPath, JSON.stringify(unsafeDescriptor))
+    assert.equal(callHelper('capture').ok, false, 'unverified extra workers block capture')
+    assert.equal(existsSync(backupDir), false)
+    assert.deepEqual(await readFile(descriptorPath), originalDescriptor)
+    assert.deepEqual(await readFile(rosterPath), originalRoster)
+    if (unsafeDescriptor.pid === process.pid && !unsafeDescriptor.processStartId) {
+      assert.equal(callHelper('workers').ok, false, 'unknown owners cannot become wait targets')
+    }
+  }
+  await writeFile(siblingPath, JSON.stringify(terminalDescriptor, null, 2))
+  const originalTerminalDescriptor = await readFile(siblingPath)
+  for (const journalPath of [
+    terminalDescriptor.recoveryJournalPath,
+    terminalDescriptor.orphanProcessJournalPath
+  ]) {
+    const bytes = Buffer.from(`terminal-${journalPath}`)
+    await writeFile(journalPath, bytes)
+    presentJournals.push([journalPath, bytes])
+  }
+
   const wrongIdentity = callHelper('inspect', { nativeAgentId: 'missing-native-identity' })
   assert.equal(wrongIdentity.ok, false)
   assert.deepEqual(await readFile(descriptorPath), originalDescriptor)
@@ -210,8 +284,8 @@ try {
   assert.equal(inspected.ok, true, JSON.stringify(inspected))
   assert.equal(inspected.result.descriptorPath, descriptorPath)
   assert.equal(inspected.result.workerId, 'worker-a')
-  assert.deepEqual(inspected.result.workerPids, [4242, 4343])
-  assert.deepEqual(callHelper('workers').result.workerPids, [4242, 4343])
+  assert.deepEqual(inspected.result.workerPids, [process.pid])
+  assert.deepEqual(callHelper('workers').result.workerPids, [process.pid])
   assert.deepEqual(await readFile(descriptorPath), originalDescriptor)
   assert.deepEqual(await readFile(rosterPath), originalRoster)
 
@@ -290,7 +364,7 @@ try {
 
   const patched = callHelper('patch')
   assert.equal(patched.ok, true, JSON.stringify(patched))
-  assert.deepEqual(patched.result.workerPids, [4242, 4343])
+  assert.deepEqual(patched.result.workerPids, [process.pid])
   const patchedDescriptor = JSON.parse(await readFile(descriptorPath, 'utf8'))
   const patchedRoster = JSON.parse(await readFile(rosterPath, 'utf8'))
   const descriptorCreate = patchedDescriptor.createCommand
@@ -323,18 +397,19 @@ try {
   assert.deepEqual(await readFile(rosterPath), originalRoster)
   assert.deepEqual(await readFile(sessionPath), sessionBytes)
   assert.deepEqual(await readFile(secondDescriptorPath), originalSecondDescriptor)
+  assert.deepEqual(await readFile(siblingPath), originalTerminalDescriptor)
   for (const [path, bytes] of presentJournals) assert.deepEqual(await readFile(path), bytes)
   assert.equal(existsSync(absentJournalPath), false)
 
   const captureBackupDir = join(tempRoot, 'capture-backup')
   const captured = callHelper('capture', { backupDir: captureBackupDir })
   assert.equal(captured.ok, true, JSON.stringify(captured))
-  assert.deepEqual(captured.result.workerPids, [4242, 4343])
+  assert.deepEqual(captured.result.workerPids, [process.pid])
   const manifest = JSON.parse(await readFile(join(captureBackupDir, 'manifest.json'), 'utf8'))
-  assert.equal(manifest.workers.length, 2)
+  assert.equal(manifest.workers.length, 3)
   assert.deepEqual(
     manifest.workers.map((worker) => worker.journals.length),
-    [2, 2]
+    [2, 2, 2]
   )
   assert.equal(
     manifest.workers
@@ -345,12 +420,27 @@ try {
   for (const [path] of presentJournals) await rm(path)
   await rm(descriptorPath)
   await rm(secondDescriptorPath)
+  await rm(siblingPath)
   await writeFile(absentJournalPath, Buffer.from('successor-only-journal'))
   assert.deepEqual(callHelper('workers', { backupDir: captureBackupDir }).result.workerPids, [])
+  const [startKind, startValue] = startId.split(':')
+  const recycledStartId =
+    startKind === 'ps' ? 'ps:Thu Jan  1 00:00:00 1970' : `${startKind}:${BigInt(startValue) + 1n}`
+  await writeFile(
+    siblingPath,
+    JSON.stringify({ ...terminalDescriptor, pid: process.pid, processStartId: recycledStartId })
+  )
+  assert.deepEqual(
+    callHelper('workers', { backupDir: captureBackupDir }).result.workerPids,
+    [],
+    'a reused PID must not be polled as a worker belonging to the stopped engine'
+  )
+  await rm(siblingPath)
 
   const restoredAndPatched = callHelper('patch', { backupDir: captureBackupDir })
   assert.equal(restoredAndPatched.ok, true, JSON.stringify(restoredAndPatched))
-  assert.deepEqual(restoredAndPatched.result.workerPids, [4242, 4343])
+  assert.deepEqual(restoredAndPatched.result.workerPids, [process.pid])
+  assert.deepEqual(await readFile(siblingPath), originalTerminalDescriptor)
   assert.equal(JSON.parse(await readFile(descriptorPath, 'utf8')).createCommand.model, 'new-model')
   assert.equal(
     JSON.parse(await readFile(rosterPath, 'utf8')).sessions[0].runtime_config.create.model,
@@ -366,6 +456,7 @@ try {
   assert.equal(restoredCapture.ok, true, JSON.stringify(restoredCapture))
   assert.deepEqual(await readFile(descriptorPath), originalDescriptor)
   assert.deepEqual(await readFile(secondDescriptorPath), originalSecondDescriptor)
+  assert.deepEqual(await readFile(siblingPath), originalTerminalDescriptor)
   assert.deepEqual(await readFile(rosterPath), originalRoster)
   for (const [path, bytes] of presentJournals) assert.deepEqual(await readFile(path), bytes)
   assert.equal(existsSync(absentJournalPath), false)
@@ -388,7 +479,7 @@ try {
   assert.deepEqual(await readFile(descriptorPath), originalDescriptor)
   assert.deepEqual(await readFile(secondDescriptorPath), originalSecondDescriptor)
   console.log(
-    'Native restart validated every live selection; target overrides, peer choices and rollback recovery passed'
+    'Native restart validated live selections and terminal owners; peer choices and rollback recovery passed'
   )
 } finally {
   const resolvedTempRoot = await realpath(tempRoot)

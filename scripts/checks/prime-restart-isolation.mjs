@@ -78,7 +78,9 @@ export async function runPrimeRestartIsolationQa({
   await liveSelectionRestartRecovery()
 
   async function liveSelectionRestartRecovery() {
-    const { restartPrimeSession, connectPrimeResident } = require(bundlePath)
+    const { restartPrimeSession, connectPrimeResident, withPrimeServiceSession } = require(
+      bundlePath
+    )
     const agentDirectory = path.join(restartRoot, 'live-selection-agent')
     await mkdir(agentDirectory, { recursive: true })
     await writeModelConfig(agentDirectory, fakeLlm.openaiBaseUrl)
@@ -131,6 +133,19 @@ export async function runPrimeRestartIsolationQa({
       const peerId = peer.nativeAgentId
       await assertSelection(primary, initial, 'Remember target selection history')
       await assertSelection(peer, initial, 'Remember peer selection history')
+      const exportedPath = path.join(agentDirectory, 'exported-history.jsonl')
+      await primary.nativeCommand('export_jsonl', { outputPath: exportedPath })
+      const imported = await withPrimeServiceSession(
+        workspaceDirectory,
+        async (request) => {
+          const result = await request('import_jsonl', { inputPath: exportedPath })
+          return result.sessionFile ? result : request('get_state')
+        },
+        undefined,
+        { executablePath, agentDir: agentDirectory, persistSession: true }
+      )
+      assert.ok(imported.sessionFile)
+      assert.notEqual(imported.sessionFile, (await primary.nativeCommand('get_state')).sessionFile)
       await switchLive(primary)
       await switchLive(peer)
       const primaryHistory = await primary.nativeCommand('get_messages')
@@ -233,7 +248,7 @@ export async function runPrimeRestartIsolationQa({
       )
       await assertSelection(recoveredPeer, live, 'Rollback peer uses its captured live provider')
       console.log(
-        'restart live selections: target, same-ID peer, explicit reset and failed-successor rollback passed'
+        'restart live selections: exported/imported session, peer, explicit reset and rollback passed'
       )
     } finally {
       for (const handle of handles.reverse()) await handle.stop().catch(() => {})

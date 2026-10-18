@@ -7,6 +7,7 @@ use anyhow::{bail, Context, Result};
 use pa_daemon::descriptor::{
     descriptor_dir, validate_descriptor, write_file_atomic, WorkerDescriptor,
 };
+use pa_daemon::lease::{get_process_start_id, is_process_alive};
 use pa_types::daemon::{DurableDaemonCreateCommand, UpdateRoster, UPDATE_ROSTER_FORMAT_VERSION};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -174,7 +175,7 @@ pub fn run() -> Result<Value> {
         return rollback(&request);
     }
     if matches!(request.operation, Operation::Workers) {
-        return Ok(json!({ "workerPids": worker_pids(&read_workers(&request)?) }));
+        return Ok(json!({ "workerPids": worker_pids(&read_workers(&request)?)? }));
     }
     validate_patch(&request.config_patch)?;
     if matches!(request.operation, Operation::Patch)
@@ -256,6 +257,7 @@ fn validate_roster(request: &Request, roster: &UpdateRoster) -> Result<usize> {
 fn read_workers(request: &Request) -> Result<Vec<WorkerFile>> {
     let directory = descriptor_dir(&request.agent_dir, &request.socket_path);
     let mut descriptors = Vec::new();
+    let mut worker_ids = std::collections::BTreeSet::new();
     let entries = match fs::read_dir(&directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(descriptors),
@@ -271,6 +273,11 @@ fn read_workers(request: &Request) -> Result<Vec<WorkerFile>> {
         let descriptor: WorkerDescriptor = serde_json::from_str(&text)
             .context("A worker descriptor could not be inspected safely")?;
         validate_descriptor(&descriptor, &request.socket_path)?;
+        if path.file_stem().and_then(|name| name.to_str()) != Some(&descriptor.worker_id)
+            || !worker_ids.insert(descriptor.worker_id.clone())
+        {
+            bail!("The durable worker path or identity is not unique");
+        }
         descriptors.push(WorkerFile {
             path,
             descriptor,
@@ -280,11 +287,41 @@ fn read_workers(request: &Request) -> Result<Vec<WorkerFile>> {
     Ok(descriptors)
 }
 
-fn worker_pids(workers: &[WorkerFile]) -> Vec<u64> {
-    let mut pids: Vec<_> = workers.iter().map(|worker| worker.descriptor.pid).collect();
+fn worker_owner_alive(descriptor: &WorkerDescriptor) -> Result<bool> {
+    let pid = u32::try_from(descriptor.pid).context("The worker process identity is invalid")?;
+    if !is_process_alive(pid)? {
+        return Ok(false);
+    }
+    let expected = descriptor
+        .process_start_id
+        .as_deref()
+        .context("The worker process start identity is unavailable")?;
+    let current = get_process_start_id(pid)
+        .context("The worker process start identity could not be verified")?;
+    let (kind, recorded) = expected
+        .split_once(':')
+        .context("The worker process start identity is invalid")?;
+    if !current.starts_with(&format!("{kind}:"))
+        || recorded.is_empty()
+        || !matches!(kind, "win" | "proc" | "ps")
+        || (matches!(kind, "win" | "proc")
+            && !recorded.bytes().all(|character| character.is_ascii_digit()))
+    {
+        bail!("The worker process start identity cannot be compared safely");
+    }
+    Ok(expected == current)
+}
+
+fn worker_pids(workers: &[WorkerFile]) -> Result<Vec<u64>> {
+    let mut pids = Vec::new();
+    for worker in workers {
+        if worker_owner_alive(&worker.descriptor)? {
+            pids.push(worker.descriptor.pid);
+        }
+    }
     pids.sort_unstable();
     pids.dedup();
-    pids
+    Ok(pids)
 }
 
 fn load_files(request: &Request) -> Result<RestartFiles> {
@@ -319,7 +356,7 @@ fn load_files(request: &Request) -> Result<RestartFiles> {
         roster,
         roster_text,
         session_index,
-        worker_pids: worker_pids(&workers),
+        worker_pids: worker_pids(&workers)?,
         workers,
     })
 }
@@ -383,9 +420,7 @@ fn supervisor_config(create: &DurableDaemonCreateCommand) -> Map<String, Value> 
 }
 
 fn validate_resident_selections(request: &Request, files: &RestartFiles) -> Result<()> {
-    if request.resident_selections.len() != files.roster.sessions.len()
-        || files.workers.len() != files.roster.sessions.len()
-    {
+    if request.resident_selections.len() != files.roster.sessions.len() {
         bail!("The live selections do not identify every restart resident");
     }
     let mut identities = std::collections::BTreeSet::new();
@@ -400,18 +435,14 @@ fn validate_resident_selections(request: &Request, files: &RestartFiles) -> Resu
         let workers: Vec<_> = files
             .workers
             .iter()
-            .filter(|worker| {
-                worker.descriptor.root_active_session_id == session.active_session_id
-                    && worker
-                        .descriptor
-                        .session_file
-                        .as_deref()
-                        .is_some_and(|path| {
-                            same_path(Path::new(path), Path::new(&session.session_file))
-                        })
-            })
+            .filter(|worker| worker.descriptor.root_active_session_id == session.active_session_id)
             .collect();
         if workers.len() != 1
+            || !workers[0]
+                .descriptor
+                .session_file
+                .as_deref()
+                .is_some_and(|path| same_path(Path::new(path), Path::new(&session.session_file)))
             || !selection.session_path.is_absolute()
             || !same_path(&selection.session_path, Path::new(&session.session_file))
             || selection.provider.trim().is_empty()
@@ -426,6 +457,18 @@ fn validate_resident_selections(request: &Request, files: &RestartFiles) -> Resu
             })
         {
             bail!("A captured live selection does not match its restart resident");
+        }
+    }
+    for worker in &files.workers {
+        if !identities.contains(&worker.descriptor.root_active_session_id)
+            && (worker
+                .descriptor
+                .stop_requested_at
+                .as_deref()
+                .is_none_or(|timestamp| timestamp.trim().is_empty())
+                || worker_owner_alive(&worker.descriptor)?)
+        {
+            bail!("A worker outside the restart snapshot has not completed its stop");
         }
     }
     Ok(())
