@@ -19,45 +19,45 @@ export interface HighlightResponse {
 
 type GrammarLoader = () => Promise<{ default: LanguageRegistration[] }>
 
-const GRAMMARS: Record<string, GrammarLoader> = {
-  typescript: () => import('shiki/langs/typescript.mjs'),
-  tsx: () => import('shiki/langs/tsx.mjs'),
-  javascript: () => import('shiki/langs/javascript.mjs'),
-  jsx: () => import('shiki/langs/jsx.mjs'),
-  json: () => import('shiki/langs/json.mjs'),
-  jsonc: () => import('shiki/langs/jsonc.mjs'),
-  shellscript: () => import('shiki/langs/shellscript.mjs'),
-  powershell: () => import('shiki/langs/powershell.mjs'),
-  bat: () => import('shiki/langs/bat.mjs'),
-  python: () => import('shiki/langs/python.mjs'),
-  rust: () => import('shiki/langs/rust.mjs'),
-  go: () => import('shiki/langs/go.mjs'),
-  java: () => import('shiki/langs/java.mjs'),
-  kotlin: () => import('shiki/langs/kotlin.mjs'),
-  swift: () => import('shiki/langs/swift.mjs'),
-  c: () => import('shiki/langs/c.mjs'),
-  cpp: () => import('shiki/langs/cpp.mjs'),
-  csharp: () => import('shiki/langs/csharp.mjs'),
-  css: () => import('shiki/langs/css.mjs'),
-  scss: () => import('shiki/langs/scss.mjs'),
-  html: () => import('shiki/langs/html.mjs'),
-  xml: () => import('shiki/langs/xml.mjs'),
-  vue: () => import('shiki/langs/vue.mjs'),
-  svelte: () => import('shiki/langs/svelte.mjs'),
-  yaml: () => import('shiki/langs/yaml.mjs'),
-  toml: () => import('shiki/langs/toml.mjs'),
-  ini: () => import('shiki/langs/ini.mjs'),
-  dotenv: () => import('shiki/langs/dotenv.mjs'),
-  markdown: () => import('shiki/langs/markdown.mjs'),
-  sql: () => import('shiki/langs/sql.mjs'),
-  graphql: () => import('shiki/langs/graphql.mjs'),
-  diff: () => import('shiki/langs/diff.mjs'),
-  docker: () => import('shiki/langs/docker.mjs'),
-  make: () => import('shiki/langs/make.mjs'),
-  ruby: () => import('shiki/langs/ruby.mjs'),
-  php: () => import('shiki/langs/php.mjs'),
-  lua: () => import('shiki/langs/lua.mjs')
-}
+const GRAMMARS = new Map<string, GrammarLoader>([
+  ['typescript', () => import('shiki/langs/typescript.mjs')],
+  ['tsx', () => import('shiki/langs/tsx.mjs')],
+  ['javascript', () => import('shiki/langs/javascript.mjs')],
+  ['jsx', () => import('shiki/langs/jsx.mjs')],
+  ['json', () => import('shiki/langs/json.mjs')],
+  ['jsonc', () => import('shiki/langs/jsonc.mjs')],
+  ['shellscript', () => import('shiki/langs/shellscript.mjs')],
+  ['powershell', () => import('shiki/langs/powershell.mjs')],
+  ['bat', () => import('shiki/langs/bat.mjs')],
+  ['python', () => import('shiki/langs/python.mjs')],
+  ['rust', () => import('shiki/langs/rust.mjs')],
+  ['go', () => import('shiki/langs/go.mjs')],
+  ['java', () => import('shiki/langs/java.mjs')],
+  ['kotlin', () => import('shiki/langs/kotlin.mjs')],
+  ['swift', () => import('shiki/langs/swift.mjs')],
+  ['c', () => import('shiki/langs/c.mjs')],
+  ['cpp', () => import('shiki/langs/cpp.mjs')],
+  ['csharp', () => import('shiki/langs/csharp.mjs')],
+  ['css', () => import('shiki/langs/css.mjs')],
+  ['scss', () => import('shiki/langs/scss.mjs')],
+  ['html', () => import('shiki/langs/html.mjs')],
+  ['xml', () => import('shiki/langs/xml.mjs')],
+  ['vue', () => import('shiki/langs/vue.mjs')],
+  ['svelte', () => import('shiki/langs/svelte.mjs')],
+  ['yaml', () => import('shiki/langs/yaml.mjs')],
+  ['toml', () => import('shiki/langs/toml.mjs')],
+  ['ini', () => import('shiki/langs/ini.mjs')],
+  ['dotenv', () => import('shiki/langs/dotenv.mjs')],
+  ['markdown', () => import('shiki/langs/markdown.mjs')],
+  ['sql', () => import('shiki/langs/sql.mjs')],
+  ['graphql', () => import('shiki/langs/graphql.mjs')],
+  ['diff', () => import('shiki/langs/diff.mjs')],
+  ['docker', () => import('shiki/langs/docker.mjs')],
+  ['make', () => import('shiki/langs/make.mjs')],
+  ['ruby', () => import('shiki/langs/ruby.mjs')],
+  ['php', () => import('shiki/langs/php.mjs')],
+  ['lua', () => import('shiki/langs/lua.mjs')]
+])
 
 const syntaxRule = (scope: string | string[], foreground: string, fontStyle?: string) => ({
   scope,
@@ -286,7 +286,7 @@ function getHighlighter(): Promise<HighlighterCore> {
 function ensureLanguage(highlighter: HighlighterCore, lang: string): Promise<void> {
   let pending = loadedLangs.get(lang)
   if (!pending) {
-    const loader = GRAMMARS[lang]
+    const loader = GRAMMARS.get(lang)
     if (!loader) return Promise.reject(new Error(`No grammar for ${lang}`))
     pending = loader().then((mod) => highlighter.loadLanguage(...mod.default))
     pending.catch(() => loadedLangs.delete(lang))
@@ -296,6 +296,7 @@ function ensureLanguage(highlighter: HighlighterCore, lang: string): Promise<voi
 }
 
 async function tokenize(code: string, language: string): Promise<HighlightedLines | null> {
+  if (!GRAMMARS.has(language)) return null
   try {
     const highlighter = await getHighlighter()
     await ensureLanguage(highlighter, language)

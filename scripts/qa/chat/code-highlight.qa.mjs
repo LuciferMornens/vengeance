@@ -30,6 +30,10 @@ const PYTHON_ANSWER = [
   '```'
 ].join('\n')
 
+const UNRECOGNIZED_LANGUAGES = ['constructor', 'toString', '__proto__', 'unknown-language']
+const WORKER_RESPONSE_TIMEOUT_MS = 30_000
+const WORKER_TEST_CODE = 'export const answer = 42'
+
 /** Class lists of the colored runs inside the code block that contains `marker`, once it has some. */
 async function coloredRuns(app, marker) {
   return until(
@@ -59,6 +63,67 @@ await runSuite(
         assert.ok(classes.includes(kind), `${kind} in the TypeScript block (got: ${classes})`)
       }
     })
+
+    await step(
+      'worker messages reject prototype names and keep valid grammars usable',
+      async () => {
+        const target = app.page
+          .workers()
+          .find((worker) => worker.url().includes('highlight-worker-'))
+        assert.ok(target, 'the bundled highlighting worker is running')
+        const responses = await app.page.evaluate(
+          async ({ url, languages, code, timeoutMs }) => {
+            const worker = new Worker(url, { type: 'module' })
+            let nextId = 0
+            const request = (language) =>
+              new Promise((resolveResponse, rejectResponse) => {
+                const id = ++nextId
+                const cleanup = () => {
+                  clearTimeout(timer)
+                  worker.removeEventListener('message', receive)
+                  worker.removeEventListener('error', failed)
+                }
+                const receive = (event) => {
+                  if (event.data.id !== id) return
+                  cleanup()
+                  resolveResponse(event.data)
+                }
+                const failed = () => {
+                  cleanup()
+                  rejectResponse(new Error('Highlighting worker failed'))
+                }
+                const timer = setTimeout(() => {
+                  cleanup()
+                  rejectResponse(new Error('Highlighting worker response timed out'))
+                }, timeoutMs)
+                worker.addEventListener('message', receive)
+                worker.addEventListener('error', failed)
+                worker.postMessage({ id, code, language })
+              })
+            try {
+              const results = []
+              for (const language of [...languages, 'typescript'])
+                results.push(await request(language))
+              return results
+            } finally {
+              worker.terminate()
+            }
+          },
+          {
+            url: target.url(),
+            languages: UNRECOGNIZED_LANGUAGES,
+            code: WORKER_TEST_CODE,
+            timeoutMs: WORKER_RESPONSE_TIMEOUT_MS
+          }
+        )
+        for (const [index, language] of UNRECOGNIZED_LANGUAGES.entries()) {
+          assert.equal(responses[index].lines, null, `${language} uses the plain-text fallback`)
+        }
+        const tokens = responses.at(-1).lines.flat()
+        assert.equal(tokens.map((token) => token.content).join(''), WORKER_TEST_CODE)
+        assert.ok(tokens.some((token) => token.className?.includes('syn-keyword')))
+      }
+    )
 
     await step('a Python block gets colors too', async () => {
       server.queue(turn.text(PYTHON_ANSWER))
