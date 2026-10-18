@@ -38,11 +38,15 @@ function Fact({ children }: { children: ReactNode }) {
   )
 }
 
-/** "running · 3m · 41 tools" / "finished · 25m" / "needs you" for a run, tone included; facts by priority. */
-function RunState({ view, resumed }: { view: SubagentRunView; resumed?: boolean }) {
+/**
+ * "running · 3m · 41 tools" / "finished · 25m" / "needs you" for a run, tone included; facts by priority. `timed`: the
+ * row's own duration column already shows how long the run took (a foreground run is its call), so "finished" stands alone.
+ */
+function RunState({ view, resumed, timed }: { view: SubagentRunView; resumed?: boolean; timed?: boolean }) {
   if (view.needsDecision)
     return <span className="font-medium whitespace-nowrap text-warning">needs you</span>
-  const elapsed = view.startedAt && view.endedAt ? formatSubagentDuration(view.endedAt - view.startedAt) : undefined
+  const elapsed =
+    !timed && view.startedAt && view.endedAt ? formatSubagentDuration(view.endedAt - view.startedAt) : undefined
   switch (view.state) {
     case 'running':
       return (
@@ -179,7 +183,7 @@ function LaunchRow({ agentId, call, execution }: ToolRendererProps) {
       workflow && runningChildren > 0 ? (
         <span className="whitespace-nowrap">{runningChildren} running</span>
       ) : (
-        <RunState view={view} resumed={resumed} />
+        <RunState view={view} resumed={resumed} timed={foreground} />
       )
   // The run facts ride in the subject rather than ToolRow's fixed meta slot, so a narrow row gives them up first:
   // trailing facts wrap whole onto a clipped second line, and the task title truncates only once the state is alone.

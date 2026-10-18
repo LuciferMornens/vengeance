@@ -144,6 +144,8 @@ export function useHotkey(
 const MODIFIERS = new Set(['mod', 'ctrl', 'alt', 'shift', 'super'])
 /** macOS menus list modifiers as ⌃⌥⇧⌘ whatever order a combo names them in. */
 const MAC_MODIFIER_ORDER = ['ctrl', 'alt', 'shift', 'mod', 'super']
+/** Windows and Linux write the Windows (Super) key first, then Ctrl, Alt, Shift: `shift+ctrl+p` reads Ctrl+Shift+P. */
+const PC_MODIFIER_ORDER = ['super', 'mod', 'ctrl', 'alt', 'shift']
 
 const MAC_CAPS: Record<string, string> = {
   mod: '⌘',
@@ -180,15 +182,14 @@ function capName(part: string, os: Os, words: boolean): string {
   return k.length <= 1 ? k.toUpperCase() : k[0]!.toUpperCase() + k.slice(1)
 }
 
-/** A combo's parts in display order: as written on Windows/Linux, modifiers first in Apple's order on macOS. */
+/** A combo's parts in display order: modifiers first in the platform's order, then the key. */
 function displayParts(combo: string, os: Os): string[] {
-  const parts = comboParts(combo)
-  if (os !== 'darwin') return parts
+  const order = os === 'darwin' ? MAC_MODIFIER_ORDER : PC_MODIFIER_ORDER
   const rank = (part: string) => {
-    const index = MAC_MODIFIER_ORDER.indexOf(part.toLowerCase())
-    return index < 0 ? MAC_MODIFIER_ORDER.length : index
+    const index = order.indexOf(part.toLowerCase())
+    return index < 0 ? order.length : index
   }
-  return [...parts].sort((a, b) => rank(a) - rank(b))
+  return [...comboParts(combo)].sort((a, b) => rank(a) - rank(b))
 }
 
 /** Key caps for a combo: `mod+shift+p` → ['Ctrl', 'Shift', 'P'] on Windows/Linux, ['⇧', '⌘', 'P'] on macOS. */

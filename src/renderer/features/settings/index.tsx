@@ -198,18 +198,27 @@ export function SettingsSheet() {
     scrollRef.current?.scrollTo({ top: 0 })
   }, [engine, cwd, section.id, searching])
   // Keep the active nav item in view: a section opened from elsewhere (palette, search, a link) can sit outside the
-  // visible part of a short window, and the isolated-config footer shortens the list once the snapshot loads. An
-  // item less than 8px clear of an edge comes back under its group heading when both fit, otherwise 8px clear of
-  // that edge (`top` and `bottom` are those two scroll offsets, relative to the list, which is positioned).
+  // visible part of a short window, the isolated-config footer shortens the list once the snapshot loads, and the
+  // window can shrink while Settings is open. The item comes back under its group heading when both fit, otherwise
+  // 8px clear of the edge it crossed (`top` and `bottom` are those two scroll offsets, relative to the list, which is
+  // positioned).
   useEffect(() => {
     const list = navListRef.current
-    const item = activeNavRef.current
-    if (!list || !item) return
-    const top = item.offsetTop - 8
-    const bottom = item.offsetTop + item.offsetHeight + 8 - list.clientHeight
-    const heading = activeGroupRef.current?.offsetTop ?? top
-    if (list.scrollTop > top) list.scrollTop = heading >= bottom ? heading : top
-    else if (list.scrollTop < bottom) list.scrollTop = bottom
+    if (!list) return
+    const keepInView = () => {
+      const item = activeNavRef.current
+      if (!item) return
+      const top = item.offsetTop - 8
+      const bottom = item.offsetTop + item.offsetHeight + 8 - list.clientHeight
+      const heading = activeGroupRef.current?.offsetTop ?? top
+      if (list.scrollTop > heading && heading >= bottom) list.scrollTop = heading
+      else if (list.scrollTop > top) list.scrollTop = top
+      else if (list.scrollTop < bottom) list.scrollTop = bottom
+    }
+    keepInView()
+    const observer = new ResizeObserver(keepInView)
+    observer.observe(list)
+    return () => observer.disconnect()
   }, [engine, section.id, snapshot?.isolated])
   // Toasts dock over the nav column while Settings is open (globals.css), clear of the centered content.
   useEffect(() => {
