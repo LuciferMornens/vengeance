@@ -1,15 +1,19 @@
 # Engine stable audit — 18 October 2026
 
 Both bundled engines already use the latest official stable release. The release APIs and all
-remote tags were checked at 20:03 UTC on 18 October 2026. No upstream revision, build identity,
-patch list, catalog pin or helper dependency changes are needed for a stable upgrade.
+remote tags were checked at 20:03 UTC on 18 October 2026. There is no newer stable base to adopt.
+Separate native prompt qualification found a stable-base defect requiring the local Prime
+backport described below; its build identity changes while the upstream revision stays pinned.
 
 ## Release identity
 
 | Engine      | Latest stable | Published UTC             | Exact upstream commit                      | Vengeance build       |
 | ----------- | ------------- | ------------------------- | ------------------------------------------ | --------------------- |
 | pi          | `v1.3.0`      | 15 October 2026, 19:17:33 | `71023aec1546d6d677a65669c5665c0927ce0dd0` | `1.3.0+vengeance.2`   |
-| Prime Agent | `v0.10.0`     | 9 October 2026, 21:28:57  | `763094e1b6a7c17450ee8399b06cda1853847ca5` | `0.10.0+vengeance.10` |
+| Prime Agent | `v0.10.0`     | 9 October 2026, 21:28:57  | `763094e1b6a7c17450ee8399b06cda1853847ca5` | `0.10.0+vengeance.11` |
+
+The Vengeance identities above are the current lock entries. The new Prime build requires the
+final reconstruction, native build and runtime qualification described below before release.
 
 The official GitHub `releases/latest` responses identify these releases as non-prereleases.
 Independent `git ls-remote --tags` checks, sorting numbered stable tags as versions, find the
@@ -37,10 +41,11 @@ There is no new stable source or session-format transition to qualify in this au
 
 Every active source patch remains listed in [the engine lock](../engines.lock.json). An unchanged
 upstream base supplies no new evidence for retiring a patch. pi's historical catalog patch `0004`
-stays retired; the active seven-patch series and Prime's nineteen-patch series are unchanged.
-The helper stays linked to the same reviewed patched Prime source and revision.
+stays retired; its active seven-patch series and Prime's first nineteen patches are unchanged.
+Prime patch `0020` extends the series. The helper keeps the same upstream revision and protocol;
+its changed engine inputs require a rebuild and qualification against the final patched source.
 
-Development source was checked to identify future reconciliation work, without adopting it:
+Development source was checked without changing the stable base:
 
 - pi `main` was `482c1381a00d8d00bc81697e4a980c593db6803e`, 30 commits after stable. Relevant
   changes include summary output limits, provider retry behavior and model configuration defaults.
@@ -64,11 +69,50 @@ Sources: [pi comparison](https://github.com/earendil-works/pi/compare/71023aec15
 [worker-exit sidecars](https://github.com/PrimeIntellect-ai/prime-agent/commit/823904967e9187765847ebadedf6dec456cfb2fe), and
 [ledger replay caches](https://github.com/PrimeIntellect-ai/prime-agent/commit/b9c1c2ffbf767bee61b28905ac275692f200c1b7).
 
+## Stable-base appended prompt backport
+
+Actual provider QA found that Prime `v0.10.0` discovers `APPEND_SYSTEM.md` but omits its resolved
+content when assembling a session's prompt. Patch
+[`0020-native-append-system-prompt.patch`](../patches/prime-agent/0020-native-append-system-prompt.patch)
+adapts upstream commit
+[`b1d71636710b0ea1b86380dfe3923b3c03fe2948`](https://github.com/PrimeIntellect-ai/prime-agent/commit/b1d71636710b0ea1b86380dfe3923b3c03fe2948).
+It sends explicit append sources through the native resource loader and puts the resolved raw text
+in the builder's appended-prompt segment. The stable builder's separate generic-guidelines API
+remains available. An additional CLI diagnostic hunk includes the same appended text in native
+`prompt` output; the reviewed upstream development head still omits it there.
+
+Native precedence remains explicit append sources, otherwise the project file, otherwise the global
+file. SYSTEM and APPEND selection are independent. An empty project or explicit append suppresses
+fallback; whitespace, Markdown and repeated bullets remain raw text. The appendix follows the native
+dynamic tail and survives live model changes. The patch changes neither the daemon JSON contract nor
+saved-session format, credential storage or helper protocol. Its SHA-256 is
+`dd5a9f05521870175845393f6b71f60abc1fbe3f20e6b0a3d5baae2d15f8bb08`.
+
+The exported patch was reviewed against the authoring source: three files, 223 additions and four
+deletions. The source owner reports eight focused actual-provider unit tests passing, covering
+independent scope precedence, explicit literal/file sources, empty and whitespace overrides,
+default/custom foundations and model-switch retention. All four focused CLI prompt-command tests
+also pass, including the raw appendix diagnostic. Final reconstructed engine, helper and app
+qualification is pending at this point. These focused results do not establish release compatibility.
+
+Retire the core backport only after an unpatched stable successor passes those provider regressions
+and its public API changes are reviewed. Recheck the separate native CLI diagnostic hunk before
+retiring the whole patch. Running residents keep their current prompt until an explicit guarded
+restart; a successful native `reload` response does not rebuild their prompt.
+
 ## Qualification scope
 
-This was a read-only release and source audit. No engine checkout, native build, account write,
-provider request, migration or runtime qualification was performed. It does not replace the
-existing release evidence or qualify an unreleased upstream head.
+The release audit and independent patch review were read-only; this audit worker performed no native
+build, account write, provider request or migration. The focused source-owner results above are
+separate from that review. Neither establishes final release qualification or qualifies an unreleased
+upstream head.
+
+The final local backport needs reconstruction from the exported series, an engine/helper rebuild,
+native regressions and the public app provider test in
+`scripts/qa/settings/system-prompts.qa.mjs`. Verify a real saved-worker PID transition, held-stream
+save behavior, model-switch retention, mixed-version resident notices and the helper's static-only
+default foundation. Repeat the applicable restart, image-capability, bundled-identity, packaged
+runtime and app validation gates in [UPSTREAM.md](../UPSTREAM.md), then inspect their screenshots.
 
 A future stable candidate requires the complete procedure in [UPSTREAM.md](../UPSTREAM.md): run
 each local regression on unpatched upstream, retire only demonstrated superseded fixes, port and

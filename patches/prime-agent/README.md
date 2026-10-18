@@ -3,7 +3,7 @@
 Follow [UPSTREAM.md](../../UPSTREAM.md) for reconstruction and qualification.
 
 Vengeance ships a source build of stable `v0.10.0`, upstream commit
-`763094e1b6a7c17450ee8399b06cda1853847ca5`, identified as `0.10.0+vengeance.10`.
+`763094e1b6a7c17450ee8399b06cda1853847ca5`, identified as `0.10.0+vengeance.11`.
 The exact source, catalog revision, toolchain and patch order live in
 [engines.lock.json](../../engines.lock.json). The native helper links this same stable base.
 
@@ -28,6 +28,7 @@ The exact source, catalog revision, toolchain and patch order live in
 | 0017  | Backport the upstream rustls 0.23.46 lockfile maintenance without changing other dependency pins.         |
 | 0018  | Keep each OAuth refresh flight through credential persistence so waiting callers reuse its token.         |
 | 0019  | Coordinate native timing/lifecycle fixtures and expose a private receive seam for piped-input tests.      |
+| 0020  | Include native APPEND_SYSTEM sources in session prompts and prompt dumps, preserving raw text.            |
 
 Patch 0014 comes from upstream commit
 [`7b89c111da0f1d9e67849b34f10552bbb4bd1bd1`](https://github.com/PrimeIntellect-ai/prime-agent/commit/7b89c111da0f1d9e67849b34f10552bbb4bd1bd1).
@@ -52,6 +53,16 @@ fixture shuts down its native worker before dropping its runtime, closing subpro
 Piped-input collection accepts a private receive function so its reset test can script arrivals;
 production still calls the standard receiver's `recv_timeout` with the full idle window on every read.
 Assertions keep their behavioral contracts rather than relying on provider speed or scheduler timing.
+
+Patch 0020 adapts upstream
+[`b1d71636710b0ea1b86380dfe3923b3c03fe2948`](https://github.com/PrimeIntellect-ai/prime-agent/commit/b1d71636710b0ea1b86380dfe3923b3c03fe2948):
+the session engine passes explicit append sources through the native resource loader and includes its
+resolved text in the native prompt builder. The stable builder's direct `prompt_guidelines` API remains
+available. The patch also includes discovered append sources in the CLI's `prompt` breakdown. Native
+provider regressions cover independent SYSTEM/APPEND scope precedence, explicit literals and files,
+empty overrides, raw Markdown and whitespace, default foundation layers, and a live model switch.
+Retirement requires those regressions and the CLI diagnostic case to pass on the candidate upstream
+base; the newer core fix alone does not qualify the CLI dump or the app's saved-worker restart path.
 
 The first three patches originated on development commit
 `fa20be8e487b1889c2395ea33906149aef983ca0`. Patch 0002 was rebased onto stable source:
