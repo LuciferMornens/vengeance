@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { CreateAgentArgs } from '@shared/api/engine'
+import type { CreateAgentArgs, EngineId } from '@shared/api/engine'
 import { invoke } from '../../lib/ipc'
 import { useAgents } from '../../store/agents'
 import { useApp, workspaceEngine } from '../../store/app'
@@ -8,7 +8,12 @@ import { prepareLaunch, type PrepareLaunchOptions } from '../launch/spawn'
 
 interface SessionOpenings {
   activations: Record<number, number>
-  focusIntent: { revision: number; owner: Element | null; started: boolean } | null
+  focusIntent: {
+    revision: number
+    owner: Element | null
+    started: boolean
+    target: { engine: EngineId; path: string } | null
+  } | null
 }
 
 export const useSessionOpenings = create<SessionOpenings>(() => ({
@@ -19,7 +24,7 @@ export const useSessionOpenings = create<SessionOpenings>(() => ({
 export function requestSessionActivation(): number {
   const owner = document.activeElement
   const revision = useAgents.getState().requestActivation()
-  useSessionOpenings.setState({ focusIntent: { revision, owner, started: false } })
+  useSessionOpenings.setState({ focusIntent: { revision, owner, started: false, target: null } })
   return revision
 }
 
@@ -27,6 +32,16 @@ export function releaseSessionFocus(revision: number): void {
   if (useSessionOpenings.getState().focusIntent?.revision === revision) {
     useSessionOpenings.setState({ focusIntent: null })
   }
+}
+
+export function setSessionOpeningTarget(revision: number, engine: EngineId, path: string): void {
+  if (useAgents.getState().activationRevision !== revision) return
+  useSessionOpenings.setState((state) => ({
+    focusIntent:
+      state.focusIntent?.revision === revision
+        ? { ...state.focusIntent, started: true, target: { engine, path } }
+        : state.focusIntent
+  }))
 }
 
 /** Nested opens share an activation; older completions cannot clear the latest request's feedback. */
@@ -44,7 +59,9 @@ export async function withSessionOpening<T>(
               state.focusIntent?.revision === activationRevision
                 ? state.focusIntent.owner
                 : document.activeElement,
-            started: true
+            started: true,
+            target:
+              state.focusIntent?.revision === activationRevision ? state.focusIntent.target : null
           },
     activations: {
       ...state.activations,
@@ -86,6 +103,9 @@ export async function spawnAgent(
       { ...args, engine: args.engine ?? workspaceEngine(args.cwd) },
       options
     )
+    if (prepared.engine && prepared.sessionPath) {
+      setSessionOpeningTarget(activationRevision, prepared.engine, prepared.sessionPath)
+    }
     return useAgents.getState().createAgent(prepared, activationRevision)
   })
 }

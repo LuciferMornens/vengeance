@@ -17,6 +17,15 @@ const IMAGE_COLOR = [40, 120, 220]
 const IMAGE_BASE64 = makePng(IMAGE_SIZE, IMAGE_SIZE, IMAGE_COLOR).toString('base64')
 const OUTPUT_DIRECTORY = reportShotsDir('open-feedback')
 const BASELINE_TITLE = 'Feedback baseline'
+const SHADOW_COMMAND_NOTICE = 'QA native new command ran'
+const SHADOW_COMMAND_EXTENSION = `
+export default function (engine) {
+  engine.registerCommand('new', {
+    description: 'Verify native command precedence during history readiness',
+    handler: (_arguments, context) => context.ui.notify('${SHADOW_COMMAND_NOTICE}', 'info')
+  })
+}
+`
 const TITLES = [
   'Mouse open',
   'Keyboard open',
@@ -26,6 +35,10 @@ const TITLES = [
   'Keep focus during delay',
   'Keep focus before create',
   'Focus after refresh',
+  'Ready before commands',
+  'Empty ready before commands',
+  'Joined history',
+  'Commands unavailable',
   'Keep sidebar focus',
   'Keep settings focus',
   'Older request',
@@ -56,6 +69,7 @@ async function installDelays(application) {
         if (gate) {
           gate.entered = true
           await gate.wait
+          if (gate.error) throw new Error(gate.error)
         }
         return original(...parameters)
       })
@@ -95,6 +109,14 @@ async function release(application, path, channel = 'engine:create') {
   await application.evaluate((_, key) => {
     globalThis.__openFeedbackGates.get(key).release()
   }, `${channel}:${path}`)
+}
+
+async function rejectCatalog(application, path) {
+  await application.evaluate((_, key) => {
+    const gate = globalThis.__openFeedbackGates.get(key)
+    gate.error = 'QA command catalog unavailable'
+    gate.release()
+  }, `engine:command:get_commands:${path}`)
 }
 
 async function clickTiming(row, deferred, activate) {
@@ -187,7 +209,7 @@ async function dropImage(app, target, name) {
 
 await runSuite(
   'sessions-open-feedback',
-  async ({ app, agentDir, step }) => {
+  async ({ app, agentDir, server, step }) => {
     const { cwd } = await app.openWorkspace()
     const directory = workspaceSessionDir(agentDir, cwd)
     const baselinePath = await longSession(cwd, { name: BASELINE_TITLE }).write(directory)
@@ -195,8 +217,10 @@ await runSuite(
     for (const title of TITLES) {
       const session = new SessionBuilder({ cwd })
       session.modelChange()
-      session.user(`Question for ${title}`)
-      session.assistant(`Answer for ${title}`)
+      if (title !== 'Empty ready before commands') {
+        session.user(`Question for ${title}`)
+        session.assistant(`Answer for ${title}`)
+      }
       session.name(title)
       paths.set(title, await session.write(directory))
     }
@@ -401,6 +425,148 @@ await runSuite(
         }
       )
 
+      await step('committed history is usable while the command catalog is held', async () => {
+        const path = paths.get('Ready before commands')
+        const channel = 'engine:command:get_commands'
+        await hold(app.app, path, channel)
+        await row('Ready before commands').click()
+        await entered(app.app, path, channel)
+        await answer('Ready before commands').waitFor()
+        await opening.waitFor({ state: 'hidden' })
+        assert.equal((await app.agentState()).info.args.sessionPath, path)
+        const composer = await app.composer()
+        assert.equal(await composer.evaluate((element) => !!element.closest('[inert]')), false)
+        await until(() => composer.evaluate((element) => document.activeElement === element), {
+          label: 'the history-ready composer receives initial focus before catalog completion'
+        })
+        const count = (await app.invoke('engine:list')).length
+        await composer.fill('/new')
+        await composer.press('Enter')
+        await app.page.getByText('Commands are still loading', { exact: true }).waitFor()
+        assert.equal(await composer.inputValue(), '/new')
+        assert.equal((await app.invoke('engine:list')).length, count)
+        await release(app.app, path, channel)
+        await until(
+          async () => (await app.agentState()).commands.some((command) => command.name === 'new'),
+          { label: 'the native shadow command catalog is committed' }
+        )
+        await composer.press('Enter')
+        await app.page.getByText(SHADOW_COMMAND_NOTICE, { exact: true }).waitFor()
+        assert.equal((await app.invoke('engine:list')).length, count)
+        assert.equal((await app.agentState()).info.args.sessionPath, path)
+      })
+
+      await step(
+        'duplicate opens and the open row keep waiting for committed history',
+        async () => {
+          const title = 'Joined history'
+          const path = paths.get(title)
+          const channel = 'engine:command:get_messages'
+          await hold(app.app, path, channel)
+          const first = app.test('openSession', path, 'pi')
+          const joined = []
+          try {
+            await entered(app.app, path, channel)
+            const count = (await app.invoke('engine:list')).length
+            const duplicate = app.test('openSession', path, 'pi')
+            joined.push(duplicate)
+            assert.equal(
+              await Promise.race([
+                duplicate.then(() => 'finished'),
+                sleep(CANCELED_OPEN_WAIT_MS).then(() => 'pending')
+              ]),
+              'pending'
+            )
+            await opening.waitFor()
+            await row(title).click()
+            await sleep(CANCELED_OPEN_WAIT_MS)
+            await opening.waitFor()
+            assert.equal((await app.invoke('engine:list')).length, count)
+            assert.equal(
+              await app.page
+                .locator('[data-session-pane] textarea[aria-label="Message"]')
+                .isVisible(),
+              false
+            )
+          } finally {
+            await release(app.app, path, channel)
+            await Promise.allSettled([first, ...joined])
+          }
+          await answer(title).waitFor()
+          await opening.waitFor({ state: 'hidden' })
+        }
+      )
+
+      await step(
+        'empty committed history is usable before command catalog completion',
+        async () => {
+          const title = 'Empty ready before commands'
+          const path = paths.get(title)
+          const channel = 'engine:command:get_commands'
+          await hold(app.app, path, channel)
+          await row(title).click()
+          await entered(app.app, path, channel)
+          await opening.waitFor({ state: 'hidden' })
+          const active = await app.agentState()
+          assert.equal(active.info.args.sessionPath, path)
+          assert.equal(active.entries.length, 0)
+          const composer = await app.composer()
+          assert.equal(await composer.evaluate((element) => !!element.closest('[inert]')), false)
+          await release(app.app, path, channel)
+        }
+      )
+
+      await step('a failed command catalog keeps ambiguous command drafts', async () => {
+        const title = 'Commands unavailable'
+        const path = paths.get(title)
+        const channel = 'engine:command:get_commands'
+        await hold(app.app, path, channel)
+        await row(title).click()
+        await entered(app.app, path, channel)
+        await answer(title).waitFor()
+        await opening.waitFor({ state: 'hidden' })
+        await rejectCatalog(app.app, path)
+        await app.page.getByText('Could not open the session', { exact: true }).waitFor()
+        const count = (await app.invoke('engine:list')).length
+        const composer = await app.composer()
+        await composer.fill('/new')
+        await composer.press('Enter')
+        await app.page.getByText('Commands could not be loaded', { exact: true }).waitFor()
+        assert.equal(await composer.inputValue(), '/new')
+        assert.equal((await app.invoke('engine:list')).length, count)
+        assert.equal((await app.agentState()).info.args.sessionPath, path)
+      })
+
+      await step('a ready cached conversation opens without a pending layer', async () => {
+        await opening.waitFor({ state: 'hidden' })
+        const observation = await app.page.evaluateHandle(() => {
+          const probe = { openingSeen: false, observer: null }
+          probe.observer = new MutationObserver((changes) => {
+            for (const change of changes) {
+              for (const node of change.addedNodes) {
+                if (
+                  node instanceof Element &&
+                  (node.matches('[data-session-opening]') ||
+                    node.querySelector('[data-session-opening]'))
+                ) {
+                  probe.openingSeen = true
+                }
+              }
+            }
+          })
+          probe.observer.observe(document.body, { subtree: true, childList: true })
+          return probe
+        })
+        try {
+          await app.test('openSession', paths.get('Mouse open'), 'pi')
+          await answer('Mouse open').waitFor()
+          assert.equal(await observation.evaluate((probe) => probe.openingSeen), false)
+        } finally {
+          await observation.evaluate((probe) => probe.observer.disconnect())
+          await observation.dispose()
+        }
+      })
+
       await step(
         'the rename delay keeps deliberate sidebar focus through native opening',
         async () => {
@@ -511,6 +677,7 @@ await runSuite(
         await app.composer()
       })
       console.log(`      actual UI acknowledgment: ${JSON.stringify(metrics)}`)
+      assert.equal(server.requests.length, 0, 'command probes do not send a model prompt')
       await mkdir(OUTPUT_DIRECTORY, { recursive: true })
       await writeFile(
         join(OUTPUT_DIRECTORY, 'metrics.json'),
@@ -520,5 +687,8 @@ await runSuite(
       await app.app.evaluate(() => globalThis.__restoreOpenFeedback?.())
     }
   },
-  { launch: { outDir: OUTPUT_DIRECTORY, exe: process.env.QA_PACKAGED_EXE } }
+  {
+    agentDir: { files: { 'extensions/qa-opening-shadow.ts': SHADOW_COMMAND_EXTENSION } },
+    launch: { outDir: OUTPUT_DIRECTORY, exe: process.env.QA_PACKAGED_EXE }
+  }
 )

@@ -48,16 +48,30 @@ export async function adoptEngines(
  */
 async function rehydrate(agentId: string): Promise<void> {
   const store = useAgents.getState()
+  const initial = store.agents[agentId]
   const [state, messages] = await Promise.all([
     rpc(agentId, { type: 'get_state' }),
     rpc(agentId, { type: 'get_messages' })
   ])
+  const current = useAgents.getState().agents[agentId]
+  if (
+    !current ||
+    current.engineGeneration !== initial?.engineGeneration ||
+    current.snapshotRevision !== initial?.snapshotRevision
+  )
+    return
   if (!state.isStreaming) {
     await store.refresh(agentId)
     return
   }
   const { entries, tools } = hydrateMessages(messages.messages, false)
-  store.patchAgent(agentId, { phase: 'running', entries, tools })
+  store.patchAgent(agentId, {
+    phase: 'running',
+    entries,
+    tools,
+    session: state,
+    historyLoaded: true
+  })
   const unsubscribe = useAgents.subscribe((next) => {
     if (next.agents[agentId]?.phase === 'running') return
     unsubscribe()

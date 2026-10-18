@@ -5,9 +5,11 @@ import { cn } from '../../lib/cn'
 import { invoke, on, platform } from '../../lib/ipc'
 import { useHotkey } from '../../lib/keybindings'
 import { lazyWithPreload } from '../../lib/lazy-with-preload'
+import { samePath } from '../../lib/paths'
 import { duration, ease } from '../../lib/motion'
 import { useWindowFocused } from '../../lib/window-focus'
 import { useAgents } from '../../store/agents'
+import { hasReadyHistory } from '../../store/agent-state'
 import { useApp } from '../../store/app'
 import { Button, EmptyState, Sheet, Shimmer } from '../../ui'
 import { Composer } from '../composer'
@@ -15,6 +17,7 @@ import type { OpeningFocus } from '../composer/focus'
 import { SessionHeader, Transcript } from '../chat'
 import { TranscriptBoundary } from '../chat/TranscriptBoundary'
 import { restoreOpenSessions, SessionSidebar } from '../sessions'
+import { agentSessionFile } from '../sessions/model'
 // Boot-time side effects of the lazily loaded settings feature: palette actions + settings change listeners.
 import '../settings/actions'
 import '../settings/store'
@@ -152,13 +155,29 @@ function CenterPane() {
   const empty = useAgents((s) => (agentId ? (s.agents[agentId]?.entries.length ?? 0) === 0 : true))
   const workspace = useApp((s) => s.prefs.activeWorkspace)
   const activationRevision = useAgents((state) => state.activationRevision)
-  const spawning = useSessionOpenings((state) => (state.activations[activationRevision] ?? 0) > 0)
+  const pendingOpening = useSessionOpenings(
+    (state) => (state.activations[activationRevision] ?? 0) > 0
+  )
+  const target = useSessionOpenings((state) =>
+    state.focusIntent?.revision === activationRevision ? state.focusIntent.target : null
+  )
+  const requestedHistoryReady = useAgents((state) => {
+    const agent = agentId ? state.agents[agentId] : undefined
+    return !!(
+      target &&
+      agent &&
+      hasReadyHistory(agent) &&
+      agent.info.engine === target.engine &&
+      samePath(agentSessionFile(agent), target.path)
+    )
+  })
+  const spawning = pendingOpening && !requestedHistoryReady
   const focusOwner = useSessionOpenings((state) =>
     state.focusIntent?.revision === activationRevision ? state.focusIntent.owner : undefined
   )
   const completedFocus = useSessionOpenings((state) => {
     const intent = state.focusIntent
-    return intent && (intent.revision !== activationRevision || (!spawning && intent.started))
+    return intent && (intent.revision !== activationRevision || (!pendingOpening && intent.started))
       ? intent.revision
       : null
   })

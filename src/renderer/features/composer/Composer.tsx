@@ -24,7 +24,7 @@ import { getEffectiveSetting } from '../settings/effective'
 import { FleetPill } from '../subagents'
 import { TodoDock } from '../tools'
 import { supportsEngineCommand, useEngineCapabilities } from '../engines/registry'
-import { findBuiltin, isBuiltinAvailable, matchBuiltin } from './builtins'
+import { findBuiltin, matchBuiltin, resolveBuiltinDispatch } from './builtins'
 import { useComposerAttachments } from './attachments'
 import { useCommandHints } from './command-hints'
 import { promptHistory, pushHistory, useDraft, useDrafts, type DraftPatch } from './drafts'
@@ -267,15 +267,10 @@ export function Composer({ agentId, opening }: { agentId: string; opening: Openi
     setDismissedAt(null)
 
     const builtin = matchBuiltin(value, engine)
-    if (builtin && !commands.some((c) => c.name === builtin.command.name)) {
-      if (!isBuiltinAvailable(builtin.command, engine)) {
-        toast({
-          level: 'info',
-          title: `/${builtin.command.name} is unavailable in ${ENGINE_LABELS[engine]}`
-        })
-        return
-      }
-      if (override === undefined) useDrafts.getState().clear(agentId)
+    const dispatch = builtin ? resolveBuiltinDispatch(agentId, builtin.command) : 'native'
+    if (dispatch === 'blocked') return
+    if (builtin && dispatch === 'app') {
+      useDrafts.getState().clear(agentId)
       pushHistory(value)
       await builtin.command.run(agentId, builtin.args)
       return
@@ -312,7 +307,7 @@ export function Composer({ agentId, opening }: { agentId: string; opening: Openi
       toast({ level: 'info', title: `This message cannot be sent to ${ENGINE_LABELS[engine]} yet` })
       return
     }
-    if (override === undefined) useDrafts.getState().clear(agentId)
+    useDrafts.getState().clear(agentId)
     pushHistory(value)
     try {
       await useAgents.getState().prompt(agentId, value, {
@@ -402,7 +397,6 @@ export function Composer({ agentId, opening }: { agentId: string; opening: Openi
       return
     }
     void submit('steer', `/${slash.name}`)
-    useDrafts.getState().clear(agentId)
   }
 
   // ─── Escape twice: stop a run, or the doubleEscapeAction setting on an empty idle editor ──────

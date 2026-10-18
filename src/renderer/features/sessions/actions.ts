@@ -15,13 +15,15 @@ import { rpc } from '../../lib/engine'
 import { invoke } from '../../lib/ipc'
 import { normalizePath, samePath } from '../../lib/paths'
 import { REVEAL_LABEL, TRASH_NAME } from '../../lib/platform-copy'
-import { useAgents } from '../../store/agents'
+import { hasReadyHistory } from '../../store/agent-state'
+import { ensureAgentHistory, useAgents } from '../../store/agents'
 import { useApp, workspaceEngine } from '../../store/app'
 import { toast } from '../../ui'
 import { setDraftText } from '../composer'
 import {
   newSession,
   requestSessionActivation,
+  setSessionOpeningTarget,
   spawnAgent,
   withSessionOpening
 } from '../shell/workspace'
@@ -39,7 +41,7 @@ function fail(title: string, error: unknown): void {
 }
 
 /** Bring an open agent to the front (and its workspace with it). */
-export function activateAgent(agentId: string, activationRevision?: number): void {
+export async function activateAgent(agentId: string, activationRevision?: number): Promise<void> {
   const store = useAgents.getState()
   const agent = store.agents[agentId]
   if (
@@ -48,8 +50,19 @@ export function activateAgent(agentId: string, activationRevision?: number): voi
   ) {
     return
   }
-  store.setActive(agentId, activationRevision)
-  focusWorkspace(agent.info.cwd)
+  if (agent.status === 'ready' && !hasReadyHistory(agent)) {
+    const revision = activationRevision ?? requestSessionActivation()
+    await withSessionOpening(revision, async () => {
+      const path = agentSessionFile(agent)
+      if (path) setSessionOpeningTarget(revision, agent.info.engine, path)
+      store.setActive(agentId, revision)
+      focusWorkspace(agent.info.cwd)
+      await ensureAgentHistory(agentId)
+    }).catch((error) => fail('Could not open the session', error))
+  } else {
+    store.setActive(agentId, activationRevision)
+    focusWorkspace(agent.info.cwd)
+  }
 }
 
 /** The open agent currently on this session file, if any. */
@@ -77,7 +90,7 @@ async function startAgent(
 ): Promise<string | null> {
   try {
     const id = await spawnAgent(args, { activationRevision })
-    activateAgent(id, activationRevision)
+    await activateAgent(id, activationRevision)
     return id
   } catch (error) {
     fail(failure, error)
@@ -105,6 +118,15 @@ export async function openSessionFile(
   path: string,
   options: OpenSessionOptions = {}
 ): Promise<string | null> {
+  const knownEngine = options.engine
+  const cached = knownEngine ? findAgentForFile(path, knownEngine) : undefined
+  if (knownEngine && cached && hasReadyHistory(useAgents.getState().agents[cached])) {
+    const activationRevision =
+      options.activationRevision ?? useAgents.getState().requestActivation()
+    await activateAgent(cached, activationRevision)
+    setSessionOpeningTarget(activationRevision, knownEngine, path)
+    return cached
+  }
   const activationRevision = options.activationRevision ?? requestSessionActivation()
   return withSessionOpening(activationRevision, async () => {
     let engine = options.engine
@@ -116,21 +138,22 @@ export async function openSessionFile(
         return null
       }
     }
-    const open = findAgentForFile(path, engine)
-    if (open) {
-      activateAgent(open, activationRevision)
-      return open
-    }
+    setSessionOpeningTarget(activationRevision, engine, path)
     const key = `${engine}:${normalizePath(path)}`
     let opening = pendingOpens.get(key)
     if (!opening) {
+      const open = findAgentForFile(path, engine)
+      if (open) {
+        await activateAgent(open, activationRevision)
+        return open
+      }
       opening = resumeSessionFile(path, { ...options, engine, activationRevision }).finally(() =>
         pendingOpens.delete(key)
       )
       pendingOpens.set(key, opening)
     }
     const agentId = await opening
-    if (agentId) activateAgent(agentId, activationRevision)
+    if (agentId) await activateAgent(agentId, activationRevision)
     return agentId
   })
 }

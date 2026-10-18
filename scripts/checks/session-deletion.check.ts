@@ -85,6 +85,7 @@ await check(
                       export const newSession = (...args) => globalThis.newSession(...args);
                       export const spawnAgent = (...args) => globalThis.createSession(...args);
                       export const requestSessionActivation = () => globalThis.reserveActivation();
+                      export const setSessionOpeningTarget = () => {};
                       export const withSessionOpening = async (_revision, open) => open();
                     `
             }))
