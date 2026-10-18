@@ -159,6 +159,13 @@ async function runPackagedChecks() {
     const system = process.platform === 'win32' ? 'Windows' : 'OS'
     console.log(`  ✓ packaged native helper loads with only the ${system} system PATH`)
     console.log(`    SHA-256 ${helperHash}`)
+    const license = await readFile(join(about.resources, 'LICENSE.md'), 'utf8')
+    assert.match(
+      license,
+      /^# Vengeance License 1\.0\r?\n/,
+      'The package must ship the Vengeance License'
+    )
+    console.log('  ✓ packaged app ships LICENSE.md')
 
     await checkEngine(
       application,

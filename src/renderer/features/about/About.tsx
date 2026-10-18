@@ -69,7 +69,9 @@ export function AboutDialog() {
         ))}
       </dl>
       <p className="mt-3.5 mb-1 text-sm leading-relaxed text-fg-3">
-        Runs on the open-source Engine by Earendil Works (MIT).
+        © 2026 LuciferMornens, under the Vengeance License:{' '}
+        <span className="whitespace-nowrap">github.com/LuciferMornens/vengeance</span>. Runs on the open-source
+        Engine by Earendil Works and Engine 2 by Prime Intellect (both MIT).
       </p>
     </Dialog>
   )

@@ -16,7 +16,7 @@
   "bugs": {
     "url": "https://github.com/LuciferMornens/vengeance/issues"
   },
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE.md",
   "private": true,
   "desktopName": "vengeance.desktop",
   "packageManager": "npm@11.17.0",

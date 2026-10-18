@@ -1,6 +1,6 @@
 appId: com.vengeance.app
 productName: Vengeance
-copyright: Copyright © Vengeance
+copyright: Copyright © 2026 LuciferMornens
 directories:
   output: release
   buildResources: build
@@ -36,6 +36,9 @@ extraResources:
       - vengeance-prime-auth.exe
   - from: resources/prime-auth/THIRD-PARTY-NOTICES.txt
     to: prime-auth/THIRD-PARTY-NOTICES.txt
+  # Every copy keeps the Vengeance License (LICENSE.md, section 3).
+  - from: LICENSE.md
+    to: LICENSE.md
 # Each platform packages natively on its own host, one arch per run (the staged engines are host builds).
 # Package with scripts/dist.mjs: it builds these targets for the host arch (pacman on x64 only) and gives
 # deb, rpm and pacman their own runs (see there).
