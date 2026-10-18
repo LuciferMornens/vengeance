@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CheckCircle2,
   Cpu,
@@ -8,6 +8,7 @@ import {
   RotateCcw,
   ScrollText
 } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import { ENGINE_LABELS, type EngineId, type EngineLocationInfo } from '@shared/api/engine'
 import { cn } from '../../../lib/cn'
 import { basename } from '../../../lib/format'
@@ -36,12 +37,26 @@ const SOURCE_LABEL: Record<NonNullable<EngineLocationInfo['source']>, string> = 
 }
 
 function Diagnostics({ engine }: { engine: EngineId }) {
-  const order = useAgents((s) => s.order)
-  const byId = useAgents((s) => s.agents)
-  const agents = order
-    .map((id) => byId[id])
-    .filter((agent) => agent !== undefined)
-    .filter((agent) => agent.info.engine === engine)
+  const entries = useAgents(
+    useShallow((s) => {
+      const out: string[] = []
+      for (const id of s.order) {
+        const agent = s.agents[id]
+        if (agent && agent.info.engine === engine) {
+          out.push(`${agent.id}\n${agentOwnTitle(agent) || basename(agent.info.cwd)}`)
+        }
+      }
+      return out
+    })
+  )
+  const agents = useMemo(
+    () =>
+      entries.map((entry) => {
+        const i = entry.indexOf('\n')
+        return { id: entry.slice(0, i), label: entry.slice(i + 1) }
+      }),
+    [entries]
+  )
   const [agentId, setAgentId] = useState<string | undefined>(agents[0]?.id)
   const [log, setLog] = useState<string | null>(null)
   useEffect(() => {
@@ -83,7 +98,7 @@ function Diagnostics({ engine }: { engine: EngineId }) {
         onValueChange={setAgentId}
         options={agents.map((a) => ({
           value: a.id,
-          label: agentOwnTitle(a) || basename(a.info.cwd)
+          label: a.label
         }))}
       />
     </Row>

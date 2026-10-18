@@ -15,9 +15,14 @@ const SCRIPT = [
 /** Process kind from its image and Chromium `--type` switch: browser (main), gpu, renderer, utility:<sub>, engine… */
 export function processKind(name, commandLine) {
   const image = name.toLowerCase()
-  if (image === 'node.exe') return 'engine'
+  if (image === 'node.exe' || /--mode\s+rpc\b/.test(commandLine)) return 'engine'
   if (image === 'prime-agent.exe') return 'engine2'
   if (image === 'conhost.exe') return 'conhost'
+  if (/\bprovider-host\.js\b/.test(commandLine)) {
+    return /"?role"?\s*:\s*"?extensions"?/.test(commandLine)
+      ? 'utility:vengeance.provider-host'
+      : 'utility:vengeance.sdk-host'
+  }
   const type = /--type=([\w-]+)/.exec(commandLine)?.[1]
   if (!type) return 'browser'
   if (type === 'utility')
@@ -103,6 +108,11 @@ export async function sampleTree(rootPid) {
       count: engines.length,
       privateWs: sum(engines, 'privateWs'),
       cpuMs: sum(engines, 'cpuMs')
+    },
+    total: {
+      count: rows.length,
+      privateWs: sum(rows, 'privateWs'),
+      cpuMs: sum(rows, 'cpuMs')
     }
   }
 }

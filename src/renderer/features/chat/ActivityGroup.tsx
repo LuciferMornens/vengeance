@@ -172,6 +172,10 @@ function MultiGroup({ agentId, calls, phases, tools, pinnedIds, labelFor }: Mult
       : calls.filter((call) => pinnedShown.includes(call.id))
   const morePinned = !open ? pinnedIds.size - pinnedShown.length : 0
   const total = durations.reduce((a, b) => a + b, 0)
+  const summary = useMemo(
+    () => summarizeCalls(calls, tools, active, labelFor),
+    [calls, tools, active, labelFor]
+  )
 
   return (
     <div
@@ -204,7 +208,7 @@ function MultiGroup({ agentId, calls, phases, tools, pinnedIds, labelFor }: Mult
               active ? 'text-fg' : 'text-fg-2 group-hover/stack:text-fg'
             )}
           >
-            {summarizeCalls(calls, tools, active, labelFor)}
+            {summary}
           </span>
           {failed > 0 && (
             <span className="shrink-0 font-medium text-danger">· {failed} failed</span>

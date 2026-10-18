@@ -3,7 +3,7 @@
  * arguments), open sessions, models and thinking level (nested pages), settings sections and individual
  * settings, workspaces — plus the keyboard shortcut sheet.
  */
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Command } from 'cmdk'
 import { AnimatePresence, motion } from 'motion/react'
 import { Dialog as RDialog } from 'radix-ui'
@@ -262,6 +262,10 @@ function pillCenterX(): number {
 
 const PALETTE_W = 640
 
+function paletteLeft(): number {
+  return Math.min(Math.max(16, pillCenterX() - PALETTE_W / 2), window.innerWidth - PALETTE_W - 16)
+}
+
 /** The open palette's content. Mounted only while open, so nothing is rebuilt while it is closed (B5). */
 function PaletteContent({ onClose }: { onClose(): void }) {
   const page = usePalette((s) => s.page)
@@ -278,17 +282,22 @@ function PaletteContent({ onClose }: { onClose(): void }) {
 
   const entries = useRootEntries(actions)
   const byId = useMemo(() => new Map(entries.map((e) => [e.id, e])), [entries])
-  const searching = search.trim().length > 0
-  const recents =
-    page === 'root' && !searching ? recentIds.flatMap((id) => byId.get(id) ?? []).slice(0, 5) : []
-  const suggested =
-    page === 'root' && !searching
-      ? SUGGESTED.filter((id) => !recentIds.includes(id)).flatMap((id) => byId.get(id) ?? [])
-      : []
-  const pinned = new Set([...recents, ...suggested].map((e) => e.id))
-  const rest = searching
-    ? [...entries, ...(search.trim().length >= 2 ? settingsEntries(settingsEngine) : [])]
-    : entries.filter((e) => !pinned.has(e.id))
+  const trimmedLen = search.trim().length
+  const searching = trimmedLen > 0
+  const includeSettings = trimmedLen >= 2
+  const { recents, suggested, groupedRest } = useMemo(() => {
+    const rec =
+      page === 'root' && !searching ? recentIds.flatMap((id) => byId.get(id) ?? []).slice(0, 5) : []
+    const sug =
+      page === 'root' && !searching
+        ? SUGGESTED.filter((id) => !recentIds.includes(id)).flatMap((id) => byId.get(id) ?? [])
+        : []
+    const pinned = new Set([...rec, ...sug].map((e) => e.id))
+    const rest = searching
+      ? [...entries, ...(includeSettings ? settingsEntries(settingsEngine) : [])]
+      : entries.filter((e) => !pinned.has(e.id))
+    return { recents: rec, suggested: sug, groupedRest: groupEntries(rest) }
+  }, [page, searching, includeSettings, recentIds, byId, entries, settingsEngine])
   const selectedEntry = byId.get(selected.replace(/^(recent|suggested):/, ''))
 
   // Every page starts empty, except the one opened with a query (`/model son`): that query is used once.
@@ -418,7 +427,7 @@ function PaletteContent({ onClose }: { onClose(): void }) {
                   {renderList(suggested, 'suggested')}
                 </Command.Group>
               )}
-              {groupEntries(rest).map(([group, list]) => (
+              {groupedRest.map(([group, list]) => (
                 <Command.Group key={group} heading={group} className={groupClass}>
                   {renderList(list)}
                 </Command.Group>
@@ -514,8 +523,17 @@ export function CommandPalette() {
   const setOpen = useApp((s) => s.setPaletteOpen)
   const page = usePalette((s) => s.page)
   const setPage = usePalette((s) => s.setPage)
+  const [left, setLeft] = useState(paletteLeft)
   // Mounted from the first open on; it reads its open state from the palette store.
   const shortcutsLoaded = shortcutsSheet.useLoaded(usePalette((s) => s.shortcutsOpen))
+
+  useLayoutEffect(() => {
+    if (!open) return
+    const update = () => setLeft(paletteLeft())
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [open])
 
   useFallbackActions(COMPOSER_ACTIONS)
   useFallbackActions(PALETTE_ACTIONS)
@@ -586,10 +604,7 @@ export function CommandPalette() {
                   }}
                   transition={spring.snappy}
                   style={{
-                    left: Math.min(
-                      Math.max(16, pillCenterX() - PALETTE_W / 2),
-                      window.innerWidth - PALETTE_W - 16
-                    ),
+                    left,
                     width: PALETTE_W
                   }}
                   className="fixed top-[calc(var(--titlebar-h)+8px)] z-[var(--z-modal)] max-w-[calc(100vw-32px)] origin-top overflow-hidden rounded-lg bg-[var(--glass-strong)] shadow-elev-3 backdrop-blur-2xl backdrop-saturate-150"

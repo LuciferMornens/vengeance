@@ -31,8 +31,10 @@ function useBackgroundActivity(): ActivitySummary {
       let waiting = 0
       let firstWaiting: (typeof s.agents)[string] | undefined
       let firstRunning: (typeof s.agents)[string] | undefined
-      for (const agent of Object.values(s.agents)) {
-        if (agent.id === s.activeAgentId) continue
+      for (const id of s.order) {
+        if (id === s.activeAgentId) continue
+        const agent = s.agents[id]
+        if (!agent) continue
         const state = liveState(agent)
         if (state === 'waiting') {
           waiting++

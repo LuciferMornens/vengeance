@@ -130,7 +130,13 @@ export function isUnseenFailure(view: SubagentRunView, slice: SubagentsState): b
 
 const activeRank = (view: SubagentRunView): number => (view.needsDecision ? 0 : view.state === 'running' ? 1 : 2)
 
+const fleetCache = new WeakMap<SubagentsState, SubagentFleet>()
+const resumedIdsCache = new WeakMap<SubagentsState['runs'], ReadonlySet<string>>()
+const tabAlertCache = new WeakMap<SubagentsState, 'warning' | 'danger' | null>()
+
 export function fleetOf(slice: SubagentsState): SubagentFleet {
+  const cached = fleetCache.get(slice)
+  if (cached) return cached
   const views = Object.values(slice.runs).map((record) => runView(record, slice))
   const active = views
     .filter((view) => ACTIVE_STATES.has(view.state) || view.needsDecision)
@@ -139,16 +145,41 @@ export function fleetOf(slice: SubagentsState): SubagentFleet {
     .filter((view) => !active.includes(view))
     .sort((a, b) => (b.endedAt ?? b.startedAt ?? 0) - (a.endedAt ?? a.startedAt ?? 0))
   const needsDecision = Object.values(slice.requests).filter((entry) => entry.state !== 'answered').length
-  return { active, recent: finished.slice(0, MAX_RECENT), all: [...active, ...finished], needsDecision }
+  const fleet: SubagentFleet = {
+    active,
+    recent: finished.slice(0, MAX_RECENT),
+    all: [...active, ...finished],
+    needsDecision
+  }
+  fleetCache.set(slice, fleet)
+  return fleet
 }
 
 /** Ids of runs a later run revived (the target of some run's `resumedFrom`). */
 function resumedRunIds(runs: SubagentsState['runs']): ReadonlySet<string> {
+  const cached = resumedIdsCache.get(runs)
+  if (cached) return cached
   const ids = new Set<string>()
   for (const record of Object.values(runs)) {
     if (record.resumedFrom) ids.add(record.resumedFrom)
   }
+  resumedIdsCache.set(runs, ids)
   return ids
+}
+
+function agentsTabAlertOf(slice: SubagentsState): 'warning' | 'danger' | null {
+  if (tabAlertCache.has(slice)) return tabAlertCache.get(slice) ?? null
+  let alert: 'warning' | 'danger' | null = null
+  if (Object.values(slice.requests).some((entry) => entry.state !== 'answered')) {
+    alert = 'warning'
+  } else {
+    const failed = Object.values(slice.runs).some((record) =>
+      isUnseenFailure(runView(record, slice), slice)
+    )
+    if (failed) alert = 'danger'
+  }
+  tabAlertCache.set(slice, alert)
+  return alert
 }
 
 export function useSubagentsSlice(agentId: string): SubagentsState | undefined {
@@ -179,10 +210,7 @@ export function useResumedRunIds(agentId: string): ReadonlySet<string> {
 export function useAgentsTabAlert(agentId: string | undefined): 'warning' | 'danger' | null {
   return useAgents((s) => {
     const slice = agentId ? s.agents[agentId]?.subagents : undefined
-    if (!slice) return null
-    if (Object.values(slice.requests).some((entry) => entry.state !== 'answered')) return 'warning'
-    const failed = Object.values(slice.runs).some((record) => isUnseenFailure(runView(record, slice), slice))
-    return failed ? 'danger' : null
+    return slice ? agentsTabAlertOf(slice) : null
   })
 }
 

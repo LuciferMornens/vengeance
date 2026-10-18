@@ -73,7 +73,13 @@ export async function readFileBounded(path: string, options: ReadFileOptions | u
   }
 }
 
-const fileCache = new Map<string, { at: number; files: Promise<string[]> }>()
+interface CachedWorkspaceFile {
+  path: string
+  lower: string
+  baseOffset: number
+}
+
+const fileCache = new Map<string, { at: number; files: Promise<CachedWorkspaceFile[]> }>()
 
 async function gitFiles(cwd: string): Promise<string[]> {
   const stdout = await runGit(['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
@@ -120,13 +126,21 @@ async function walkFiles(cwd: string): Promise<string[]> {
   return files
 }
 
-function workspaceFiles(cwd: string): Promise<string[]> {
+function workspaceFiles(cwd: string): Promise<CachedWorkspaceFile[]> {
   const cached = fileCache.get(cwd)
   if (cached && Date.now() - cached.at < CACHE_MS) return cached.files
   const files = gitFiles(cwd)
     .catch(() => fdFiles(cwd))
     .catch(() => walkFiles(cwd))
-    .then((list) => list.map((f) => f.split(sep).join('/')))
+    .then((list) =>
+      list
+        .map((f) => f.split(sep).join('/'))
+        .sort((a, b) => a.localeCompare(b))
+        .map((path) => {
+          const lower = path.toLowerCase()
+          return { path, lower, baseOffset: lower.lastIndexOf('/') + 1 }
+        })
+    )
   fileCache.set(cwd, { at: Date.now(), files })
   files.catch(() => fileCache.delete(cwd))
   return files
@@ -154,15 +168,40 @@ export function fuzzyScore(path: string, query: string): number {
   return score * 4 - path.length * 0.1
 }
 
+function fuzzyScoreCached(file: CachedWorkspaceFile, needle: string): number {
+  const { path, lower: hay, baseOffset } = file
+  if (hay.startsWith(needle, baseOffset)) return 1000 - path.length
+  if (hay.indexOf(needle, baseOffset) !== -1) return 800 - path.length
+  if (hay.indexOf(needle) !== -1) return 600 - path.length
+  let score = 0
+  let run = 0
+  let from = 0
+  for (const ch of needle) {
+    const at = hay.indexOf(ch, from)
+    if (at === -1) return -1
+    run = at === from ? run + 1 : 0
+    const prev = at > 0 ? hay.charCodeAt(at - 1) : 0
+    const boundary = at === 0 || prev === 47 || prev === 45 || prev === 95 || prev === 46
+    score += 1 + run * 2 + (boundary ? 3 : 0)
+    from = at + 1
+  }
+  return score * 4 - path.length * 0.1
+}
+
 export async function listFiles(cwd: string, query: string, limit = 50): Promise<FileMatch[]> {
   const files = await workspaceFiles(resolve(cwd))
-  const trimmed = query.trim().replace(/\\/g, '/')
-  const matches: FileMatch[] = []
-  for (const path of files) {
-    const score = fuzzyScore(path, trimmed)
-    if (score >= 0) matches.push({ path, score })
+  const needle = query.trim().replace(/\\/g, '/').toLowerCase()
+  if (!needle) {
+    return files.slice(0, limit).map((file) => ({ path: file.path, score: 1 }))
   }
-  matches.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
+  const matches: FileMatch[] = []
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]!
+    const score = fuzzyScoreCached(file, needle)
+    if (score >= 0) matches.push({ path: file.path, score })
+  }
+  // `files` is pre-sorted by `path.localeCompare`, and V8's TimSort is stable, so ties preserve path order.
+  matches.sort((a, b) => b.score - a.score)
   return matches.slice(0, limit)
 }
 

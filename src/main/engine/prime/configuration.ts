@@ -119,6 +119,7 @@ async function dispatchPrimeSettings(
     case 'settings:snapshot':
       return primeSettingsSnapshot(...request.args)
     case 'settings:prewarm':
+    case 'settings:release':
       return
     case 'settings:set':
       return changed('settings', () => setPrimeSetting(...request.args, context.overridePath))

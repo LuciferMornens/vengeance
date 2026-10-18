@@ -493,11 +493,25 @@ export function startSessionsTracking(): void {
   })
   let phases = new Map<string, string>()
   let front = useAgents.getState().activeAgentId
-  useAgents.subscribe((state) => {
-    if (state.activeAgentId !== front) {
+  useAgents.subscribe((state, previous) => {
+    const activeChanged = state.activeAgentId !== front
+    if (activeChanged) {
       front = state.activeAgentId
       const cwd = front ? state.agents[front]?.info.cwd : undefined
       if (cwd) focusWorkspace(cwd)
+    }
+    if (!activeChanged && state.order === previous.order && state.agents === previous.agents) return
+    if (!activeChanged && state.order === previous.order) {
+      let phaseChanged = false
+      for (const id of state.order) {
+        const agent = state.agents[id]
+        if (agent === previous.agents[id]) continue
+        if ((agent?.phase ?? 'idle') !== (phases.get(id) ?? 'idle')) {
+          phaseChanged = true
+          break
+        }
+      }
+      if (!phaseChanged) return
     }
     const next = new Map<string, string>()
     const finished: string[] = []

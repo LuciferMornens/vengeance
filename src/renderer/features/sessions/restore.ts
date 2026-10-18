@@ -56,12 +56,19 @@ function startPersisting(): void {
   const { openSessions, activeSession } = useApp.getState().prefs
   persisted = JSON.stringify({ openSessions, activeSession })
   useAgents.subscribe((state, previous) => {
+    if (
+      state.activeAgentId === previous.activeAgentId &&
+      state.order === previous.order &&
+      state.agents === previous.agents
+    )
+      return
     const changed =
       state.activeAgentId !== previous.activeAgentId ||
       state.order !== previous.order ||
       state.order.some((id) => {
         const agent = state.agents[id]
         const before = previous.agents[id]
+        if (agent === before) return false
         return (
           agent?.info.cwd !== before?.info.cwd ||
           agent?.info.engine !== before?.info.engine ||

@@ -189,6 +189,21 @@ export class HostProcess {
     if (this.pending.size === 0 && !this.exited) this.scheduleIdleExit()
   }
 
+  /** Shorten the idle keep-alive window to `ms` from now (or after in-flight calls settle). */
+  trimIdle(ms: number): void {
+    if (this.exited) return
+    const nextMs = Math.min(this.idleMs, ms)
+    if (!this.busy) {
+      this.keepAliveUntil = Date.now() + ms
+      this.scheduleIdleExit()
+      return
+    }
+    this.keepAliveUntil = Math.min(this.keepAliveUntil, Date.now() + nextMs)
+    for (const pending of this.pending.values()) {
+      pending.keepAliveMs = Math.min(pending.keepAliveMs, nextMs)
+    }
+  }
+
   /** A deliberate stop: calls still running end with the `cancelled` text. */
   dispose(): void {
     if (this.exited) return

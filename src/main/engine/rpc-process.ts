@@ -5,7 +5,8 @@ import type {
   EngineEvent,
   RpcCommand,
   RpcExtensionUIResponse,
-  RpcResponse
+  RpcResponse,
+  RpcSessionState
 } from '@shared/engine-types'
 import { Emitter, defaultTimeout, type EngineHandle, type EngineHandleEvents, type SendOptions } from './handle'
 import type { EngineLocation } from './locate'
@@ -130,6 +131,7 @@ export class EngineProcess implements EngineHandle {
   private exitPromise: Promise<void> | null = null
   private _status: EngineStatus = 'starting'
   private _error: string | undefined
+  private initialState: RpcSessionState | null = null
 
   constructor(private readonly options: EngineProcessOptions) {}
 
@@ -151,6 +153,12 @@ export class EngineProcess implements EngineHandle {
 
   stderr(): string {
     return this.stderrBuffer.toString()
+  }
+
+  consumeInitialState(): RpcSessionState | null {
+    const state = this.initialState
+    this.initialState = null
+    return state
   }
 
   async start(): Promise<void> {
@@ -211,10 +219,14 @@ export class EngineProcess implements EngineHandle {
       this._error = response.error
       throw new EngineProcessError(`Engine failed to start: ${response.error}`, 'spawn')
     }
+    if (response.command === 'get_state') {
+      this.initialState = response.data
+    }
     if (this._status === 'starting') this.setStatus('ready')
   }
 
   send(command: RpcCommand, options: SendOptions = {}): Promise<RpcResponse> {
+    if (command.type !== 'get_commands') this.initialState = null
     const child = this.child
     if (!child || this._status === 'crashed' || this._status === 'exited' || this.stopping) {
       return Promise.reject(new EngineProcessError('Engine is not running', 'not-running'))

@@ -1,13 +1,25 @@
+import { useMemo } from 'react'
 import { cn } from '../../../lib/cn'
 import { useAgents } from '../../../store/agents'
 import { CodeView } from '../../../ui/CodeView'
 import { languageFromPath } from '../../../ui/highlight'
+import { useDisclosure, useToolsExpanded } from '../disclosure'
 import { PathChip, useDisplayPath } from '../PathChip'
 import { registerToolRenderer, type ToolRendererProps } from '../registry'
 import { DetailNote, RowDetail, ShowMore, ToolRow, usePreviewExpanded } from '../ToolRow'
-import { fileErrorReason, isActive, lineCount, num, payloadImages, payloadText, resultPayload, splitTrailingNotes, str, toolPhase } from '../tool-utils'
+import { fileErrorReason, isActive, num, payloadImages, payloadText, resultPayload, splitTrailingNotes, str, toolPhase } from '../tool-utils'
 
 const PREVIEW_LINES = 60
+
+function countLines(text: string): number {
+  if (!text) return 0
+  const end = text.endsWith('\n') ? text.length - 1 : text.length
+  let lines = 1
+  for (let i = 0; i < end; i++) {
+    if (text.charCodeAt(i) === 10) lines++
+  }
+  return lines
+}
 
 /** "L12–80" from offset/limit and the returned content (or the engine's "Showing lines" note). */
 function lineRange(offset: number | undefined, returned: number, notes: string[]): string | null {
@@ -32,15 +44,20 @@ function ReadRow({ agentId, call, execution }: ToolRendererProps) {
   const relative = useDisplayPath(agentId, path)
   const offset = num(call.arguments.offset)
   const payload = resultPayload(execution)
-  const { body, notes } = splitTrailingNotes(payloadText(payload))
-  const images = payloadImages(payload)
+  const { body, notes } = useMemo(() => splitTrailingNotes(payloadText(payload)), [payload])
+  const images = useMemo(() => payloadImages(payload), [payload])
   const failed = phase === 'error'
   const imageOnly = images.length > 0 && /^Read image file/.test(body.trim())
-  const returned = failed || imageOnly ? 0 : lineCount(body)
-  const range = lineRange(offset, returned, notes)
+  const returned = useMemo(() => (failed || imageOnly ? 0 : countLines(body)), [failed, imageOnly, body])
+  const range = useMemo(() => lineRange(offset, returned, notes), [offset, returned, notes])
+  const toolsExpanded = useToolsExpanded()
+  const [open] = useDisclosure(`tool:${call.id}`, toolsExpanded)
   const [expanded, setExpanded] = usePreviewExpanded('content')
   const folded = !expanded && returned > PREVIEW_LINES + 10
-  const shown = folded ? body.split('\n').slice(0, PREVIEW_LINES).join('\n') : body
+  const shown = useMemo(() => {
+    if (!open) return ''
+    return folded ? body.split('\n').slice(0, PREVIEW_LINES).join('\n') : body
+  }, [open, folded, body])
   const thumb = images[0]
   return (
     <ToolRow

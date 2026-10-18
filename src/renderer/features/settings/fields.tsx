@@ -22,7 +22,7 @@ import {
   ModelThinkingLevelsEditor
 } from './editors'
 import { Group, KeyHint, Row } from './layout'
-import { activeCwd, useResolved, useSettings, type ResolvedSetting } from './store'
+import { activeCwd, resolveSetting, useResolved, useSettings, type ResolvedSetting } from './store'
 import { settingEffect } from './values'
 
 /** Schema-driven rows: every engine setting renders through SettingField. */
@@ -158,9 +158,17 @@ function usePlaceholder(
   resolved: ResolvedSetting,
   scope: string
 ): string | number | undefined {
+  const isNumber = def.control.kind === 'number'
   // A default that names another setting ("HTTP idle timeout") shows that setting's current value.
-  const linked = SETTINGS.find((s) => s.label === def.defaultLabel && s.control.kind === 'number')
-  const linkedValue = useResolved(linked?.key ?? def.key).value
+  const linked =
+    isNumber && def.defaultLabel
+      ? SETTINGS.find((s) => s.label === def.defaultLabel && s.control.kind === 'number')
+      : undefined
+  const linkedKey = linked?.key
+  const linkedValue = useSettings((s) =>
+    linkedKey ? resolveSetting(s.snapshot, s.scope, linkedKey, s.engine).value : undefined
+  )
+  if (!isNumber) return undefined
   if (scope === 'project' && typeof resolved.globalValue === 'number') return resolved.globalValue
   if (typeof def.default === 'number') return def.default
   if (def.key in THINKING_BUDGET_DEFAULTS) return THINKING_BUDGET_DEFAULTS[def.key]

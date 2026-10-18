@@ -70,6 +70,11 @@ export function prewarmSdkHost(override: string | null): void {
   )
 }
 
+/** Settings closed: shorten the interactive keep-alive window so an idle host exits promptly. */
+export function releaseSdkHost(): void {
+  host?.trimIdle(1_500)
+}
+
 /** Stop the host (app quit). */
 export function disposeSdkHost(): void {
   host?.dispose()

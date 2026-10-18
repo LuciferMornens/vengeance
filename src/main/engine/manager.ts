@@ -29,10 +29,7 @@ import type { SubagentInspectReply, SubagentInspectRequest } from '@shared/subag
 import { bridgeLoadFailed, bridgeTimeout, callBridge } from './bridge'
 import type { EngineHandle } from './handle'
 import { locateEngine, type EngineLocation } from './locate'
-import { MockEngineProcess } from './mock'
-import { readMockHandoff } from './mock-handoff'
 import { EngineProcess } from './rpc-process'
-import { PrimeMockEngineProcess } from './prime/mock'
 import { asRecord, stringValue } from './prime/transport'
 import { requestSessionTree } from './session-tree'
 import { prepareEngineAttachment } from './session-attachment'
@@ -545,8 +542,10 @@ export class EngineManager {
   }
 
   async mockPlay(agentId: string, args: MockPlayArgs): Promise<void> {
+    if (!this.options.mock) throw new Error('mock:play is only available in mock mode')
     await this.operation(agentId, async (agent) => {
       const handle = agent.handle
+      const { MockEngineProcess } = await import('./mock')
       if (!(handle instanceof MockEngineProcess))
         throw new Error('mock:play is only available in mock mode')
       await handle.play(args)
@@ -581,30 +580,35 @@ export class EngineManager {
         args: info.args,
         executablePath: this.options.engineOverridePath('prime')
       })
+    } else if (location) {
+      handle = new EngineProcess({
+        location,
+        cwd: info.args.cwd,
+        args: buildEngineArgs(info.args, bridgePath),
+        env: {
+          ...(bridgePath ? this.options.bridgeEnv?.() : undefined),
+          ...info.args.launch?.env
+        }
+      })
     } else {
-      const history = this.options.mock
-        ? await readMockHandoff(info.args.sessionPath, info.engine)
-        : undefined
-      handle = location
-        ? new EngineProcess({
-            location,
-            cwd: info.args.cwd,
-            args: buildEngineArgs(info.args, bridgePath),
-            env: {
-              ...(bridgePath ? this.options.bridgeEnv?.() : undefined),
-              ...info.args.launch?.env
-            }
-          })
-        : info.engine === 'prime'
-          ? new PrimeMockEngineProcess(info.args, undefined, history)
-          : new MockEngineProcess(
-              info.args,
-              {
-                ...this.options.bridgeEnv?.(),
-                ...info.args.launch?.env
-              },
-              history
-            )
+      const { readMockHandoff } = await import('./mock-handoff')
+      const history = await readMockHandoff(info.args.sessionPath, info.engine)
+      if (info.engine === 'prime') {
+        const { PrimeMockEngineProcess } = await import('./prime/mock')
+        if (this.agents.get(info.agentId) !== agent) return
+        handle = new PrimeMockEngineProcess(info.args, undefined, history)
+      } else {
+        const { MockEngineProcess } = await import('./mock')
+        if (this.agents.get(info.agentId) !== agent) return
+        handle = new MockEngineProcess(
+          info.args,
+          {
+            ...this.options.bridgeEnv?.(),
+            ...info.args.launch?.env
+          },
+          history
+        )
+      }
     }
     agent.handle = handle
     info.status = 'starting'
@@ -740,8 +744,16 @@ export class EngineManager {
     const handle = this.requireHandle(agent)
     agent.info.nativeAgentId = handle.nativeAgentId
     agent.info.runtime = handle.runtime
+    const initialState = handle.consumeInitialState?.() ?? null
     const [state, commands] = await Promise.all([
-      handle.send({ type: 'get_state' }),
+      initialState
+        ? Promise.resolve<RpcResponse>({
+            type: 'response',
+            command: 'get_state',
+            success: true,
+            data: initialState
+          })
+        : handle.send({ type: 'get_state' }),
       handle.send({ type: 'get_commands' })
     ])
     if (state.success && state.command === 'get_state') {

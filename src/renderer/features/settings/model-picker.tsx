@@ -75,10 +75,13 @@ export function ModelPicker({
   const { catalog, loading } = useCatalog()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const selected = catalog?.models.find((m) => modelKey(m) === value)
+  const selected = useMemo(
+    () => (value ? catalog?.models.find((m) => modelKey(m) === value) : undefined),
+    [catalog, value]
+  )
 
   const groups = useMemo(() => {
-    if (!catalog) return []
+    if (!open || !catalog) return []
     const names = new Map(catalog.providers.map((p) => [p.id, providerName(p)]))
     const byProvider = new Map<string, ModelInfo[]>()
     for (const m of catalog.models) {
@@ -96,7 +99,7 @@ export function ModelPicker({
         models
       }))
       .sort((a, b) => Number(b.available) - Number(a.available) || a.name.localeCompare(b.name))
-  }, [catalog, availableOnly, exclude])
+  }, [open, catalog, availableOnly, exclude])
 
   return (
     <RPopover.Root

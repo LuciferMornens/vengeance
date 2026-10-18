@@ -1,5 +1,5 @@
 import './markdown.css'
-import { memo, type ReactNode } from 'react'
+import { memo, useMemo, type ReactNode } from 'react'
 import { cn } from '../lib/cn'
 import { CopyButton } from './CopyButton'
 import { languageLabel, resolveLanguage, useHighlight, type CodeToken } from './highlight'
@@ -51,8 +51,36 @@ export const CodeView = memo(function CodeView({
   lineClassName
 }: CodeViewProps) {
   const tokens = useHighlight(code, lang, highlight)
-  const lines = code.replace(/\n$/, '').split('\n')
-  const gutterWidth = `${String(startLine + lines.length - 1).length + 1}ch`
+  const simple = !lineNumbers && !lineClassName
+  const trimmed = useMemo(() => code.replace(/\n$/, ''), [code])
+  const flat = useMemo(() => {
+    if (!simple || !tokens) return null
+    const runs: CodeToken[] = []
+    for (let i = 0; i < tokens.length; i++) {
+      if (i > 0) {
+        const last = runs[runs.length - 1]
+        if (last && !last.className) last.content += '\n'
+        else runs.push({ content: '\n' })
+      }
+      const line = tokens[i]!
+      if (line.length === 0 && i === tokens.length - 1) {
+        const last = runs[runs.length - 1]
+        if (last && !last.className) last.content += '\u200b'
+        else runs.push({ content: '\u200b' })
+      }
+      for (const token of line) {
+        const last = runs[runs.length - 1]
+        if (last && last.className === token.className) {
+          last.content += token.content
+        } else {
+          runs.push({ content: token.content, className: token.className })
+        }
+      }
+    }
+    return runs
+  }, [simple, tokens])
+  const lines = useMemo(() => (simple ? [] : trimmed.split('\n')), [simple, trimmed])
+  const gutterWidth = simple ? undefined : `${String(startLine + lines.length - 1).length + 1}ch`
   return (
     <pre
       className={cn(
@@ -61,23 +89,29 @@ export const CodeView = memo(function CodeView({
         className
       )}
     >
-      {lines.map((line, i) => (
-        <div key={i} className={cn('flex', lineClassName)}>
-          {lineNumbers && (
-            <span
-              aria-hidden
-              className="shrink-0 pr-4 text-right text-fg-4 tabular select-none"
-              style={{ width: gutterWidth, minWidth: gutterWidth, boxSizing: 'content-box' }}
-            >
-              {startLine + i}
-            </span>
-          )}
-          <span className="min-w-0 flex-1">
-            <TokenLine tokens={tokens?.[i]} text={line} />
-            {line === '' && '\u200b'}
-          </span>
-        </div>
-      ))}
+      {simple
+        ? flat
+          ? <TokenLine tokens={flat} text={trimmed} />
+          : trimmed.endsWith('\n')
+            ? `${trimmed}\u200b`
+            : trimmed || '\u200b'
+        : lines.map((line, i) => (
+            <div key={i} className={cn('flex', lineClassName)}>
+              {lineNumbers && (
+                <span
+                  aria-hidden
+                  className="shrink-0 pr-4 text-right text-fg-4 tabular select-none"
+                  style={{ width: gutterWidth, minWidth: gutterWidth, boxSizing: 'content-box' }}
+                >
+                  {startLine + i}
+                </span>
+              )}
+              <span className="min-w-0 flex-1">
+                <TokenLine tokens={tokens?.[i]} text={line} />
+                {line === '' && '\u200b'}
+              </span>
+            </div>
+          ))}
     </pre>
   )
 })

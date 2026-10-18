@@ -108,27 +108,54 @@ let mermaidModule: Promise<MermaidModule> | null = null
 let mermaidTheme: string | null = null
 let renderQueue: Promise<unknown> = Promise.resolve()
 let renderCount = 0
+const MAX_MERMAID_CACHE = 64
 /** Rendered SVG (or null for a failed diagram) per theme + source: remounts and re-renders are free. */
 const svgCache = new Map<string, string | null>()
+
+function setCachedSvg(key: string, svg: string | null): void {
+  if (svgCache.has(key)) svgCache.delete(key)
+  else if (svgCache.size >= MAX_MERMAID_CACHE) {
+    const oldest = svgCache.keys().next().value
+    if (oldest !== undefined) svgCache.delete(oldest)
+  }
+  svgCache.set(key, svg)
+}
 
 function loadMermaid(): Promise<MermaidModule> {
   mermaidModule ??= import('mermaid').then((m) => m.default)
   return mermaidModule
 }
 
+const themeListeners = new Set<() => void>()
+let themeObserver: MutationObserver | null = null
+
+function subscribeDocumentTheme(onChange: () => void): () => void {
+  themeListeners.add(onChange)
+  if (!themeObserver) {
+    themeObserver = new MutationObserver(() => {
+      for (const listener of themeListeners) listener()
+    })
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme']
+    })
+  }
+  return () => {
+    themeListeners.delete(onChange)
+    if (themeListeners.size === 0 && themeObserver) {
+      themeObserver.disconnect()
+      themeObserver = null
+    }
+  }
+}
+
+function getDocumentTheme(): string {
+  return document.documentElement.dataset.theme ?? 'dark'
+}
+
 /** Current `data-theme` of <html> (dark/light), as a subscribable value. */
 function useDocumentTheme(): string {
-  return useSyncExternalStore(
-    (onChange) => {
-      const observer = new MutationObserver(onChange)
-      observer.observe(document.documentElement, {
-        attributes: true,
-        attributeFilter: ['data-theme']
-      })
-      return () => observer.disconnect()
-    },
-    () => document.documentElement.dataset.theme ?? 'dark'
-  )
+  return useSyncExternalStore(subscribeDocumentTheme, getDocumentTheme)
 }
 
 /** A color token as opaque hex, composited over `--code-bg` (Mermaid derives shades itself and cannot read CSS variables). */
@@ -223,7 +250,7 @@ function renderMermaid(code: string, theme: string): Promise<string | null> {
       (result) => result.svg,
       () => null
     )
-    svgCache.set(key, svg)
+    setCachedSvg(key, svg)
     return svg
   })
   renderQueue = job.catch(() => undefined)
@@ -281,47 +308,94 @@ const FENCE_CLOSED = /\n {0,3}(`{3,}|~{3,})\s*$/
 const MERMAID_FENCE = /(`{3,}|~{3,})\s*mermaid/
 
 /** `live` = streaming tail block, `messageLive` = its message is still streaming, `closed` = the tail's fence is complete. */
-function makeComponents(
-  live: boolean,
-  messageLive: boolean,
-  closed: boolean,
+interface MarkdownRenderState {
+  live: boolean
+  messageLive: boolean
+  closed: boolean
   mermaid: MermaidMode
-): Components {
-  return {
-    a: Link,
-    code: InlineCode,
-    pre: ({ children }) => {
-      const { code, lang } = codeOf(children)
-      const diagram =
-        lang === 'mermaid' &&
-        (mermaid === 'streaming' ? !live || closed : mermaid === 'final' && !messageLive)
-      return diagram ? (
-        <MermaidBlock code={code} />
-      ) : (
-        <CodeBlock code={code} lang={lang} live={live} />
-      )
-    },
-    table: Table,
-    input: TaskCheckbox,
-    img: Image
-  }
 }
 
-const componentCache = new Map<string, Components>()
+const MarkdownRenderContext = createContext<MarkdownRenderState>({
+  live: false,
+  messageLive: false,
+  closed: false,
+  mermaid: 'streaming'
+})
 
-function componentsFor(
-  live: boolean,
-  messageLive: boolean,
-  closed: boolean,
-  mermaid: MermaidMode
-): Components {
-  const key = `${live}:${messageLive}:${closed}:${mermaid}`
-  let components = componentCache.get(key)
-  if (!components) {
-    components = makeComponents(live, messageLive, closed, mermaid)
-    componentCache.set(key, components)
+function MarkdownPre({ children }: ComponentProps<'pre'>) {
+  const { live, messageLive, closed, mermaid } = useContext(MarkdownRenderContext)
+  const { code, lang } = codeOf(children)
+  const diagram =
+    lang === 'mermaid' &&
+    (mermaid === 'streaming' ? !live || closed : mermaid === 'final' && !messageLive)
+  return diagram ? (
+    <MermaidBlock code={code} />
+  ) : (
+    <CodeBlock code={code} lang={lang} live={live} />
+  )
+}
+
+const COMPONENTS: Components = {
+  a: Link,
+  code: InlineCode,
+  pre: MarkdownPre,
+  table: Table,
+  input: TaskCheckbox,
+  img: Image
+}
+
+const STANDALONE_FENCE_OPEN = /^(`{3,}|~{3,})([\w+#.-]*)[ \t]*$/
+
+function parseStandaloneFence(
+  source: string
+): { code: string; lang: string | null; closed: boolean } | null {
+  if (source.charCodeAt(0) !== 96 && source.charCodeAt(0) !== 126) return null
+  const firstNl = source.indexOf('\n')
+  const firstLine = (firstNl === -1 ? source : source.slice(0, firstNl)).replace(/\r$/, '')
+  const match = STANDALONE_FENCE_OPEN.exec(firstLine)
+  if (!match) return null
+  const fence = match[1]!
+  const fenceChar = fence[0]!
+  const lang = match[2] || null
+  if (firstNl === -1) return { code: '', lang, closed: false }
+  const body = source.slice(firstNl + 1)
+  const lastNl = body.lastIndexOf('\n')
+  const lastLine = (lastNl === -1 ? body : body.slice(lastNl + 1)).replace(/\r$/, '')
+  const prefix = lastNl === -1 ? '' : body.slice(0, lastNl)
+  // If any earlier line could close the fence, let ReactMarkdown parse it.
+  if (prefix.includes(fence)) return null
+  const trimmedLast = lastLine.trim()
+  const isClosed =
+    trimmedLast.length >= fence.length &&
+    trimmedLast[0] === fenceChar &&
+     lastLine.startsWith(trimmedLast) &&
+    /^(`+|~+)$/.test(trimmedLast)
+  if (isClosed) {
+    return { code: prefix.replace(/\n$/, ''), lang, closed: true }
   }
-  return components
+  return { code: body.replace(/\n$/, ''), lang, closed: false }
+}
+
+const MAX_RENDERED_BLOCKS = 500
+const settledRenderCache = new Map<string, ReactNode>()
+
+function putSettledRender(source: string, node: ReactNode): ReactNode {
+  if (settledRenderCache.has(source)) {
+    settledRenderCache.delete(source)
+  } else if (settledRenderCache.size >= MAX_RENDERED_BLOCKS) {
+    const oldest = settledRenderCache.keys().next().value
+    if (oldest !== undefined) settledRenderCache.delete(oldest)
+  }
+  settledRenderCache.set(source, node)
+  return node
+}
+
+function renderMarkdownAst(source: string): ReactNode {
+  return ReactMarkdown({
+    remarkPlugins: REMARK_PLUGINS,
+    components: COMPONENTS,
+    children: source
+  })
 }
 
 const Block = memo(function Block({
@@ -334,16 +408,66 @@ const Block = memo(function Block({
   messageLive: boolean
 }) {
   const mermaid = useContext(MermaidModeContext)
-  const closed = live && FENCE_CLOSED.test(source)
+  const standalone = useMemo(() => parseStandaloneFence(source), [source])
+  const closed = live && (standalone ? standalone.closed : FENCE_CLOSED.test(source))
+  const renderState = useMemo(
+    () => ({ live, messageLive, closed, mermaid }),
+    [live, messageLive, closed, mermaid]
+  )
+  const lastRef = useRef<{ source: string; node: ReactNode } | null>(null)
+  if (standalone) {
+    const diagram =
+      standalone.lang === 'mermaid' &&
+      (mermaid === 'streaming' ? !live || closed : mermaid === 'final' && !messageLive)
+    return diagram ? (
+      <MermaidBlock code={standalone.code} />
+    ) : (
+      <CodeBlock code={standalone.code} lang={standalone.lang} live={live} />
+    )
+  }
+  let content: ReactNode
+  if (!live) {
+    const cached = settledRenderCache.get(source)
+    if (cached !== undefined) {
+      settledRenderCache.delete(source)
+      settledRenderCache.set(source, cached)
+      content = cached
+    } else if (lastRef.current?.source === source) {
+      content = putSettledRender(source, lastRef.current.node)
+    } else {
+      content = putSettledRender(source, renderMarkdownAst(source))
+    }
+  } else if (lastRef.current?.source === source) {
+    content = lastRef.current.node
+  } else {
+    content = renderMarkdownAst(source)
+    lastRef.current = { source, node: content }
+  }
   return (
-    <ReactMarkdown
-      remarkPlugins={REMARK_PLUGINS}
-      components={componentsFor(live, messageLive, closed, mermaid)}
-    >
-      {source}
-    </ReactMarkdown>
+    <MarkdownRenderContext.Provider value={renderState}>
+      {content}
+    </MarkdownRenderContext.Provider>
   )
 })
+
+const MAX_CACHED_SPLITS = 250
+const settledBlockCache = new Map<string, string[]>()
+
+function getSettledBlocks(text: string, splitter: MarkdownBlockSplitter): string[] {
+  const cached = settledBlockCache.get(text)
+  if (cached !== undefined) {
+    settledBlockCache.delete(text)
+    settledBlockCache.set(text, cached)
+    return cached
+  }
+  const blocks = splitter.split(text)
+  if (settledBlockCache.size >= MAX_CACHED_SPLITS) {
+    const oldest = settledBlockCache.keys().next().value
+    if (oldest !== undefined) settledBlockCache.delete(oldest)
+  }
+  settledBlockCache.set(text, blocks)
+  return blocks
+}
 
 /**
  * While `live`, reveal streamed text at a steady per-frame pace instead of in network-sized chunks.
@@ -406,7 +530,10 @@ export const Markdown = memo(function Markdown({
 }: MarkdownProps) {
   const shown = useSmoothText(text, live)
   const [splitter] = useState(() => new MarkdownBlockSplitter())
-  const blocks = useMemo(() => splitter.split(shown), [shown, splitter])
+  const blocks = useMemo(
+    () => (live ? splitter.split(shown) : getSettledBlocks(shown, splitter)),
+    [live, shown, splitter]
+  )
   return (
     <div
       className={cn(

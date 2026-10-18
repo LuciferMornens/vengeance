@@ -59,6 +59,8 @@ export function engineScope(
   return scope === 'project' ? { label: 'Project', title: 'This project' } : undefined
 }
 
+const EMPTY_SLASH_SUGGESTIONS: SlashSuggestion[] = []
+
 /**
  * The engine commands the slash menu and palette offer. `enableSkillCommands: false` hides skill commands from
  * them, as in the Engine's terminal (RPC `get_commands` lists them regardless); typed ones still run.
@@ -66,12 +68,16 @@ export function engineScope(
 export function useOfferedCommands(
   commands: RpcSlashCommand[],
   cwd: string | null,
-  engine: EngineId = 'pi'
+  engine: EngineId = 'pi',
+  enabled = true
 ): RpcSlashCommand[] {
   const skillCommands = useEffectiveSetting('enableSkillCommands', cwd, engine) !== false
   return useMemo(
-    () => (skillCommands ? commands : commands.filter((command) => command.source !== 'skill')),
-    [commands, skillCommands]
+    () =>
+      !enabled || skillCommands
+        ? commands
+        : commands.filter((command) => command.source !== 'skill'),
+    [enabled, commands, skillCommands]
   )
 }
 
@@ -84,10 +90,12 @@ export function useSlashSuggestions(
   query: string,
   hints: Map<string, string>,
   engineId: EngineId,
-  bridge: boolean
+  bridge: boolean,
+  enabled = true
 ): SlashSuggestion[] {
   const capabilities = useEngineCapabilities(engineId)
   return useMemo(() => {
+    if (!enabled) return EMPTY_SLASH_SUGGESTIONS
     const engine: SlashSuggestion[] = commands.map((command) => ({
       key: `${command.source}:${command.name}`,
       name: command.name,
@@ -132,7 +140,7 @@ export function useSlashSuggestions(
         })
     }
     return scored.sort((a, b) => b.score - a.score).map((s) => s.item)
-  }, [commands, query, hints, engineId, bridge, capabilities])
+  }, [enabled, commands, query, hints, engineId, bridge, capabilities])
 }
 
 // ─── @ file mentions ─────────────────────────────────────────────────────────────────────────

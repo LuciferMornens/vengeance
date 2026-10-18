@@ -52,6 +52,7 @@ export default defineConfig({
     plugins: [singleModuleCopies()],
     resolve: { alias: { '@shared': shared } },
     build: {
+      minify: 'esbuild',
       externalizeDeps: true,
       rollupOptions: {
         input: {
@@ -66,7 +67,11 @@ export default defineConfig({
     root,
     plugins: [singleModuleCopies()],
     resolve: { alias: { '@shared': shared } },
-    build: { externalizeDeps: true, rollupOptions: { input: resolve(root, 'src/preload/index.ts') } }
+    build: {
+      minify: 'esbuild',
+      externalizeDeps: true,
+      rollupOptions: { input: resolve(root, 'src/preload/index.ts') }
+    }
   },
   renderer: {
     root: resolve(root, 'src/renderer'),

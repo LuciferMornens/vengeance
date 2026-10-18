@@ -3,6 +3,7 @@ import { useAgents } from '../../../store/agents'
 import { languageFromPath } from '../../../ui/highlight'
 import { useDiffModule } from '../diff-lazy'
 import { DiffStats, DiffView } from '../DiffView'
+import { useDisclosure, useToolsExpanded } from '../disclosure'
 import { LensMeta, LensSection } from '../LensVerdict'
 import { PathChip, useDisplayPath } from '../PathChip'
 import { registerToolRenderer, type ToolRendererProps } from '../registry'
@@ -31,14 +32,17 @@ function EditRow({ agentId, call, execution }: ToolRendererProps) {
   const details = isRecord(payload?.details) ? payload.details : undefined
   const patch = str(details?.patch)
   const edits = useMemo(() => editsOf(call.arguments), [call.arguments])
+  const detailsStats = useMemo(() => diffStats(details), [details])
+  const toolsExpanded = useToolsExpanded()
+  const [open] = useDisclosure(`tool:${call.id}`, toolsExpanded)
   const diff = useDiffModule()
   const model = useMemo(() => {
-    if (!diff) return null
+    if ((!open && detailsStats !== null) || !diff) return null
     return (patch ? diff.diffFromPatch(patch) : null) ?? (edits.length > 0 ? diff.diffFromEdits(edits) : null)
-  }, [diff, patch, edits])
-  const stats = model ? { added: model.added, removed: model.removed } : diffStats(details)
+  }, [open, detailsStats, diff, patch, edits])
+  const stats = model ? { added: model.added, removed: model.removed } : detailsStats
   const failed = phase === 'error'
-  const { body: rawBody, lens } = splitLensVerdict(payloadText(payload))
+  const { body: rawBody, lens } = useMemo(() => splitLensVerdict(payloadText(payload)), [payload])
   const body = failed ? rawBody.replace(RETRYABLE_PREFIX, '') : rawBody
   const issue = lens?.issues ? lens.firstIssue : undefined
   return (

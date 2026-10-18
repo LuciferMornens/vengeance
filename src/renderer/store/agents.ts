@@ -441,18 +441,19 @@ export const useAgents = create<AgentsStore>()((set, get) => ({
 
   applyEvents(batch) {
     set((state) => {
-      const agents = { ...state.agents }
+      let agents: Record<string, AgentState> | null = null
       for (const [agentId, events] of batch) {
-        let agent = agents[agentId]
+        let agent = (agents ?? state.agents)[agentId]
         if (!agent) {
           const early = earlyEvents.get(agentId)
           early?.push(...events.slice(0, Math.max(0, MAX_EARLY_EVENTS - early.length)))
           continue
         }
         for (const event of events) agent = reduceAgentEvent(agent, event)
+        agents ??= { ...state.agents }
         agents[agentId] = agent
       }
-      return { agents }
+      return agents ? { agents } : state
     })
   },
 
@@ -669,7 +670,7 @@ function scheduleStateRefresh(agentId: string): void {
 }
 
 function flush(): void {
-  if (frame !== null) cancelAnimationFrame(frame)
+  if (frame !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frame)
   if (fallback !== null) clearTimeout(fallback)
   frame = null
   fallback = null
@@ -704,15 +705,48 @@ function flush(): void {
   }
 }
 
+/**
+ * Replace an earlier queued `tool_execution_update` for the same tool call in the current frame,
+ * stopping at any lifecycle boundary for that call so ordering semantics stay intact.
+ */
+function coalesceToolUpdate(list: EngineEvent[], event: EngineEvent): boolean {
+  if (event.type !== 'tool_execution_update') return false
+  for (let i = list.length - 1; i >= 0; i--) {
+    const candidate = list[i]!
+    if (candidate.type === 'agent_settled' || candidate.type === 'engine_native_event') return false
+    if (
+      (candidate.type === 'tool_execution_start' || candidate.type === 'tool_execution_end') &&
+      candidate.toolCallId === event.toolCallId
+    ) {
+      return false
+    }
+    if (
+      candidate.type === 'message_end' &&
+      candidate.message.role === 'toolResult' &&
+      candidate.message.toolCallId === event.toolCallId
+    ) {
+      return false
+    }
+    if (candidate.type === 'tool_execution_update' && candidate.toolCallId === event.toolCallId) {
+      list[i] = event
+      return true
+    }
+  }
+  return false
+}
+
 function enqueue(agentId: string, event: EngineEvent): void {
   if (!useAgents.getState().agents[agentId] && !earlyEvents.has(agentId)) return
   const list = pending.get(agentId)
   const previous = list?.[list.length - 1]
   const combined = previous ? combineDeltas(previous, event) : null
   if (list && combined) list[list.length - 1] = combined
-  else if (list) list.push(event)
+  else if (list && coalesceToolUpdate(list, event)) {
+    // Replaced the earlier update for this toolCallId in-place.
+  } else if (list) list.push(event)
   else pending.set(agentId, [event])
-  if (frame === null) frame = requestAnimationFrame(flush)
+  if (frame === null && typeof requestAnimationFrame === 'function')
+    frame = requestAnimationFrame(flush)
   // rAF does not fire while the window is hidden/minimized; never let events stall.
   if (fallback === null) fallback = setTimeout(flush, HIDDEN_WINDOW_FLUSH_MS)
 }

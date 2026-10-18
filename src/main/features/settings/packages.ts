@@ -25,9 +25,36 @@ async function projectTrustedFor(override: string | null, cwd: string | null): P
 
 type ListedPackages = SdkHostResult<'packages'>
 
+const configuredPackagesCache = new Map<string, Promise<ListedPackages>>()
+
+/** Clear cached package/resource resolution when settings, packages, resources, or project trust change. */
+export function invalidateConfiguredPackagesCache(): void {
+  configuredPackagesCache.clear()
+}
+
 /** The engine's configured packages and resolved resources for `cwd`, nothing installed (the SDK host). */
 function configuredPackages(override: string | null, cwd: string | null, projectTrusted: boolean): Promise<ListedPackages> {
-  return sdkHostCall(override, 'packages', { cwd: cwd ? projectRoot(cwd) : agentDir(), agentDir: agentDir(), projectTrusted })
+  const resolvedCwd = cwd ? projectRoot(cwd) : agentDir()
+  const currentAgentDir = agentDir()
+  const key = `${override ?? ''}\n${currentAgentDir}\n${resolvedCwd}\n${projectTrusted}`
+  const hit = configuredPackagesCache.get(key)
+  if (hit) return hit
+  const pending = sdkHostCall(override, 'packages', { cwd: resolvedCwd, agentDir: currentAgentDir, projectTrusted })
+  configuredPackagesCache.set(key, pending)
+  pending.catch(() => {
+    if (configuredPackagesCache.get(key) === pending) configuredPackagesCache.delete(key)
+  })
+  return pending
+}
+
+/** Whether any non-builtin extension is enabled for `cwd` (determines if the provider host needs to start). */
+export async function hasEnabledUserExtensions(
+  override: string | null,
+  cwd: string | null,
+  projectTrusted: boolean
+): Promise<boolean> {
+  const { resolved } = await configuredPackages(override, cwd, projectTrusted)
+  return resolved.extensions.some((resource) => resource.enabled && !resource.path.startsWith('builtin:'))
 }
 
 /** Resolve resources without installing anything that is missing. */
@@ -103,6 +130,7 @@ export async function setPackageEnabled(override: string | null, cwd: string | n
     list[index] = setPackageEntryEnabled(list[index]!, enabled)
     return { ...current, packages: list }
   })
+  invalidateConfiguredPackagesCache()
   return listPackages(override, cwd)
 }
 
@@ -162,6 +190,7 @@ async function applyMockRun(override: string | null, args: PackageRunArgs): Prom
     writeSeedFile(join(dir, 'package.json'), `${JSON.stringify({ name, version: '1.0.0', description: 'Freshly installed package', keywords: ['pi-package'] }, null, 2)}\n`)
     writeSeedFile(join(dir, 'extensions', 'index.ts'), 'export default function (pi) {}\n')
   }
+  invalidateConfiguredPackagesCache()
 }
 
 export async function runPackageAction(
@@ -281,5 +310,6 @@ export async function toggleResource(override: string | null, args: ToggleResour
       return { ...current, packages }
     })
   }
+  invalidateConfiguredPackagesCache()
   return listResources(override, cwd)
 }

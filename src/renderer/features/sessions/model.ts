@@ -54,16 +54,31 @@ export function itemTitle(item: SessionListItem): string {
   )
 }
 
+type FirstEntryState = { kind: 'user'; text: string } | { kind: 'compaction' } | { kind: 'none' }
+
+const firstUserCache = new WeakMap<AgentState['entries'], FirstEntryState>()
+const messageCountCache = new WeakMap<AgentState['entries'], number>()
+
 /**
  * First user message of the session. A resumed compacted session's transcript starts at the compaction summary, after
  * the real first message, so the title comes from the listing (read from the file) there.
  */
 function firstUserText(agent: AgentState): string | undefined {
-  const first = agent.entries.find(
-    (e) => e.message.role === 'user' || e.message.role === 'compactionSummary'
-  )?.message
-  if (first?.role === 'user') return firstLine(userText(first))
-  if (first?.role !== 'compactionSummary') return undefined
+  let state = firstUserCache.get(agent.entries)
+  if (!state) {
+    const first = agent.entries.find(
+      (e) => e.message.role === 'user' || e.message.role === 'compactionSummary'
+    )?.message
+    state =
+      first?.role === 'user'
+        ? { kind: 'user', text: firstLine(userText(first)) }
+        : first?.role === 'compactionSummary'
+          ? { kind: 'compaction' }
+          : { kind: 'none' }
+    firstUserCache.set(agent.entries, state)
+  }
+  if (state.kind === 'user') return state.text || undefined
+  if (state.kind !== 'compaction') return undefined
   return firstLine(listedSession(agentSessionFile(agent))?.firstMessage ?? '') || undefined
 }
 
@@ -120,7 +135,14 @@ export function agentSearchText(agent: AgentState): string {
  * entry), minus system-prompt messages, which are not part of the conversation.
  */
 export function agentMessageCount(agent: AgentState): number {
-  return agent.entries.filter((e) => e.message.role !== 'system').length
+  const cached = messageCountCache.get(agent.entries)
+  if (cached !== undefined) return cached
+  let count = 0
+  for (const entry of agent.entries) {
+    if (entry.message.role !== 'system') count++
+  }
+  messageCountCache.set(agent.entries, count)
+  return count
 }
 
 export type LiveState = 'starting' | 'running' | 'waiting' | 'crashed' | 'idle'

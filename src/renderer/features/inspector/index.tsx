@@ -303,9 +303,9 @@ const TabBar = memo(function TabBar({
 
 /** `width` is the panel's drawn width, which the shell may narrow below the saved preference. */
 export function Inspector({ agentId, width }: { agentId: string | null; width: number }) {
-  const agent = useAgents((s) => (agentId ? s.agents[agentId] : undefined))
-  const stored = useApp((s) => s.prefs.inspector.tab)
   const open = useApp((s) => s.prefs.inspector.open)
+  const agent = useAgents((s) => (open && agentId ? s.agents[agentId] : undefined))
+  const stored = useApp((s) => s.prefs.inspector.tab)
   const engine = agent?.info.engine ?? 'pi'
   const capabilities = useEngineCapabilities(engine)
   const tabs = useMemo(

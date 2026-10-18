@@ -34,6 +34,10 @@ const SettingsSheet = settingsSheet.Component
 const inspectorPanel = lazyWithPreload(() => import('../inspector').then((m) => m.Inspector))
 const Inspector = inspectorPanel.Component
 
+export function preloadSettingsSheet(): void {
+  void settingsSheet.preload()
+}
+
 /** Keep <html> attributes, CSS scale and native window chrome in sync with prefs. */
 function useAppearance(): void {
   const theme = useApp((s) => s.prefs.theme)

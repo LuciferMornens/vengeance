@@ -222,6 +222,7 @@ async function productionScenario(exe, appArgs, server, name) {
       appProcesses: last.app.count,
       engineMiB: mib(median(samples.map((sample) => sample.engines.privateWs))),
       engineProcesses: last.engines.count,
+      totalMiB: mib(median(samples.map((sample) => sample.total.privateWs))),
       kindsMiB: Object.fromEntries(
         Object.entries(kinds).map(([kind, values]) => [kind, mib(median(values))])
       ),
@@ -363,10 +364,16 @@ async function drivenScenario(exe, server) {
       paletteOpenMedianMs: Math.round(median(paletteTimes)),
       afterInteraction: {
         appMiB: mib(tree.app.privateWs),
+        engineMiB: mib(tree.engines.privateWs),
+        totalMiB: mib(tree.total.privateWs),
+        appProcesses: tree.app.count,
+        engineProcesses: tree.engines.count,
         kindsMiB: Object.fromEntries(
           Object.entries(byKind(tree)).map(([kind, bytes]) => [kind, mib(bytes)])
         ),
         rendererHeapMiB: mib(heaps.rendererBytes),
+        rendererTotalHeapMiB: mib(heaps.rendererTotalBytes),
+        rendererEmbedderHeapMiB: mib(heaps.rendererEmbedderBytes),
         mainHeapMiB: mib(heaps.mainBytes)
       }
     }
@@ -392,18 +399,30 @@ function compareTable(before, after) {
     const b = after.production?.[scenario]
     if (!b) continue
     add(`${scenario}: app memory`, a.appMiB, b.appMiB, 'MiB')
+    add(`${scenario}: engine memory`, a.engineMiB, b.engineMiB, 'MiB')
+    add(
+      `${scenario}: total tree memory`,
+      a.totalMiB ?? round((a.appMiB ?? 0) + (a.engineMiB ?? 0)),
+      b.totalMiB ?? round((b.appMiB ?? 0) + (b.engineMiB ?? 0)),
+      'MiB'
+    )
     for (const kind of new Set([...Object.keys(a.kindsMiB), ...Object.keys(b.kindsMiB)])) {
       add(`${scenario}: ${kind}`, a.kindsMiB[kind] ?? 0, b.kindsMiB[kind] ?? 0, 'MiB')
     }
     add(`${scenario}: app processes`, a.appProcesses, b.appProcesses, '')
     add(`${scenario}: idle CPU`, a.idleCpuPercent, b.idleCpuPercent, '%')
-    add(`${scenario}: engine memory`, a.engineMiB, b.engineMiB, 'MiB')
   }
   const da = before.driven
   const db = after.driven
   if (da && db) {
     add('startup (median)', da.startup.medianMs, db.startup.medianMs, 'ms')
     add('streaming p95 frame', da.interaction.streaming.p95Ms, db.interaction.streaming.p95Ms, 'ms')
+    add(
+      'streaming max frame',
+      da.interaction.streaming.maxMs,
+      db.interaction.streaming.maxMs,
+      'ms'
+    )
     add(
       'streaming long frames',
       da.interaction.streaming.longFrames,
@@ -416,6 +435,7 @@ function compareTable(before, after) {
       db.interaction.switchMedianMs,
       'ms'
     )
+    add('session switch (max)', da.interaction.switchMaxMs, db.interaction.switchMaxMs, 'ms')
     add('settings open', da.interaction.settingsOpenMs, db.interaction.settingsOpenMs, 'ms')
     add(
       'settings section (median)',
@@ -436,9 +456,38 @@ function compareTable(before, after) {
       'MiB'
     )
     add(
+      'after interaction: engine memory',
+      da.interaction.afterInteraction.engineMiB,
+      db.interaction.afterInteraction.engineMiB,
+      'MiB'
+    )
+    add(
+      'after interaction: total tree memory',
+      da.interaction.afterInteraction.totalMiB,
+      db.interaction.afterInteraction.totalMiB,
+      'MiB'
+    )
+    for (const kind of new Set([
+      ...Object.keys(da.interaction.afterInteraction.kindsMiB ?? {}),
+      ...Object.keys(db.interaction.afterInteraction.kindsMiB ?? {})
+    ])) {
+      add(
+        `after interaction: ${kind}`,
+        da.interaction.afterInteraction.kindsMiB?.[kind] ?? 0,
+        db.interaction.afterInteraction.kindsMiB?.[kind] ?? 0,
+        'MiB'
+      )
+    }
+    add(
       'after interaction: renderer JS heap',
       da.interaction.afterInteraction.rendererHeapMiB,
       db.interaction.afterInteraction.rendererHeapMiB,
+      'MiB'
+    )
+    add(
+      'after interaction: renderer DOM/Oilpan heap',
+      da.interaction.afterInteraction.rendererEmbedderHeapMiB,
+      db.interaction.afterInteraction.rendererEmbedderHeapMiB,
       'MiB'
     )
     add(
@@ -511,6 +560,7 @@ if (process.argv.includes('--compare')) {
           appProcesses: pick('appProcesses'),
           engineMiB: pick('engineMiB'),
           engineProcesses: pick('engineProcesses'),
+          totalMiB: pick('totalMiB'),
           idleCpuPercent: pick('idleCpuPercent'),
           engineIdleCpuPercent: pick('engineIdleCpuPercent'),
           kindsMiB: Object.fromEntries(

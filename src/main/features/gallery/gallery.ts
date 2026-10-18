@@ -7,7 +7,6 @@ import {
 } from '@shared/api/gallery'
 import { env } from '../../env'
 import { updatesOfflineReason } from '../updates/updates-service'
-import { MOCK_GALLERY, mockDetail } from './mock'
 import { isNpmPackageName, parseManifest, parseSearch } from './parse'
 
 /**
@@ -55,6 +54,7 @@ export async function searchGallery({ query, from = 0 }: GallerySearchArgs): Pro
   const terms = query.replace(/\s+/g, ' ').trim().slice(0, MAX_QUERY)
   const offset = Number.isInteger(from) && from > 0 ? from : 0
   if (env.mock) {
+    const { MOCK_GALLERY } = await import('./mock')
     const needle = terms.toLowerCase()
     const matches = MOCK_GALLERY.filter((pkg) =>
       [pkg.name, pkg.description ?? '', ...pkg.keywords].some((field) =>
@@ -82,7 +82,7 @@ export async function searchGallery({ query, from = 0 }: GallerySearchArgs): Pro
 
 export async function galleryPackage(name: string): Promise<GalleryPackageDetail> {
   if (typeof name !== 'string' || !isNpmPackageName(name)) throw new Error('Choose a package from the gallery')
-  if (env.mock) return mockDetail(name)
+  if (env.mock) return (await import('./mock')).mockDetail(name)
   assertOnline()
   return cached(`package:${name}`, async () =>
     parseManifest(name, await getJson(`${REGISTRY}/${name.replace('/', '%2F')}/latest`))

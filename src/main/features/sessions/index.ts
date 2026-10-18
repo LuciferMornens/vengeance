@@ -167,6 +167,14 @@ async function readSummary(
   let lastActivity: number | undefined
 
   for await (const line of sessionLines(path)) {
+    if (
+      format === 'pi' &&
+      header !== null &&
+      !line.includes('"message"') &&
+      !line.includes('"session_info"')
+    ) {
+      continue
+    }
     const entry = parseEntry(line)
     if (!entry) continue
     if (
@@ -314,9 +322,17 @@ export class SessionIndex {
     this.forget(path)
     // UTF-16 string storage plus allowance for each map entry and metadata object.
     const summary = entry.summary
+    const header = entry.header
+    const headerLength = header
+      ? header.id.length +
+        header.timestamp.length +
+        header.cwd.length +
+        (header.parentSession?.length ?? 0) +
+        64
+      : 4
     const textLength =
       path.length +
-      JSON.stringify(entry.header).length +
+      headerLength +
       (summary
         ? summary.path.length +
           summary.id.length +

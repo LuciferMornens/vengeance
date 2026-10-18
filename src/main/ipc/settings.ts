@@ -5,7 +5,7 @@ import type { SettingsChangeArea, SettingsEventMap } from '@shared/api/settings'
 import type { IpcContext } from './context'
 import { broadcast, handle, onQuit } from './handle'
 import { appState } from '../app-state'
-import { disposeSdkHost, prewarmSdkHost } from '../engine/sdk-host/client'
+import { disposeSdkHost, prewarmSdkHost, releaseSdkHost } from '../engine/sdk-host/client'
 import { isInside } from '../paths'
 import { ACCOUNT_PROVIDER, refreshAccountModels } from '../features/settings/account-models'
 import { agentDir, prepareAgentDir, projectRoot } from '../features/settings/agent-dir'
@@ -50,7 +50,11 @@ import {
   toggleResource
 } from '../features/settings/packages'
 import { cancelRun } from '../features/settings/pi-cli'
-import { disposeProviderHost, noteProviderConfigChange } from '../features/settings/provider-host'
+import {
+  disposeProviderHost,
+  noteProviderConfigChange,
+  releaseProviderHost
+} from '../features/settings/provider-host'
 import {
   setSetting,
   settingsSnapshot,
@@ -103,7 +107,7 @@ function invalidateFlagsFor(area: SettingsChangeArea): void {
 
 /** Settings feature: engine settings, providers & auth, custom models, packages, resources, MCP, instructions, trust, keybindings. */
 export function registerSettingsIpc(context: IpcContext): void {
-  prepareAgentDir()
+  void prepareAgentDir()
   const override = () => context.engineOverridePath()
   /** `force`: re-read the account's models now (a sign-in through Vengeance); otherwise only when the list is stale. */
   const checkAccountModels = (force: boolean) =>
@@ -191,6 +195,10 @@ export function registerSettingsIpc(context: IpcContext): void {
 
   handle('settings:snapshot', (cwd) => settingsSnapshot(override(), cwd))
   handle('settings:prewarm', () => prewarmSdkHost(override()))
+  handle('settings:release', () => {
+    releaseSdkHost()
+    releaseProviderHost()
+  })
   handle('settings:set', (args) => write('settings', () => setSetting(override(), args)))
   handle('settings:validate', (text, scope) => validateRawSettings(text, scope))
   handle('settings:write-raw', (args) =>

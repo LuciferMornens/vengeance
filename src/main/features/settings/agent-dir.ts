@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { env } from '../../env'
-import { seedMockAgentDir } from './mock-agent-dir'
 
 /**
  * Where the engine keeps its user-level config. pi honors `PI_CODING_AGENT_DIR`; Vengeance reads it
@@ -13,6 +12,7 @@ import { seedMockAgentDir } from './mock-agent-dir'
  */
 
 let mockRoot: string | null = null
+let preparePromise: Promise<void> | null = null
 const explicitOverride = !!process.env.PI_CODING_AGENT_DIR
 
 function expandHome(path: string): string {
@@ -22,12 +22,13 @@ function expandHome(path: string): string {
 }
 
 /** Call once at startup (before any SDK access). */
-export function prepareAgentDir(): void {
-  if (!env.mock || explicitOverride) return
-  mockRoot = mkdtempSync(join(tmpdir(), 'vengeance-mock-engine-'))
-  const agentDir = join(mockRoot, 'agent')
-  seedMockAgentDir(agentDir, join(mockRoot, 'workspaces'))
-  process.env.PI_CODING_AGENT_DIR = agentDir
+export function prepareAgentDir(): Promise<void> {
+  if (!env.mock || explicitOverride) return Promise.resolve()
+  if (preparePromise) return preparePromise
+  const root = mkdtempSync(join(tmpdir(), 'vengeance-mock-engine-'))
+  mockRoot = root
+  const dir = join(root, 'agent')
+  process.env.PI_CODING_AGENT_DIR = dir
   app.on('will-quit', () => {
     if (!mockRoot) return
     try {
@@ -36,6 +37,10 @@ export function prepareAgentDir(): void {
       // Windows can still hold handles from exiting engines; a leftover temp dir is harmless.
     }
   })
+  preparePromise = import('./mock-agent-dir').then(({ seedMockAgentDir }) => {
+    seedMockAgentDir(dir, join(root, 'workspaces'))
+  })
+  return preparePromise
 }
 
 export function agentDir(): string {
