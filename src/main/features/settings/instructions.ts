@@ -10,7 +10,7 @@ import type {
 } from '@shared/api/settings'
 import { sdkHostCall } from '../../engine/sdk-host/client'
 import { agentDir, projectRoot } from './agent-dir'
-import { lastWrittenText, rememberWrittenText, writeFileAtomic } from './json-file'
+import { withFileRemovalOwnership, writeFileAtomic } from './json-file'
 import { trustPreflight } from '../launch/trust'
 
 /** Context files the engine loads (AGENTS.md / CLAUDE.md) and the editable system prompt files. */
@@ -95,14 +95,7 @@ export async function writeInstructionFile(
     throw new Error('A replacement prompt cannot be empty. Restore the inherited prompt instead.')
   if (text === null) {
     if (existsSync(path)) {
-      const previousWritten = lastWrittenText(path)
-      rememberWrittenText(path, null)
-      try {
-        await shell.trashItem(path)
-      } catch (error) {
-        rememberWrittenText(path, previousWritten)
-        throw error
-      }
+      await withFileRemovalOwnership(path, () => shell.trashItem(path))
     }
   } else {
     const normalized = text.endsWith('\n') || text === '' ? text : `${text}\n`

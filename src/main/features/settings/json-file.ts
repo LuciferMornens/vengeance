@@ -93,7 +93,13 @@ const RENAME_ATTEMPTS = 5
 const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms))
 
 /** The text Vengeance last wrote to each config file, so the config watcher can tell its own writes from outside edits. */
-const writtenTexts = new Map<string, string | null>()
+interface WrittenTextRecord {
+  text: string | null
+  previous?: WrittenTextRecord
+  failed?: boolean
+}
+
+const writtenTexts = new Map<string, WrittenTextRecord>()
 
 function writtenKey(path: string): string {
   const absolute = resolve(path)
@@ -102,14 +108,38 @@ function writtenKey(path: string): string {
 
 /** What Vengeance last wrote to `path` through writeFileAtomic (undefined when it never wrote it). */
 export function lastWrittenText(path: string): string | null | undefined {
-  return writtenTexts.get(writtenKey(path))
+  return writtenTexts.get(writtenKey(path))?.text
 }
 
 /** Null records an owned removal; undefined restores a path with no known app write. */
 export function rememberWrittenText(path: string, text: string | null | undefined): void {
   const key = writtenKey(path)
   if (text === undefined) writtenTexts.delete(key)
-  else writtenTexts.set(key, text)
+  else writtenTexts.set(key, { text })
+}
+
+/** Track an asynchronous removal without undoing later writes or outside edits. */
+export async function withFileRemovalOwnership(
+  path: string,
+  remove: () => Promise<void>
+): Promise<void> {
+  const key = writtenKey(path)
+  const attempt: WrittenTextRecord = { text: null, previous: writtenTexts.get(key) }
+  writtenTexts.set(key, attempt)
+  try {
+    await remove()
+    // Completed removals must not retain prompt bytes in their ownership marker.
+    attempt.previous = undefined
+  } catch (error) {
+    attempt.failed = true
+    if (writtenTexts.get(key) === attempt) {
+      let previous = attempt.previous
+      while (previous?.failed) previous = previous.previous
+      if (previous) writtenTexts.set(key, previous)
+      else writtenTexts.delete(key)
+    }
+    throw error
+  }
 }
 
 export interface ReplaceFileOptions {
