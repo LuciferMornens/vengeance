@@ -22,7 +22,7 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 `engines.lock.json` is the source of truth. Current stable bases are pi `v1.3.0` at
 `71023aec1546d6d677a65669c5665c0927ce0dd0` and Prime `v0.10.0` at
 `763094e1b6a7c17450ee8399b06cda1853847ca5`. The builds identify as `1.3.0+vengeance.2` and
-`0.10.0+vengeance.10`. Never reuse a Vengeance build version for different shipped behavior.
+`0.10.0+vengeance.11`. Never reuse a Vengeance build version for different shipped behavior.
 
 The current Prime source comparison and patch decisions are recorded in
 [PRIME-STABLE-AUDIT-2026-10-16.md](docs/PRIME-STABLE-AUDIT-2026-10-16.md).
@@ -289,6 +289,8 @@ sign-in testing only with explicit user authorization; report coverage gaps rath
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Both engines, configuration and account isolation                   | `scripts/qa/engines/integration.qa.mjs`, `scripts/qa/engines/updates.qa.mjs`, `scripts/qa/settings/engine-selection.qa.mjs`                                        |
 | Model/reasoning changes and restart notices                         | `scripts/qa/engines/restart-notices.qa.mjs`, `scripts/qa/engines/candidate-controls.qa.mjs`                                                                        |
+| Active-work restart refusal and deferred restart admission          | `scripts/checks/engine-restart.check.ts`, `scripts/qa/engines/restart-safety.qa.mjs`                                                                               |
+| Native prompt inspection, scoped edits and explicit application     | `scripts/qa/settings/system-prompts.qa.mjs`, `scripts/shots/system-prompts.mjs`; helper `system_prompt` tests                                                      |
 | Parent/child model isolation and concurrent settings preservation   | `scripts/qa/engines/model-isolation.qa.mjs`; native `model_isolation`, settings persistence and `settings_mcp_save` regressions                                    |
 | Image capabilities, live model switches and tool/image delivery     | `scripts/qa/engines/image-capabilities.qa.mjs`; native model-switch and prompt regressions                                                                         |
 | Response speed, subscription entitlement and native tier transport  | `scripts/qa/engines/speed-mode-engine2.qa.mjs`, `speed-mode.qa.mjs`, `speed-mode-subscriptions.qa.mjs`; native `service_tiers` and `service_tiers_transport` tests |
@@ -297,6 +299,7 @@ sign-in testing only with explicit user authorization; report coverage gaps rath
 | Mixed-version resident attachment and Close tab versus Stop session | `scripts/qa/engines/resident-upgrade.qa.mjs`, `scripts/qa/engines/resident-close.qa.mjs`; selected-state and transport regressions                                 |
 | Packaged app, external bridge and native helper                     | `scripts/qa/engines/packaged.qa.mjs`, `scripts/checks/prime-auth-native.mjs`, `scripts/checks/prime-auth-oauth.mjs`                                                |
 | Scale and lifecycle retention when those contracts change           | `scripts/qa/performance/session-listing.qa.mjs`, `scripts/qa/performance/session-churn.qa.mjs`, `scripts/qa/performance/long-tools.qa.mjs`                         |
+| Process-cold launch and first conversation navigation               | `scripts/perf/first-navigation.mjs`; both native engines, rich saved histories, frame gaps, CPU profiles and rendered syntax verification                          |
 | Engine 2 native long-history activation and retention               | `scripts/qa/performance/prime-long-history.qa.mjs`; public native writer, cold/resident opening, cached workspace switching and frame/heap bounds                  |
 | Mixed-engine workspace scale and hidden-workspace navigation        | `scripts/qa/performance/workspace-scale.qa.mjs`; full 8,300-history, 65-workspace corpus                                                                           |
 | Engine stable upgrade and recovery on an isolated copy              | `scripts/qa/engines/pi-transition.qa.mjs`; retain a complete baseline package with `QA_PI_BASELINE_PACKAGE`                                                        |
@@ -419,3 +422,13 @@ built by the release workflow; record their hashes from that run.
 If a fix belongs upstream, retain a minimal reproducer and a reviewable patch suitable for contribution.
 Publishing issues or pull requests remains a separate authorized action. Once a supported upstream
 release incorporates the behavior, prefer it and remove the local patch after qualification.
+
+Engine 2 `0.10.0+vengeance.11` backports native append-file assembly from upstream commit
+`b1d71636710b0ea1b86380dfe3923b3c03fe2948` in patch `0020`. The stable base discovers
+`APPEND_SYSTEM.md` but omits it from resident prompts. The patch passes discovered or explicit append
+sources through the native prompt builder, preserving raw Markdown, independent SYSTEM/APPEND scope
+precedence, and explicit-source overrides. The native `prompt` diagnostic now includes the same append
+text. The stable builder's direct guideline API remains available. Retire the backport once a stable
+base contains the upstream fix and the provider-payload and diagnostic regressions pass on that base.
+No session format, account schema, or helper protocol revision changes. Rebuild the helper against the
+new engine fingerprint, and qualify an idle resident transition from the complete `.10` package.

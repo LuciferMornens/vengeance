@@ -52,7 +52,8 @@ export interface EngineHandle {
   /** Apply a backend restart while its current connection can still preserve resident work. */
   prepareRestart?(
     nextArgs: CreateAgentArgs,
-    executablePath?: string | null
+    executablePath?: string | null,
+    patch?: Partial<CreateAgentArgs>
   ): Promise<CreateAgentArgs | void>
   /** Block side operations while a cross-engine history handoff owns this connection. */
   guardHandoff?(): { assertIdle(): void; release(): void }

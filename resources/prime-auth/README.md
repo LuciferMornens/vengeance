@@ -49,6 +49,16 @@ mode availability. Vengeance checks this frame before sending `start`.
 `--version` prints that metadata and exits without reading account files or
 accessing the network.
 
+`--system-prompt-default` prints the bundled native system prompt's static foundation as
+`{ "ok": true, "protocol": 1, "revision": "...", "result": { "text": "..." } }`.
+Metadata advertises `systemPromptDefault: true`. This read-only mode calls
+`pa_core::prompts::system_prompt_breakdown` and selects its native static segments. It reads no
+account or project files and starts no daemon, worker, provider request or kernel. User replacements,
+appended instructions, model-specific layers and the session tail are excluded. Vengeance labels
+this bundled foundation separately from a running session's exact native `get_system_prompt` view;
+the latter also works when a custom engine is selected. Main bounds output to 1 MiB and validates
+the protocol and revision before rendering it.
+
 `start` supplies `providerId`, `cwd`, `agentDir`, and optionally the native Prime
 CLI config path. `method` defaults to `oauth`; `api_key` starts the native key
 validation flow for Prime Inference or Agent Traces. Replies identify a prompt
@@ -75,6 +85,7 @@ new upstream base or native patch:
    `resources/prime-auth/Cargo.toml`, `UPSTREAM_REVISION` in `resources/prime-auth/src/main.rs`, and
    `HELPER_REVISION` in both
    `src/main/engine/prime/auth-oauth.ts` and `src/main/engine/prime/restart-native.ts`
+   and the built-in prompt consumer `src/main/engine/prime/system-prompt.ts`
    together. Search for the old revision to catch additional consumers. Export native patches
    before building. Run `node scripts/build-prime-auth.mjs --update-lockfile` to regenerate
    `Cargo.lock` with the same source overrides used by regular locked builds; review the diff.

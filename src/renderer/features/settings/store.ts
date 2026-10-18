@@ -405,14 +405,14 @@ on('settings:account-models', ({ engine = 'pi' }) => {
 })
 
 // Keep the sheet and open engines in sync with changes made elsewhere: other Vengeance views, the terminal, other programs.
-on('settings:changed', ({ engine = 'pi', area, external, project, fromRun }) => {
+on('settings:changed', ({ engine = 'pi', area, external, project, fromRun, apply }) => {
   const store = useSettings.getState()
   if (store.engine === engine && (area === 'auth' || area === 'models'))
     void store.loadCatalog(true)
   // Engines read credentials, custom models, packages, resources, MCP config and instructions only at startup. A
   // change to an untrusted project loads nowhere until the folder is trusted, and trusting it restarts its sessions.
   const reason = ENGINE_STARTUP_AREAS.get(area)
-  if (reason) {
+  if (reason && apply !== 'new-sessions') {
     if (!project) afterEngineConfigChange('restart', undefined, engine, reason)
     else if (project.trusted)
       afterEngineConfigChange(

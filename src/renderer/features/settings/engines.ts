@@ -4,6 +4,7 @@ import type { SettingDef } from '@shared/api/settings-schema'
 import { rpc } from '../../lib/engine'
 import { normalizePath } from '../../lib/paths'
 import { useAgents } from '../../store/agents'
+import type { AgentState } from '../../store/agent-state'
 import { useApp } from '../../store/app'
 import { toast } from '../../ui'
 import { agentSessionFile } from '../sessions/model'
@@ -24,7 +25,60 @@ import {
 
 /** Agents waiting to restart, with the args patch to restart them with (see engine:restart). */
 const pendingRestart = new Map<string, Partial<CreateAgentArgs>>()
+const restartingAgents = new Set<string>()
+const restartRetries = new Map<string, { failures: number; after: number }>()
+const INITIAL_RESTART_RETRY_MS = 250
+const MAX_RESTART_RETRY_MS = 2000
+const RETRYABLE_RESTART_REFUSALS = [
+  'Wait for the current session operation to finish before restarting',
+  'Wait until this session finishes its active work before restarting',
+  'Wait for Engine 2 side questions to finish before restarting its runtime',
+  'Wait until every Engine 2 resident reconnects before restarting its runtime',
+  'Wait for Engine 2 background services to finish, then restart again.',
+  'Finish this session’s extension dialog before restarting',
+  'This engine is already restarting',
+  'This engine is already changing'
+]
 let unsubscribe: (() => void) | null = null
+let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+function canRestartAgent(agent: AgentState): boolean {
+  const queued = agent.queue.steering.length + agent.queue.followUp.length
+  return (
+    agent.phase === 'idle' &&
+    agent.status !== 'starting' &&
+    agent.status !== 'stopping' &&
+    !agent.compaction &&
+    agent.ext.dialogs.length === 0 &&
+    (agent.info.engine !== 'pi' || queued === 0) &&
+    !Object.values(agent.bash).some((run) => run.running)
+  )
+}
+
+function syncRestartWatch(): void {
+  if (retryTimer) clearTimeout(retryTimer)
+  retryTimer = null
+  if (pendingRestart.size > 0) {
+    if (!unsubscribe) unsubscribe = useAgents.subscribe(restartWhenIdle)
+    const { agents } = useAgents.getState()
+    const deadlines = [...restartRetries].flatMap(([id, retry]) => {
+      const agent = agents[id]
+      return agent && canRestartAgent(agent) && !restartingAgents.has(id) ? [retry.after] : []
+    })
+    if (deadlines.length) {
+      retryTimer = setTimeout(
+        () => {
+          retryTimer = null
+          restartWhenIdle()
+        },
+        Math.max(0, Math.min(...deadlines) - Date.now())
+      )
+    }
+    return
+  }
+  unsubscribe?.()
+  unsubscribe = null
+}
 
 function restartWhenIdle(): void {
   const store = useAgents.getState()
@@ -32,29 +86,51 @@ function restartWhenIdle(): void {
     const agent = store.agents[id]
     if (!agent) {
       pendingRestart.delete(id)
+      restartRetries.delete(id)
       continue
     }
-    if (
-      agent.phase === 'idle' &&
-      agent.status !== 'starting' &&
-      !agent.compaction &&
-      !Object.values(agent.bash).some((run) => run.running)
-    ) {
-      pendingRestart.delete(id)
-      void store.restartAgent(id, patch).catch((error: unknown) => {
-        toast({
-          id: `settings-restart-error-${id}`,
-          level: 'error',
-          title: 'Could not restart session',
-          description: error instanceof Error ? error.message : String(error)
+    if (restartingAgents.has(id)) continue
+    if ((restartRetries.get(id)?.after ?? 0) > Date.now()) continue
+    if (canRestartAgent(agent)) {
+      restartingAgents.add(id)
+      void store
+        .restartAgent(id, patch)
+        .then(() => {
+          restartRetries.delete(id)
+          if (pendingRestart.get(id) === patch) pendingRestart.delete(id)
         })
-      })
+        .catch((error: unknown) => {
+          if (!pendingRestart.has(id)) return
+          const description = error instanceof Error ? error.message : String(error)
+          const waitingForSibling =
+            /Engine 2 restarts its shared runtime\. Wait until .+ finishes, then restart again\./.test(
+              description
+            )
+          if (
+            waitingForSibling ||
+            RETRYABLE_RESTART_REFUSALS.some((refusal) => description.includes(refusal))
+          ) {
+            const failures = restartRetries.get(id)?.failures ?? 0
+            const delay = Math.min(INITIAL_RESTART_RETRY_MS * 2 ** failures, MAX_RESTART_RETRY_MS)
+            restartRetries.set(id, { failures: failures + 1, after: Date.now() + delay })
+            return
+          }
+          restartRetries.delete(id)
+          if (pendingRestart.get(id) === patch) pendingRestart.delete(id)
+          toast({
+            id: `settings-restart-error-${id}`,
+            level: 'error',
+            title: 'Could not restart session',
+            description
+          })
+        })
+        .finally(() => {
+          restartingAgents.delete(id)
+          restartWhenIdle()
+        })
     }
   }
-  if (pendingRestart.size === 0 && unsubscribe) {
-    unsubscribe()
-    unsubscribe = null
-  }
+  syncRestartWatch()
 }
 
 /**
@@ -79,10 +155,12 @@ export function restartAgentsWhenIdle(agentIds: string[], patch?: Partial<Create
     })
   }
   // A later plain restart keeps an earlier patch (e.g. a new trust decision) for agents still waiting.
-  for (const id of agentIds)
-    if (!ephemeral.includes(id)) pendingRestart.set(id, { ...pendingRestart.get(id), ...patch })
+  for (const id of agentIds) {
+    if (ephemeral.includes(id)) continue
+    pendingRestart.set(id, { ...pendingRestart.get(id), ...patch })
+    restartRetries.delete(id)
+  }
   restartWhenIdle()
-  if (pendingRestart.size > 0 && !unsubscribe) unsubscribe = useAgents.subscribe(restartWhenIdle)
 }
 
 /** Restart every open agent now (idle) or after it settles (busy). */

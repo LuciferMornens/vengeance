@@ -1,4 +1,5 @@
 import type { ShareDestination, ShareReadiness, ShareSessionResult } from '@shared/api/sessions'
+import type { SystemPromptDefault } from '@shared/api/settings'
 import type {
   ConfiguredPackage,
   ModelLike,
@@ -47,6 +48,7 @@ export interface PackageScope {
 
 /** Every operation: `[arguments, result]`. */
 export interface SdkHostOps {
+  'system-prompt-default': [args: Record<string, never>, result: SystemPromptDefault]
   'share-readiness': [args: PackageScope, result: ShareReadiness]
   'share-session': [
     args: PackageScope & {

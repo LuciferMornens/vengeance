@@ -1,5 +1,13 @@
 import { createRequire } from 'node:module'
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import type { JsonObject } from '@shared/api/settings'
 import { locateEngine } from '../../engine/locate'
@@ -28,7 +36,8 @@ export function readJsonFile(path: string): JsonFileRead {
   if (!text.trim()) return { exists: true, text, data: {} }
   try {
     const parsed: unknown = JSON.parse(text)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { exists: true, text, data: {}, error: 'The file must contain a JSON object.' }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      return { exists: true, text, data: {}, error: 'The file must contain a JSON object.' }
     // SAFETY: JSON.parse output checked to be a plain object above.
     return { exists: true, text, data: parsed as JsonObject }
   } catch (error) {
@@ -84,7 +93,7 @@ const RENAME_ATTEMPTS = 5
 const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms))
 
 /** The text Vengeance last wrote to each config file, so the config watcher can tell its own writes from outside edits. */
-const writtenTexts = new Map<string, string>()
+const writtenTexts = new Map<string, string | null>()
 
 function writtenKey(path: string): string {
   const absolute = resolve(path)
@@ -92,8 +101,15 @@ function writtenKey(path: string): string {
 }
 
 /** What Vengeance last wrote to `path` through writeFileAtomic (undefined when it never wrote it). */
-export function lastWrittenText(path: string): string | undefined {
+export function lastWrittenText(path: string): string | null | undefined {
   return writtenTexts.get(writtenKey(path))
+}
+
+/** Null records an owned removal; undefined restores a path with no known app write. */
+export function rememberWrittenText(path: string, text: string | null | undefined): void {
+  const key = writtenKey(path)
+  if (text === undefined) writtenTexts.delete(key)
+  else writtenTexts.set(key, text)
 }
 
 export interface ReplaceFileOptions {
@@ -108,7 +124,7 @@ export async function writeFileAtomic(
   options: ReplaceFileOptions = {}
 ): Promise<void> {
   // Recorded before the rename: the watcher's event for it can only arrive afterwards.
-  writtenTexts.set(writtenKey(path), text)
+  rememberWrittenText(path, text)
   await replaceFile(path, text, options)
 }
 
@@ -169,7 +185,10 @@ export async function updateJsonFile(
   const release = lock ? lockWithRetry(lock, path) : null
   try {
     const current = readJsonFile(path)
-    if (current.error && current.text.trim()) throw new Error(`${basename(path)} is not valid JSON (${current.error}). Fix it in Raw JSON first.`)
+    if (current.error && current.text.trim())
+      throw new Error(
+        `${basename(path)} is not valid JSON (${current.error}). Fix it in Raw JSON first.`
+      )
     await writeFileAtomic(path, serializeJson(mutate(current.data)), options)
   } finally {
     release?.()
@@ -177,7 +196,11 @@ export async function updateJsonFile(
 }
 
 /** Replace the whole file with already validated text under the engine's lock, even when the current file is corrupt. */
-export async function replaceJsonFile(path: string, override: string | null, text: string): Promise<void> {
+export async function replaceJsonFile(
+  path: string,
+  override: string | null,
+  text: string
+): Promise<void> {
   const lock = await engineLockfile(override)
   mkdirSync(dirname(path), { recursive: true })
   const release = lock ? lockWithRetry(lock, path) : null
@@ -193,7 +216,11 @@ function isObject(value: unknown): value is JsonObject {
 }
 
 /** Immutable set/unset of a nested key; unset prunes parents that become empty. */
-export function setAtPath(root: JsonObject, path: string[], value: JsonObject[string] | undefined): JsonObject {
+export function setAtPath(
+  root: JsonObject,
+  path: string[],
+  value: JsonObject[string] | undefined
+): JsonObject {
   const [head, ...rest] = path
   if (head === undefined) return root
   const next: JsonObject = { ...root }

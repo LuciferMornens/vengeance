@@ -197,6 +197,17 @@ export interface SessionManagerLike {
 }
 
 export interface PiSdkSurface {
+  buildSystemPromptSections(options: {
+    cwd: string
+    selectedTools?: string[]
+    toolSnippets?: Record<string, string>
+    toolGuidelines?: Record<string, string[]>
+  }): Record<string, string>
+  createCodingToolDefinitions(cwd: string): Array<{
+    name: string
+    promptSnippet?: string
+    promptGuidelines?: readonly string[]
+  }>
   VERSION: string
   /** `CURRENT_SESSION_VERSION` (header version of exported files). */
   CURRENT_SESSION_VERSION?: number

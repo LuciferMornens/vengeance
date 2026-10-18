@@ -316,6 +316,18 @@ A restart offer ("Restart to apply") names what changed (packages, sign-ins, or 
 Vengeance). Writes an engine makes while applying a live change (runtime toggles it saves itself, models chosen in a
 session) never offer a restart, and a project's config changes only concern that folder's sessions.
 
+System prompt controls expose the selected engine's native foundation and an open conversation's
+assembled prompt as distinct views. A foundation preview excludes user files and runtime additions;
+the conversation view identifies its source session and is a snapshot, since native hooks can change
+later requests. The Engine 2 foundation comes from the bundled native helper, which is identified
+separately from a custom engine location.
+
+Users can edit global or project `SYSTEM.md`, `APPEND_SYSTEM.md` and context instructions, customize
+the built-in foundation, and restore inherited defaults. The editor explains native precedence and
+launch overrides, protects unsaved drafts, refuses conflicting external edits and bounds file sizes.
+Saving an instruction file never restarts open work, regardless of the automatic restart preference.
+Applying it to an open conversation is explicit and uses the guarded restart path.
+
 ### 3.7 Updates — qualified engines with app releases
 
 - Vengeance bundles its own source builds of both engines. Engine upgrades ship together with app
@@ -525,6 +537,10 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   session. Refusal keeps the temporary resident and its messages intact. Other user temporary sessions
   sharing the daemon must close before a saved resident restarts. Internal configuration-service workers
   drain within a bounded period before a native restart.
+- Both engines reject restart while startup or a session operation is in flight. Restart preparation
+  excludes new commands and checks native streaming and compaction state before stopping anything.
+  Engine refuses restart with queued messages or nonempty temporary history that cannot be restored;
+  it carries the live model and reasoning selection unless the restart explicitly changes them.
 - Launch-environment changes are rejected while other residents share the daemon. Unknown background
   launch environments also fail closed. Startup failures attempt the prior executable/environment/config
   rollback only after all relevant native processes are confirmed stopped. An ambiguous running

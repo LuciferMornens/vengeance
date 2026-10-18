@@ -17,6 +17,7 @@ import {
   writePrimeModels
 } from './auth'
 import { cancelPrimeRun } from './configuration-cli'
+import { primeDefaultSystemPrompt } from './system-prompt'
 import {
   openPrimePath,
   primeContextOverview,
@@ -110,6 +111,7 @@ async function dispatchPrimeSettings(
     const result = await operation()
     context.broadcast?.('settings:changed', {
       area,
+      ...(request.channel === 'settings:instruction-file-write' ? { apply: 'new-sessions' } : {}),
       ...(cwd ? { project: { cwd, trusted: true } } : {})
     })
     return result
@@ -193,6 +195,8 @@ async function dispatchPrimeSettings(
       return primeMcpAuth(...request.args, context)
     case 'settings:context':
       return primeContextOverview(...request.args)
+    case 'settings:system-prompt-default':
+      return primeDefaultSystemPrompt()
     case 'settings:instruction-file':
       return readPrimeInstruction(...request.args)
     case 'settings:instruction-file-write':

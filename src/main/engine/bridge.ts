@@ -42,7 +42,8 @@ const OP_COMMAND: Record<BridgeOp, BridgeCommandName> = {
   'tools-set': 'vengeance-tools',
   label: 'vengeance-label',
   subagents: 'vengeance-subagents',
-  speed: 'vengeance-speed'
+  speed: 'vengeance-speed',
+  'system-prompt': 'vengeance-system-prompt'
 }
 
 /** The bridge waits up to 15 s for pi-subagents' event-bus reply; allow for the prompt round trip on top. */
@@ -63,6 +64,7 @@ function payloadOf(request: BridgeRequest, reqId: string): Record<string, unknow
       return { reqId, ...rest }
     }
     case 'reload':
+    case 'system-prompt':
       return { reqId }
     case 'tools-get':
       return { reqId, op: 'get' }

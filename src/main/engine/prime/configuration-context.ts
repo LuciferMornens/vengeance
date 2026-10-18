@@ -5,6 +5,7 @@ import type {
   ContextOverview,
   InstructionFileRef,
   InstructionFileState,
+  InstructionFileWriteRef,
   JsonObject,
   KeybindingsState,
   SetSettingArgs,
@@ -331,6 +332,8 @@ export async function primeContextOverview(cwd: string | null): Promise<ContextO
 
 async function instructionPath(cwd: string | null, reference: InstructionFileRef): Promise<string> {
   if (!INSTRUCTION_KINDS.has(reference.kind)) throw new Error('Unknown instruction file.')
+  if (!['global', 'project'].includes(reference.scope))
+    throw new Error('Unknown instruction scope.')
   if (reference.scope === 'project' && !cwd) throw new Error('Choose a workspace first.')
   const base =
     reference.scope === 'global'
@@ -360,10 +363,18 @@ export async function readPrimeInstruction(
 
 export async function writePrimeInstruction(
   cwd: string | null,
-  reference: InstructionFileRef,
+  reference: InstructionFileWriteRef,
   text: string | null
 ): Promise<InstructionFileState> {
   const path = await instructionPath(cwd, reference)
+  const current = await readPrimeInstruction(cwd, reference)
+  if (
+    reference.expected &&
+    (reference.expected.exists !== current.exists || reference.expected.text !== current.text)
+  )
+    throw new Error('This file changed outside the editor. Reopen it to review the latest version.')
+  if (reference.kind === 'SYSTEM.md' && text !== null && !text.trim())
+    throw new Error('A replacement prompt cannot be empty. Restore the inherited prompt instead.')
   if (text === null) {
     try {
       await stat(path)

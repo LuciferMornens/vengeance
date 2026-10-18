@@ -14,6 +14,7 @@ import { setProjectTrust, trustPreflight } from '../features/launch/trust'
 import { ConfigWatcher } from '../features/settings/config-watcher'
 import {
   contextOverview,
+  defaultSystemPrompt,
   readInstructionFile,
   writeInstructionFile
 } from '../features/settings/instructions'
@@ -150,20 +151,19 @@ export function registerSettingsIpc(context: IpcContext): void {
   setTimeout(() => checkAccountModels(false), ACCOUNT_MODELS_FIRST_CHECK_MS).unref()
   setInterval(() => checkAccountModels(false), ACCOUNT_MODELS_INTERVAL_MS).unref()
   const stopOfflineListener = appState.onPrefsChange((next, previous) => {
-    if (previous.features.updates?.offline && !next.features.updates?.offline) checkAccountModels(false)
+    if (previous.features.updates?.offline && !next.features.updates?.offline)
+      checkAccountModels(false)
   })
   onQuit('before-quit', stopOfflineListener)
 
   const changed = (
     area: SettingsChangeArea,
-    project?: SettingsEventMap['settings:changed']['project']
+    project?: SettingsEventMap['settings:changed']['project'],
+    apply?: SettingsEventMap['settings:changed']['apply']
   ) => {
     noteChange(area)
     watcher.noteSelfChange(area)
-    broadcast(
-      'settings:changed',
-      project ? { area, project, engine: 'pi' } : { area, engine: 'pi' }
-    )
+    broadcast('settings:changed', { area, project, apply, engine: 'pi' })
   }
   const log = (event: SettingsEventMap['settings:process-log']) =>
     broadcast('settings:process-log', { ...event, engine: 'pi' })
@@ -287,10 +287,18 @@ export function registerSettingsIpc(context: IpcContext): void {
   )
 
   handle('settings:context', (cwd) => contextOverview(override(), cwd))
+  handle('settings:system-prompt-default', () => defaultSystemPrompt(override()))
   handle('settings:instruction-file', (cwd, ref) => readInstructionFile(cwd, ref))
-  handle('settings:instruction-file-write', (cwd, ref, text) =>
-    write('instructions', () => writeInstructionFile(cwd, ref, text))
-  )
+  handle('settings:instruction-file-write', async (cwd, ref, text) => {
+    const project =
+      ref.scope === 'project' && cwd
+        ? { cwd, trusted: (await trustPreflight(override(), cwd)).engineDefault }
+        : undefined
+    watcher.noteSelfChange('instructions')
+    const result = await writeInstructionFile(cwd, ref, text)
+    changed('instructions', project, 'new-sessions')
+    return result
+  })
 
   handle('settings:trust-list', () => listTrust())
   handle('settings:trust-entry', (path, decision) =>

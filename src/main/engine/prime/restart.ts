@@ -76,16 +76,21 @@ const pendingRestarts = new Map<string, PendingRestart>()
 export function primeRestartSelection(
   previous: CreateAgentArgs,
   next: CreateAgentArgs,
-  state: PrimeRecord
+  state: PrimeRecord,
+  patch?: Partial<CreateAgentArgs>
 ): CreateAgentArgs {
   const model = asRecord(state.model)
-  const keepModel = previous.provider === next.provider && previous.model === next.model
+  const sameModel = previous.provider === next.provider && previous.model === next.model
+  const keepProvider = patch ? !Object.hasOwn(patch, 'provider') : sameModel
+  const keepModel = patch ? !Object.hasOwn(patch, 'model') : sameModel
+  const keepThinking = patch
+    ? !Object.hasOwn(patch, 'thinking')
+    : previous.thinking === next.thinking
   return {
     ...next,
-    provider: keepModel ? (stringValue(model.provider) ?? next.provider) : next.provider,
+    provider: keepProvider ? (stringValue(model.provider) ?? next.provider) : next.provider,
     model: keepModel ? (stringValue(model.id) ?? next.model) : next.model,
-    thinking:
-      previous.thinking === next.thinking ? thinkingLevel(state.thinkingLevel) : next.thinking
+    thinking: keepThinking ? thinkingLevel(state.thinkingLevel) : next.thinking
   }
 }
 
@@ -239,6 +244,7 @@ async function performPrimeRestart(
     assertMarkerFresh(prepared.expiresAt)
     residents = await residentSessions(control)
     assertIdle(residents)
+    assertPrimeSideQuestionsIdle(source.socketPath)
     commitAttempted = true
     await commitRestart(control, prepared.updateId, [
       ...capturedWorkers,
@@ -378,6 +384,17 @@ function sessionIdentity(session: PrimeRecord): string | undefined {
 }
 
 function assertIdle(residents: PrimeRecord[]): void {
+  if (
+    residents.some(
+      (session) =>
+        typeof session.hasRunningSubagents !== 'boolean' ||
+        typeof session.isRunningTools !== 'boolean'
+    )
+  ) {
+    throw new Error(
+      'Engine 2 cannot verify whether every resident’s child agents and tools are idle'
+    )
+  }
   const busy = residents.find(
     (session) =>
       session.isStreaming === true ||

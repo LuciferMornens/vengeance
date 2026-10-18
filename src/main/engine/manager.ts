@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
-import { isAbsolute, resolve } from 'node:path'
+import { isAbsolute } from 'node:path'
 import {
   hasBridgeCommands,
   isEngineId,
@@ -32,7 +32,18 @@ import { locateEngine, type EngineLocation } from './locate'
 import { EngineProcess } from './rpc-process'
 import { asRecord, stringValue } from './prime/transport'
 import { requestSessionTree } from './session-tree'
-import { prepareEngineAttachment } from './session-attachment'
+import {
+  absoluteSessionFile,
+  prepareEngineAttachment,
+  withAbsoluteSessionFile
+} from './session-attachment'
+import {
+  assertRestartIdle,
+  locateRestartEngine,
+  observeRestartDialog,
+  prepareRestartArgs,
+  type RestartDialog
+} from './restart'
 import { inspectSubagent } from './subagents-inspect'
 import {
   assertPrimeHandoffIdle,
@@ -73,37 +84,14 @@ interface ManagedAgent {
   switching?: boolean
   hidden?: boolean
   bufferedEvents?: EngineEvent[]
-  operations?: number
+  operations: number
+  dialogs: Map<string, RestartDialog>
   terminated?: boolean
 }
 
 const AGENT_ID = /^[A-Za-z0-9-]{1,64}$/
 
-/**
- * The engine reports `sessionFile` as configured, so a relative `sessionDir` (project `.pi/settings.json`) gives a
- * path relative to the engine's working folder. Everything in the app keys sessions by absolute path.
- */
-function absoluteSessionFile(sessionFile: string | undefined, cwd: string): string | undefined {
-  return sessionFile && !isAbsolute(sessionFile) ? resolve(cwd, sessionFile) : sessionFile
-}
-
-/** A `get_state` / `get_session_stats` reply with its `sessionFile` made absolute (see `absoluteSessionFile`). */
-export function withAbsoluteSessionFile(response: RpcResponse, cwd: string): RpcResponse {
-  if (!response.success) return response
-  if (response.command === 'get_state') {
-    return {
-      ...response,
-      data: { ...response.data, sessionFile: absoluteSessionFile(response.data.sessionFile, cwd) }
-    }
-  }
-  if (response.command === 'get_session_stats') {
-    return {
-      ...response,
-      data: { ...response.data, sessionFile: absoluteSessionFile(response.data.sessionFile, cwd) }
-    }
-  }
-  return response
-}
+export { withAbsoluteSessionFile } from './session-attachment'
 
 /** Build pi CLI args (after `--mode rpc`) from session options, loading the bridge extension when given. */
 export function buildEngineArgs(
@@ -184,6 +172,8 @@ export class EngineManager {
       info,
       handle: null,
       unsubscribe: [],
+      operations: 1,
+      dialogs: new Map(),
       hidden,
       bufferedEvents: hidden ? [] : undefined
     }
@@ -201,6 +191,7 @@ export class EngineManager {
         this.hooks.onStatus(agentId, info.status, { ...info })
       }
     }
+    agent.operations--
     return { ...info }
   }
 
@@ -292,11 +283,12 @@ export class EngineManager {
 
   /** Live transcript of an async subagent child (pi-subagents' inspect host command). */
   inspectSubagent(agentId: string, request: SubagentInspectRequest): Promise<SubagentInspectReply> {
-    const agent = this.require(agentId)
-    if (agent.info.engine !== 'pi') {
-      throw new Error('Use this engine’s native agent controls to inspect a child session')
-    }
-    return inspectSubagent(this.requireHandle(agent), request)
+    return this.operation(agentId, async (agent) => {
+      if (agent.info.engine !== 'pi') {
+        throw new Error('Use this engine’s native agent controls to inspect a child session')
+      }
+      return inspectSubagent(this.requireHandle(agent), request)
+    })
   }
 
   async nativeCommand(
@@ -328,7 +320,9 @@ export class EngineManager {
   respondUi(agentId: string, response: RpcExtensionUIResponse): void {
     const agent = this.require(agentId)
     if (agent.switching) throw new Error('Wait for the engine switch to finish')
+    if (agent.restarting) throw new Error('Wait for the engine restart to finish')
     agent.handle?.respondUi(response)
+    agent.dialogs.delete(response.id)
   }
 
   stderr(agentId: string): string {
@@ -340,6 +334,7 @@ export class EngineManager {
     const agent = this.require(agentId)
     if (agent.switching) throw new Error('Wait for the engine switch to finish')
     if (agent.restarting) throw new Error('This engine is already restarting')
+    assertRestartIdle(agent.info, agent.operations, agent.dialogs)
     agent.restarting = true
     const assertOpen = (): void => {
       if (this.agents.get(agentId) !== agent) throw new Error('This session is no longer open')
@@ -349,35 +344,29 @@ export class EngineManager {
       if (patch?.engine !== undefined && patch.engine !== agent.info.engine) {
         throw new Error('Choose a different engine when creating a new session')
       }
-      const location =
-        this.options.mock || agent.info.engine === 'prime' ? undefined : await this.locate()
-      if (!this.options.mock && agent.info.engine === 'prime') {
-        // Imported on use: prime/locate needs Electron's `app`, and the Node checks load this module (Vite's
-        // "also statically imported" warning about it is expected).
-        const { primeEngineInfo } = await import('./prime/locate')
-        const details = await primeEngineInfo(this.options.engineOverridePath('prime'))
-        if (!details.found) throw new Error(details.error ?? 'Engine 2 could not be found')
-      }
+      const location = await locateRestartEngine(
+        agent.info.engine,
+        this.options.mock,
+        this.options.engineOverridePath(agent.info.engine)
+      )
       assertOpen()
-      const resume = agent.info.sessionFile
-      const stored: CreateAgentArgs = {
-        ...agent.info.args,
-        ...patch,
-        cwd: agent.info.args.cwd,
-        engine: agent.info.engine
-      }
-      let args: CreateAgentArgs = resume
-        ? { ...stored, sessionPath: resume, forkFrom: undefined, noSession: undefined }
-        : stored
+      assertRestartIdle(agent.info, agent.operations, agent.dialogs)
+      let args = await prepareRestartArgs(agent.info, agent.handle, patch)
+      assertOpen()
+      assertRestartIdle(agent.info, agent.operations, agent.dialogs)
       // A failed startup already released its client; retry creation and native resident lookup.
       if (agent.started) {
         const prepared = await agent.handle?.prepareRestart?.(
           args,
-          this.options.engineOverridePath(agent.info.engine)
+          this.options.engineOverridePath(agent.info.engine),
+          patch
         )
         if (prepared) args = prepared
       }
       assertOpen()
+      if (agent.info.engine === 'pi') {
+        assertRestartIdle(agent.info, agent.operations, agent.dialogs)
+      }
       await this.stopAgent(agent)
       assertOpen()
       this.agents.delete(agentId)
@@ -650,6 +639,7 @@ export class EngineManager {
     agent.unsubscribe.push(
       handle.on('event', (event) => {
         if (!current()) return
+        observeRestartDialog(agent.dialogs, event, info.busy)
         if (event.type === 'agent_start') info.busy = true
         else if (event.type === 'agent_settled') info.busy = false
         else if (event.type === 'session_info_changed') info.sessionName = event.name
@@ -678,12 +668,14 @@ export class EngineManager {
         }
         if (status === 'crashed') {
           info.busy = false
+          agent.dialogs.clear()
           info.error = handle.error
         }
         if (!agent.hidden) this.hooks.onStatus(info.agentId, status, { ...info })
       }),
       handle.on('exit', (exit) => {
         if (!current()) return
+        agent.dialogs.clear()
         if (agent.hidden) return
         this.hooks.onExit({
           agentId: info.agentId,
@@ -697,6 +689,7 @@ export class EngineManager {
   private unwire(agent: ManagedAgent): void {
     for (const off of agent.unsubscribe) off()
     agent.unsubscribe = []
+    agent.dialogs.clear()
   }
 
   private async stopAgent(agent: ManagedAgent): Promise<void> {
@@ -780,7 +773,8 @@ export class EngineManager {
   ): Promise<Result> {
     const agent = this.require(agentId)
     if (agent.switching) throw new Error('Wait for the engine switch to finish')
-    agent.operations = (agent.operations ?? 0) + 1
+    if (agent.restarting) throw new Error('Wait for the engine restart to finish')
+    agent.operations++
     try {
       return await run(agent)
     } finally {
