@@ -31,6 +31,7 @@ interface StoreModule {
       ): Promise<void>
       setThinkingLevel(agentId: string, level: ThinkingLevel): Promise<void>
       refreshCapabilities(agentId: string): Promise<void>
+      refresh(agentId: string): Promise<void>
       applyEvents(events: Map<string, EngineEvent[]>): void
     }
   }
@@ -64,6 +65,28 @@ async function settle(): Promise<void> {
   await new Promise<void>((done) => setImmediate(done))
 }
 
+function waitForAgent(
+  store: StoreModule['useAgents'],
+  agentId: string,
+  predicate: (agent: AgentState) => boolean,
+  message: string
+): Promise<void> {
+  const READINESS_TIMEOUT_MS = 2000
+  return new Promise((complete, reject) => {
+    const timeout = setTimeout(() => {
+      unsubscribe()
+      reject(new Error(message))
+    }, READINESS_TIMEOUT_MS)
+    const unsubscribe = store.subscribe((state) => {
+      const agent = state.agents[agentId]
+      if (!agent || !predicate(agent)) return
+      clearTimeout(timeout)
+      unsubscribe()
+      complete()
+    })
+  })
+}
+
 async function fixture() {
   const root = process.cwd()
   const esbuild: typeof import('esbuild') = createRequire(join(root, 'package.json'))('esbuild')
@@ -85,6 +108,7 @@ async function fixture() {
   let blockState: ReturnType<typeof deferred> | undefined
   let refuseRestart = false
   let failMutation = false
+  let refusedRead: RpcCommand['type'] | undefined
   const levels = (state: RpcSessionState): ThinkingLevel[] =>
     state.model?.reasoning ? ['off', 'low', 'high'] : ['off']
   const emit = (agentId: string, event: EngineEvent) =>
@@ -166,6 +190,15 @@ async function fixture() {
             command: command.type,
             data
           })
+          if (command.type === refusedRead) {
+            refusedRead = undefined
+            return {
+              type: 'response',
+              command: command.type,
+              success: false,
+              error: 'Read refused'
+            }
+          }
           if (command.type === 'get_state') {
             const snapshot = { ...state }
             const gate = blockState
@@ -216,6 +249,10 @@ async function fixture() {
     mutations,
     prompts,
     emit,
+    reportStatus(agentId: string, status: AgentInfo['status']) {
+      const info = infos.get(agentId)!
+      listeners.get('engine:status')?.({ agentId, info: { ...info, status } })
+    },
     delayMutation() {
       blockMutation = deferred()
       return blockMutation
@@ -229,6 +266,9 @@ async function fixture() {
     },
     failMutation() {
       failMutation = true
+    },
+    failRead(command: 'get_state' | 'get_commands') {
+      refusedRead = command
     },
     async close() {
       for (const agentId of [...infos.keys()]) await api.useAgents.getState().disposeAgent(agentId)
@@ -328,6 +368,69 @@ await check('a prompt waits for the selected model without blocking other sessio
     await test.close()
   }
 })
+
+await check(
+  'settled model refreshes cannot cancel a restarted native command catalog',
+  async () => {
+    const test = await fixture()
+    try {
+      const agentId = await test.store.getState().createAgent({ cwd: 'project', engine: 'prime' })
+      test.reportStatus(agentId, 'starting')
+      test.reportStatus(agentId, 'ready')
+      const snapshot = waitForAgent(
+        test.store,
+        agentId,
+        (agent) => agent.snapshotRevision > 0,
+        'The native attachment snapshot did not reach the renderer'
+      )
+      test.emit(agentId, {
+        type: 'engine_native_event',
+        engine: 'prime',
+        name: 'session_snapshot',
+        data: { state: test.states.get(agentId), messages: [], steering: [], followUp: [] }
+      })
+      await snapshot
+      const catalog = waitForAgent(
+        test.store,
+        agentId,
+        (agent) => agent.commandsStatus === 'ready',
+        'The settled-model refresh canceled the restarted native command catalog'
+      )
+      test.emit(agentId, { type: 'agent_settled', aborted: false })
+      await catalog
+      assert.equal(test.store.getState().agents[agentId]!.historyLoaded, true)
+    } finally {
+      await test.close()
+    }
+  }
+)
+
+await check(
+  'refresh failures keep only the current generation’s authoritative command catalog',
+  async () => {
+    const test = await fixture()
+    try {
+      const agentId = await test.store.getState().createAgent({ cwd: 'project', engine: 'prime' })
+      const catalog = test.store.getState().agents[agentId]!.commands
+      for (const refresh of ['refreshCapabilities', 'refresh'] as const) {
+        for (const command of ['get_state', 'get_commands'] as const) {
+          test.failRead(command)
+          await assert.rejects(test.store.getState()[refresh](agentId), /Read refused/)
+          const agent = test.store.getState().agents[agentId]!
+          assert.equal(agent.commandsStatus, 'ready')
+          assert.equal(agent.commands, catalog)
+        }
+      }
+      test.reportStatus(agentId, 'starting')
+      test.reportStatus(agentId, 'ready')
+      test.failRead('get_commands')
+      await assert.rejects(test.store.getState().refreshCapabilities(agentId), /Read refused/)
+      assert.equal(test.store.getState().agents[agentId]!.commandsStatus, 'error')
+    } finally {
+      await test.close()
+    }
+  }
+)
 
 await check('refused restart preserves the running session and rejects to its caller', async () => {
   const test = await fixture()

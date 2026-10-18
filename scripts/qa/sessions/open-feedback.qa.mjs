@@ -535,6 +535,11 @@ await runSuite(
         assert.equal(await composer.inputValue(), '/new')
         assert.equal((await app.invoke('engine:list')).length, count)
         assert.equal((await app.agentState()).info.args.sessionPath, path)
+        const failure = app.page
+          .getByRole('alert')
+          .filter({ hasText: 'QA command catalog unavailable' })
+        await failure.getByRole('button', { name: 'Dismiss', exact: true }).click()
+        await failure.waitFor({ state: 'hidden' })
       })
 
       await step('a ready cached conversation opens without a pending layer', async () => {

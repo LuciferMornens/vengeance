@@ -376,7 +376,10 @@ export const useAgents = create<AgentsStore>()((set, get) => ({
       rpc(agentId, { type: 'get_available_thinking_levels' }),
       rpc(agentId, { type: 'get_commands' })
     ]).catch((error) => {
-      if (isCurrentGeneration(agentId, generation, revision)) {
+      if (
+        isCurrentGeneration(agentId, generation, revision) &&
+        get().agents[agentId]?.commandsStatus !== 'ready'
+      ) {
         get().patchAgent(agentId, { commandsStatus: 'error' })
       }
       throw error
@@ -469,7 +472,10 @@ async function refreshAgent(agentId: string): Promise<void> {
       }
     })
     .catch((error) => {
-      if (isCurrentGeneration(agentId, generation, revision)) {
+      if (
+        isCurrentGeneration(agentId, generation, revision) &&
+        get().agents[agentId]?.commandsStatus !== 'ready'
+      ) {
         get().patchAgent(agentId, { commandsStatus: 'error' })
       }
       throw error
@@ -619,6 +625,7 @@ let frame: number | null = null
 let fallback: ReturnType<typeof setTimeout> | null = null
 const statsTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const stateTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const capabilityTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const REFRESH_DEBOUNCE_MS = 250
 const HIDDEN_WINDOW_FLUSH_MS = 120
 
@@ -626,7 +633,7 @@ function clearAgentWork(agentId: string): void {
   pending.delete(agentId)
   earlyEvents.delete(agentId)
   modelChanges.delete(agentId)
-  for (const timers of [statsTimers, stateTimers]) {
+  for (const timers of [statsTimers, stateTimers, capabilityTimers]) {
     const timer = timers.get(agentId)
     if (timer !== undefined) clearTimeout(timer)
     timers.delete(agentId)
@@ -677,7 +684,7 @@ function flush(): void {
       )
     ) {
       scheduleStats(agentId)
-      debounce(stateTimers, agentId, () => useAgents.getState().refreshCapabilities(agentId))
+      debounce(capabilityTimers, agentId, () => useAgents.getState().refreshCapabilities(agentId))
       continue
     }
     if (
