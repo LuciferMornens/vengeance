@@ -53,6 +53,9 @@ node scripts/qa/settings/thinking.qa.mjs   # one suite directly
   Engine 2 and helper package builds. Both accept 1–32 jobs and default to four. For native tests,
   `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0` omits debug symbols while keeping test
   assertions, reducing GNU linker memory use on Windows.
+- Prime workspace formatting on Windows runs per-package native checks across the workspace and its
+  recursive path dependencies. This keeps full `cargo fmt --all --check` coverage within Windows'
+  command-line length limit; other hosts use the single native workspace command.
 - The Engine workspace runner builds the locked `packages/env` Rust daemon before the full suite
   or a targeted `env` run, matching upstream CI. `QA_NATIVE_JOBS` also limits this prerequisite.
   The standalone Env package is outside the bundled SDK's runtime dependency graph.
