@@ -32,6 +32,11 @@ fallback. The [14 October audit](docs/ENGINE-AUDIT-2026-10-14.md) records earlie
 evidence and gaps. Engine 2 settings preservation and rustls maintenance are identified upstream
 backports; its native base remains the latest stable release.
 
+The [prompt and restart qualification report](docs/ENGINE-PROMPTS-QUALIFICATION-2026-10-18.md) records
+the current reconstructed artifacts and completed or pending gates. The
+[navigation performance report](docs/PERFORMANCE-FIRST-NAVIGATION-2026-10-18.md) keeps measured renderer
+builds and native payloads explicit; its timings do not replace engine or packaged qualification.
+
 [OpenAI native compaction](docs/openai-native-compaction.md) records the protocol study, checkpoint
 compatibility policy and regressions for Prime patch `0015` and the Engine bridge. Requalify both
 Responses transports, both authentication routes, cancellation and saved-session replay on upgrades.
@@ -202,6 +207,17 @@ retained 0.3.0 packages as the baseline.
    and restart capture/configuration. Follow `resources/prime-auth/README.md` when updating the helper's
    dependencies; both auth and restart revision consumers must agree. A helper handshake is not an
    engine/helper compatibility check. Test the supported engine/helper combinations explicitly.
+   Restart requires helper capabilities `restartConfig`, `restartCapture` and `restartSelections`
+   before native preparation. Once the daemon reaches `Prepared`, its mutation fence protects
+   `get_connection_state` capture of every resident's provider, model and actual thinking level.
+   The helper validates complete, unique roster/worker identities, paths and all descriptor/roster
+   create envelopes before commit. It writes each captured selection to flat and nested create fields,
+   then overlays explicit target configuration. Failed-successor recovery restores the raw backups,
+   reapplies the checkpointed selections with an empty target patch and launches the prior engine.
+   Keep those backups intact. Qualify changed target and idle-peer selections across providers, queued
+   explicit overrides, malformed peer creates and failed-successor rollback through
+   `scripts/checks/prime-restart-native.mjs`, `scripts/checks/prime-restart-isolation.mjs` and
+   `scripts/checks/prime-adapter-real.mjs`.
    Prime can report `session_already_active` while a revived worker holds the file lease but its
    supervisor has not registered that identity. The app retries only the corresponding unknown-session
    attach, within a 30-second retry window, without creating another worker or changing the saved file. Qualify
@@ -255,9 +271,9 @@ retained 0.3.0 packages as the baseline.
      ChatGPT can echo `default` for a faster request: native billing follows the requested tier.
      An explicit provider tier refusal resets the preference to Standard and displays a notice;
      rate limits and unrelated provider errors do not change it.
-   - Engine 2 restart configuration carries the live model and thinking level unless launch options
-     explicitly change them. Qualify model changes followed by restart, not only unchanged launch
-     selections or tier serialization.
+   - Engine 2 restart configuration carries every resident's live provider, model and thinking level;
+     explicit launch changes override only the target. Qualify model changes followed by restart,
+     including idle peers and rollback, not only unchanged launch selections or tier serialization.
    - pi's own compaction summary request bypasses `before_provider_request`, so it runs at standard speed
      (a documented limitation); the bridge's native compaction checkpoint applies the speed itself.
    - ChatGPT model catalog (`resources/bridge/speed-mode-core.ts`): `GET <baseUrl>/codex/models?client_version=`

@@ -529,6 +529,11 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   restart without interrupting it. The pinned helper applies the selected executable, saved settings and
   explicitly changed launch fields. Native recovery snapshots carry queued messages, goals, kernel,
   child-agent and schedule state; successful restoration verifies a new worker process.
+  After native preparation reaches `Prepared`, its mutation fence protects capture of every resident's
+  live provider, model and thinking level through `get_connection_state`. The helper validates complete,
+  unique roster/descriptor coverage and every native create envelope before commit. Each resident keeps
+  its captured selection in both descriptor replay and roster fallback; explicit target launch changes
+  apply last. A sibling's defaults or original launch selection never replace that live selection.
   Active product side questions and side questions observed through attached clients also block restart.
   The native API cannot query a previously unseen side question owned by an external client; the guard
   must not claim visibility into that work. The normal app-owned daemon disconnect aborts its client-owned
@@ -550,6 +555,8 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   the roster before commit. The installed native commit path can also run terminal cleanup and remove
   those recovery files. Restore their captured native contents only after verifying that the relevant
   workers stopped, then launch the selected successor and restore its roster through the native API.
+  If the successor fails, restore the raw backups and reapply every checkpointed live selection with no
+  target launch patch before launching the prior executable. Keep the raw recovery backups intact.
 - Prime saved-session listing and workspace discovery read native JSONL metadata without starting a
   worker, model request or Python environment. Discovery is cached and coalesced. Mutations invalidate
   the appropriate listing, while background residents remain reachable by their native identity.
@@ -576,7 +583,8 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   preview and requested uploads; upload actions send native session data only when the user invokes them.
   Its `--restart-config` mode applies typed native launch configuration to a prepared recovery snapshot;
   metadata advertises this as `restartConfig`. Its precommit capture mode is advertised as
-  `restartCapture`; both capabilities are required for native restart.
+  `restartCapture`, and complete live-selection validation and restoration as `restartSelections`.
+  All three capabilities are required before native restart preparation.
 - Private child-process JSON Lines carry credentials to main only. Renderer events contain prompts,
   notices and completion status. Bound frames, expire idle flows, cancel pending prompts and terminate
   the helper on cancellation or app shutdown. Once atomic credential saving begins, finish that write.
@@ -673,3 +681,8 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
 - Custom engine locations do not receive automatic native self-updates. Vengeance releases deliver
   qualified builds; the app updater does not run the maintainer qualification suite or rebase patches.
   Documentation and UI must distinguish upstream releases from verified compatibility and local patch identity.
+
+Current prompt and restart evidence is recorded in the
+[qualification report](docs/ENGINE-PROMPTS-QUALIFICATION-2026-10-18.md). The separate
+[navigation performance report](docs/PERFORMANCE-FIRST-NAVIGATION-2026-10-18.md) identifies its measured
+builds, fixtures and remaining qualification limits.
