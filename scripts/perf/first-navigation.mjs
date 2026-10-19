@@ -314,27 +314,99 @@ async function saveTimeline(profiler, path) {
   }
 }
 
-async function verifyHistoryScrolling(page) {
-  const transcript = page.locator('[data-transcript-scroll]')
-  const rectangle = await transcript.boundingBox()
-  await page.mouse.move(rectangle.x + rectangle.width / 2, rectangle.y + rectangle.height / 2)
-  await page.mouse.wheel(0, -rectangle.height * HISTORY_ENTRY_SCROLL_SCREENS)
-  await page.waitForFunction(
-    () => {
-      const scroller = document.querySelector('[data-transcript-scroll]')
+async function verifyWheelHistory(page) {
+  const observation = await page.evaluateHandle((stabilityMs) => {
+    const scroller = document.querySelector('[data-transcript-scroll]')
+    const geometry = () => ({
+      scrollTop: scroller.scrollTop,
+      scrollHeight: scroller.scrollHeight,
+      clientHeight: scroller.clientHeight
+    })
+    let previous = geometry()
+    let changedAt = performance.now()
+    let trustedWheel = false
+    let movedUp = false
+    const record = () => {
+      const current = geometry()
+      if (trustedWheel && current.scrollTop < previous.scrollTop) movedUp = true
+      if (Object.keys(current).some((key) => current[key] !== previous[key])) {
+        changedAt = performance.now()
+      }
+      previous = current
+      return current
+    }
+    const wheel = (event) => {
+      if (!event.isTrusted || event.deltaY >= 0) return
+      trustedWheel = true
+      previous = geometry()
+      changedAt = performance.now()
+    }
+    const snapshot = () => {
+      const current = record()
       const viewport = scroller.getBoundingClientRect()
-      return [...scroller.querySelectorAll('[data-virtual-segments] > [data-index]')].some(
-        (row) => {
+      const rows = [...scroller.querySelectorAll('[data-virtual-segments] > [data-index]')]
+        .filter((row) => {
           const rectangle = row.getBoundingClientRect()
           return (
             rectangle.bottom > viewport.top && rectangle.top < viewport.bottom && row.textContent
           )
-        }
-      )
-    },
-    null,
-    { timeout: HISTORY_READY_TIMEOUT_MS }
-  )
+        })
+        .map((row) => row.getAttribute('data-index'))
+      return {
+        ...current,
+        trustedWheel,
+        movedUp,
+        quietMs: performance.now() - changedAt,
+        distance: current.scrollHeight - current.scrollTop - current.clientHeight,
+        visibleRows: rows
+      }
+    }
+    scroller.addEventListener('wheel', wheel)
+    scroller.addEventListener('scroll', record)
+    return {
+      snapshot,
+      ready(latest) {
+        const current = snapshot()
+        const settled = current.quietMs >= stabilityMs
+        if (latest) return settled && current.distance < 1
+        return (
+          settled && trustedWheel && movedUp && current.distance > 1 && current.visibleRows.length
+        )
+      },
+      cleanup() {
+        scroller.removeEventListener('wheel', wheel)
+        scroller.removeEventListener('scroll', record)
+      }
+    }
+  }, HISTORY_SCROLL_STABILITY_MS)
+  const waitForSettled = async (latest) => {
+    const settled = await page.waitForFunction(
+      ({ observation, latest }) => observation.ready(latest),
+      { observation, latest },
+      { timeout: HISTORY_READY_TIMEOUT_MS }
+    )
+    await settled.dispose()
+  }
+  try {
+    const rectangle = await page.locator('[data-transcript-scroll]').boundingBox()
+    await page.mouse.move(rectangle.x + rectangle.width / 2, rectangle.y + rectangle.height / 2)
+    await page.mouse.wheel(0, -rectangle.height * HISTORY_ENTRY_SCROLL_SCREENS)
+    await waitForSettled(false)
+    const jump = page.getByRole('button', { name: 'Jump to latest' })
+    assert.equal(await jump.isVisible(), true, 'the wheel leaves a settled history reader')
+    await jump.click()
+    await waitForSettled(true)
+  } catch (error) {
+    const snapshot = await observation.evaluate((value) => value.snapshot())
+    throw new Error(`Wheel history did not settle: ${JSON.stringify(snapshot)}`, { cause: error })
+  } finally {
+    await observation.evaluate((value) => value.cleanup())
+    await observation.dispose()
+  }
+}
+
+async function verifyHistoryScrolling(page) {
+  await verifyWheelHistory(page)
   await page.evaluate(() => {
     const transcript = document.querySelector('[data-transcript-scroll]')
     transcript.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }))
@@ -373,7 +445,14 @@ async function verifyHistoryScrolling(page) {
     const transcript = document.querySelector('[data-transcript-scroll]')
     return transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 1
   })
-  return { firstUpwardScroll: true, oldestHistory: true, stableReader: true, jumpToLatest: true }
+  return {
+    firstUpwardScroll: true,
+    wheelReader: true,
+    wheelJumpToLatest: true,
+    oldestHistory: true,
+    stableReader: true,
+    jumpToLatest: true
+  }
 }
 
 async function visit(page, path, engine, title) {
