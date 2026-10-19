@@ -14,7 +14,15 @@ import { createConnection } from 'node:net'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { APP_PROCESS_NAME, ELECTRON_SWITCHES } from './platform.mjs'
-import { isAlive, killTree, pidsOfImage, processTable } from './processes.mjs'
+import {
+  isAlive,
+  killTree,
+  pidsOfImage,
+  processIdentity,
+  processTable,
+  processWasPresent,
+  sameProcess
+} from './processes.mjs'
 import { snapshotRealConfig, REAL_PROMPT_MAX_CHARS } from './real-guard.mjs'
 import { assertOutsideRealHome, isInside, qaTempDir } from './tmp.mjs'
 import { assertTempPath } from './agent-dir.mjs'
@@ -144,8 +152,18 @@ async function stopDaemonEndpoint(endpoint) {
   })
 }
 
+function hasDaemonEndpoint(commandLine, endpoint) {
+  const escaped = endpoint.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(?:^|[\\s"'])${escaped}(?=$|[\\s"'])`).test(commandLine)
+}
+
+function executableKey(path) {
+  const absolute = resolve(path)
+  return process.platform === 'win32' ? absolute.toLowerCase() : absolute
+}
+
 /** Only a registry under the QA temp root and a daemon started during this run can be cleaned up. */
-export async function shutdownOwnedPrimeDaemons(agentDir, foreignPids) {
+export async function shutdownOwnedPrimeDaemons(agentDir, foreignProcesses) {
   assertTempPath(agentDir)
   assertOutsideRealHome(agentDir)
   const registry = await readFile(join(agentDir, 'vengeance-daemons.json'), 'utf8').catch(
@@ -162,12 +180,23 @@ export async function shutdownOwnedPrimeDaemons(agentDir, foreignPids) {
     if (!DAEMON_ENDPOINT.test(record.socketPath) || typeof record.executablePath !== 'string') {
       throw new Error('The QA daemon registry contains an invalid endpoint')
     }
-    const owned = table.filter(
+    const candidates = table.filter(
       (entry) =>
-        !foreignPids.includes(entry.pid) &&
+        !processWasPresent(entry, foreignProcesses) &&
         entry.name.toLowerCase() === basename(record.executablePath).toLowerCase() &&
-        entry.commandLine.includes(record.socketPath)
+        hasDaemonEndpoint(entry.commandLine, record.socketPath)
     )
+    const owned = []
+    for (const entry of candidates) {
+      const identity = await processIdentity(entry.pid).catch(() => null)
+      if (
+        identity &&
+        (!(identity.createdMs > 0) || sameProcess(identity, entry)) &&
+        executableKey(identity.executablePath) === executableKey(record.executablePath)
+      ) {
+        owned.push(entry)
+      }
+    }
     if (owned.length === 0) continue
     try {
       await stopDaemonEndpoint(record.socketPath)
@@ -178,7 +207,24 @@ export async function shutdownOwnedPrimeDaemons(agentDir, foreignPids) {
         await sleep(POLL_MS)
       }
     } finally {
-      for (const entry of owned) if (isAlive(entry.pid)) await killTree(entry.pid)
+      for (const entry of owned) {
+        if (!isAlive(entry.pid)) continue
+        const current = (await processTable()).find((candidate) => candidate.pid === entry.pid)
+        if (!current || !hasDaemonEndpoint(current.commandLine, record.socketPath)) continue
+        const identity = await processIdentity(entry.pid).catch(() => null)
+        if (
+          !identity ||
+          executableKey(identity.executablePath) !== executableKey(record.executablePath)
+        ) {
+          continue
+        }
+        if (!(identity.createdMs > 0)) {
+          throw new Error(
+            `Cannot safely force-stop QA daemon ${entry.pid}: creation time unavailable`
+          )
+        }
+        if (sameProcess(identity, entry)) await killTree(entry.pid)
+      }
     }
   }
 }
@@ -222,7 +268,7 @@ export function launchApp(options = {}) {
 }
 
 /** `runRoot`: the temp folder of a previous run to launch on again (relaunch()), else a new one. */
-async function startApp(options, runRoot, initialPrimePids) {
+async function startApp(options, runRoot, initialPrimeProcesses) {
   const {
     mode = 'fake',
     agentDir,
@@ -259,8 +305,8 @@ async function startApp(options, runRoot, initialPrimePids) {
 
   const realGuard = mode === 'real' ? await snapshotRealConfig() : null
   const foreignPids = await pidsOfImage(APP_PROCESS_NAME)
-  const foreignPrimePids =
-    initialPrimePids ?? (mode === 'fake' ? (await processTable()).map((entry) => entry.pid) : [])
+  const foreignPrimeProcesses =
+    initialPrimeProcesses ?? (mode === 'fake' ? await processTable() : [])
   const env = buildEnv({ mode, agentDir, primeDir, userData, tempFolder, homeFolder, extraEnv })
   const args = ['--force-device-scale-factor=1', ...ELECTRON_SWITCHES]
   const app = await electron.launch(
@@ -374,9 +420,10 @@ async function startApp(options, runRoot, initialPrimePids) {
       env.PRIME_AGENT_CODING_AGENT_DIR &&
       isInside(tempRoot, resolve(env.PRIME_AGENT_CODING_AGENT_DIR))
     ) {
-      await shutdownOwnedPrimeDaemons(env.PRIME_AGENT_CODING_AGENT_DIR, foreignPrimePids).catch(
-        (error) => problems.push(error.message)
-      )
+      await shutdownOwnedPrimeDaemons(
+        env.PRIME_AGENT_CODING_AGENT_DIR,
+        foreignPrimeProcesses
+      ).catch((error) => problems.push(error.message))
     }
     if (!keepRunFolder && beforeCleanup) {
       try {
@@ -545,7 +592,7 @@ async function startApp(options, runRoot, initialPrimePids) {
      */
     async relaunch(overrides = {}) {
       await shutdown({ keepRunFolder: true })
-      return startApp({ ...options, ...overrides }, tempRoot, foreignPrimePids)
+      return startApp({ ...options, ...overrides }, tempRoot, foreignPrimeProcesses)
     }
   }
   return qa

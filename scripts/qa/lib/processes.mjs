@@ -13,6 +13,8 @@ const TERM_GRACE_MS = 3_000
 const POLL_MS = 50
 const PROCESS_INSPECTION_TIMEOUT_MS = 10_000
 const PS_MAX_BUFFER = 64 * 1024 * 1024
+/** macOS ps reports elapsed process time in whole seconds. */
+const PROCESS_START_TOLERANCE_MS = process.platform === 'darwin' ? 1000 : 0
 /** /proc/<pid>/stat counts in USER_HZ: 100 on every architecture Vengeance ships (x64, arm64). */
 const LINUX_TICKS_PER_SECOND = 100
 
@@ -25,6 +27,26 @@ export function isAlive(pid) {
   } catch (error) {
     return error.code === 'EPERM'
   }
+}
+
+export function sameProcess(first, second) {
+  return (
+    first.pid === second.pid &&
+    first.createdMs > 0 &&
+    second.createdMs > 0 &&
+    first.createdMs === second.createdMs
+  )
+}
+
+/** An unreadable creation time keeps a matching PID protected from QA cleanup. */
+export function processWasPresent(entry, snapshot) {
+  return snapshot.some(
+    (previous) =>
+      previous.pid === entry.pid &&
+      (!(previous.createdMs > 0) ||
+        !(entry.createdMs > 0) ||
+        Math.abs(entry.createdMs - previous.createdMs) <= PROCESS_START_TOLERANCE_MS)
+  )
 }
 
 function signal(pid, name) {
@@ -208,7 +230,7 @@ export function descendants(table, pid) {
   return out
 }
 
-/** { pid, parentPid, executablePath } of one running process. */
+/** Full executable identity; createdMs is omitted when the platform exposes only a coarse estimate. */
 export async function processIdentity(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('The native worker has no valid PID')
   const unknown = () => new Error(`Native process ${pid} could not be inspected`)
@@ -216,7 +238,16 @@ export async function processIdentity(pid) {
     const stat = await readFile(join('/proc', String(pid), 'stat'), 'utf8').catch(() => null)
     const executablePath = await linuxExecutable(pid)
     if (!stat || !executablePath) throw unknown()
-    return { pid, parentPid: Number(linuxStat(stat)[1][1]), executablePath }
+    const fields = linuxStat(stat)[1]
+    const bootSeconds = /^btime (\d+)$/m.exec(await readFile('/proc/stat', 'utf8'))?.[1]
+    return {
+      pid,
+      parentPid: Number(fields[1]),
+      executablePath,
+      createdMs: bootSeconds
+        ? Number(bootSeconds) * 1000 + (Number(fields[19]) * 1000) / LINUX_TICKS_PER_SECOND
+        : undefined
+    }
   }
   if (process.platform === 'darwin') {
     // macOS `comm` is the path the process started from; resolve it like Windows' ExecutablePath.
@@ -231,7 +262,7 @@ export async function processIdentity(pid) {
   }
   const script = [
     `Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'`,
-    'Select-Object ProcessId,ParentProcessId,ExecutablePath',
+    'Select-Object ProcessId,ParentProcessId,ExecutablePath,@{n="Created";e={[DateTimeOffset]::new($_.CreationDate).ToUnixTimeMilliseconds()}}',
     'ConvertTo-Json -Compress'
   ].join(' | ')
   const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', script], {
@@ -243,6 +274,7 @@ export async function processIdentity(pid) {
   return {
     pid: record.ProcessId,
     parentPid: record.ParentProcessId,
-    executablePath: record.ExecutablePath
+    executablePath: record.ExecutablePath,
+    createdMs: Number(record.Created ?? 0)
   }
 }
