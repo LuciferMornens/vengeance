@@ -148,7 +148,7 @@ jobs:
             rpm libarchive-tools fakeroot file procps \
             libgtk-3-0 libnss3 libxss1 libxtst6 libatk-bridge2.0-0 libatk1.0-0 libcups2 libdrm2 \
             libgbm1 libasound2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libxfixes3 \
-            libpango-1.0-0 libcairo2 libnotify4 libsecret-1-0 \
+            libpango-1.0-0 libcairo2 libnotify4 libsecret-1-0 libglib2.0-bin \
             xvfb xauth fonts-dejavu-core
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -400,6 +400,7 @@ jobs:
           done
           test -f /usr/share/applications/vengeance.desktop
           command -v vengeance
+          command -v gio
 
   install-rpm:
     name: Install the rpm (${{ matrix.id }})
@@ -439,6 +440,7 @@ jobs:
           done
           test -f /usr/share/applications/vengeance.desktop
           command -v vengeance
+          command -v gio
 
   install-pacman:
     name: Install the pacman package (linux-x64)
@@ -471,6 +473,7 @@ jobs:
             fi
           done
           test -f /usr/share/applications/vengeance.desktop
+          command -v gio
 
   publish:
     name: Draft the GitHub release

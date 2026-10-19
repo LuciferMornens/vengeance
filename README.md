@@ -307,6 +307,10 @@ launcher entry, and uninstall through your package manager.
   GNOME and KDE Plasma get window buttons. Tiling compositors such as Hyprland (Omarchy), sway or
   niri manage windows themselves, so Vengeance shows none. Set `VENGEANCE_WINDOW_CONTROLS` to
   `native` or `none` to choose yourself.
+- **Trash on minimal desktops.** AppImage and tar.gz users need `gio` on `PATH` to move files to
+  Trash, including restoring instruction defaults. Debian and Ubuntu provide it in
+  `libglib2.0-bin`; Fedora and Arch provide it in `glib2`. The deb, rpm and pacman packages install
+  the provider automatically.
 - **Secrets.** Environment values Vengeance stores for the engines, such as API keys, are encrypted
   with your desktop's secret store when one is running: a Secret Service such as gnome-keyring or
   KeePassXC, or KWallet on KDE Plasma. Without one they are stored in plain text in
