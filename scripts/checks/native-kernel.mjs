@@ -15,10 +15,24 @@ import { hashFile } from '../qa/lib/packaged-target.mjs'
 import { executableName } from '../qa/lib/platform.mjs'
 import { qaTempDir } from '../qa/lib/tmp.mjs'
 
+/** A child's failure with what it printed; a timeout otherwise reads as a bare "Command failed". */
+function childFailure(label, timeoutMs, error) {
+  const how = error.killed
+    ? `did not finish within ${timeoutMs / 1000} s`
+    : `failed (${error.code ?? error.signal})`
+  const output = [error.stdout, error.stderr].filter((text) => text?.trim()).join('\n')
+  return new Error(`${label} ${how}${output ? `:\n${output}` : ''}`, { cause: error })
+}
+
 const directory = await qaTempDir('qa-native-kernel-check-')
 let escapedDirectory
 const executeFile = promisify(execFile)
 const CHILD_TIMEOUT_MS = 10_000
+/**
+ * The actual-engine fixture starts two local providers, hashes the candidate and runs QA's daemon
+ * cleanup; hosted Windows runners have needed more than ten seconds for that.
+ */
+const FIXTURE_CHILD_TIMEOUT_MS = 60_000
 const MAXIMUM_CHILD_OUTPUT_BYTES = 64 * 1024
 const WHEEL_NAME = 'cryptography-50.0.2-cp311-abi3-macosx_13_0_x86_64.whl'
 const NATIVE_MODULE = 'cryptography/hazmat/bindings/_rust.abi3.so'
@@ -367,10 +381,12 @@ try {
         QA_PRIME_EXECUTABLE: executable,
         QA_PRIME_SHA256: await hashFile(executable)
       },
-      timeout: CHILD_TIMEOUT_MS,
+      timeout: FIXTURE_CHILD_TIMEOUT_MS,
       maxBuffer: MAXIMUM_CHILD_OUTPUT_BYTES
     }
-  )
+  ).catch((error) => {
+    throw childFailure('The actual-engine fixture child', FIXTURE_CHILD_TIMEOUT_MS, error)
+  })
   process.stdout.write(factoryResult.stdout)
 
   await writeFile(join(baselineDirectory, 'pi', 'entry.js'), 'mutated other engine')
