@@ -254,9 +254,9 @@ function isEditable(target: EventTarget | null): boolean {
 
 /**
  * Stick to the bottom while content grows, release when the user scrolls up. Only the user's own scrolling
- * releases (wheel, scroll keys, scrollbar or selection drag, touch, or an upward scroll while nothing changed
- * size: middle-click autoscroll, a screen reader): content growing below the view (rows measuring taller,
- * images loading) keeps following. "Jump to latest" glides there
+ * releases (wheel, scroll keys, scrollbar or selection drag, touch, or a silent upward scroll from
+ * autoscroll or a screen reader). Content growing below the view (rows measuring taller, images loading)
+ * keeps following. "Jump to latest" glides there
  * and lands on the bottom as it ends, wherever virtualized rows that measured on the way moved it.
  */
 function useStickToBottom(agentId: string) {
@@ -429,8 +429,8 @@ function useStickToBottom(agentId: string) {
     if (!el) return
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight
     const movedUp = el.scrollTop < lastScrollTop.current
-    // Nothing changed size: an upward move is a scroll (anchoring and a shrink's clamp change the height).
-    const unexplainedUp = movedUp && el.scrollHeight === lastScrollHeight.current
+    // Upward scrolls can coincide with growth; shrinking content can clamp the offset.
+    const unexplainedUp = movedUp && el.scrollHeight >= lastScrollHeight.current
     lastScrollTop.current = el.scrollTop
     lastScrollHeight.current = el.scrollHeight
     if (touchHeld.current) touchScrolled.current = true
