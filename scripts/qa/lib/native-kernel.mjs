@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, resolve } from 'node:path'
+import { lstat, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { inventory, sha256 } from '../../engines/common.mjs'
 import { ROOT } from './app.mjs'
@@ -295,19 +295,77 @@ export async function snapshotNativeBaseline(executable, outputDirectory) {
   const canonical = await realpath(executable)
   const directory = await realpath(dirname(dirname(canonical)))
   assertOutsideRealHome(directory)
-  assert.ok(isInside(await realpath(QA_TMP_ROOT), directory))
+  const ownershipRoot = await realpath(
+    assertOutsideRealHome(process.env.QA_RELEASE_BASELINE_TMP_ROOT ?? QA_TMP_ROOT)
+  )
+  const suiteTemporaryRoot = await realpath(assertOutsideRealHome(QA_TMP_ROOT))
+  assertOutsideRealHome(ownershipRoot)
+  assertOutsideRealHome(suiteTemporaryRoot)
+  assert.ok(
+    isInside(ownershipRoot, suiteTemporaryRoot),
+    'The baseline ownership root must contain the suite temporary root'
+  )
+  assert.ok(isInside(ownershipRoot, directory), 'The baseline escaped its verified ownership root')
   const manifest = JSON.parse(await readFile(join(directory, 'manifest.json'), 'utf8'))
   assert.equal(manifest.platform, `${process.platform}-${process.arch}`)
   assert.equal(manifest.engines.prime.version, BASELINE_VERSION)
   assert.equal(await realpath(join(directory, manifest.engines.prime.entry)), canonical)
   const before = await inventory(directory)
-  const evidence = { directory, before, beforeSha256: sha256(JSON.stringify(before)) }
+  const evidence = {
+    directory,
+    ownershipRoot,
+    suiteTemporaryRoot,
+    before,
+    beforeSha256: sha256(JSON.stringify(before))
+  }
   await mkdir(outputDirectory, { recursive: true })
   await writeFile(
     join(outputDirectory, 'baseline-inventory.json'),
     `${JSON.stringify(evidence, null, 2)}\n`
   )
   return evidence
+}
+
+async function assertWritableFixturePath(root, path) {
+  assert.equal(typeof path, 'string', 'The writable kernel fixture path is required')
+  assert.ok(isAbsolute(path), 'The writable kernel fixture path must be absolute')
+  const target = assertOutsideRealHome(path)
+  assert.ok(isInside(root, target), 'A writable kernel path escaped its suite fixture')
+  let parent = root
+  for (const part of relative(root, target).split(sep).filter(Boolean)) {
+    parent = join(parent, part)
+    const entry = await lstat(parent).catch((error) => {
+      if (error.code === 'ENOENT') return null
+      throw error
+    })
+    if (!entry) break
+    assert.equal(entry.isSymbolicLink(), false, 'Writable kernel paths cannot contain links')
+    assert.ok(entry.isDirectory(), 'Writable kernel paths must be directories')
+  }
+}
+
+export async function validateNativeKernelFixture(fixture) {
+  const suiteRoot = await realpath(assertOutsideRealHome(QA_TMP_ROOT))
+  const root = await realpath(assertOutsideRealHome(fixture.root.dir))
+  assertOutsideRealHome(suiteRoot)
+  assertOutsideRealHome(root)
+  assert.ok(isInside(suiteRoot, root), 'The writable kernel fixture escaped its suite temp root')
+  const environment = fixture.environment
+  assert.equal(environment.PRIME_AGENT_CODING_AGENT_DIR, fixture.primeDirectory)
+  assert.equal(environment.PRIME_AGENT_KERNEL_PYTHON, undefined)
+  for (const path of [
+    environment.PRIME_AGENT_CODING_AGENT_DIR,
+    environment.PRIME_AGENT_KERNEL_VENV,
+    environment.PYTHONPYCACHEPREFIX,
+    join(root, 'baseline-kernel-bootstrap')
+  ]) {
+    await assertWritableFixturePath(root, path)
+  }
+  assert.ok(
+    isInside(environment.PRIME_AGENT_KERNEL_VENV, environment.PYTHONPYCACHEPREFIX),
+    'Python bytecode must stay inside the fixture kernel directory'
+  )
+  return root
 }
 
 export async function prepareNativeBaseline(fixture, executable, outputDirectory) {
@@ -318,9 +376,11 @@ export async function prepareNativeBaseline(fixture, executable, outputDirectory
   evidence.prewarm = { executable: canonical, executableSha256: await hashFile(canonical) }
   let failure
   try {
+    const fixtureRoot = await validateNativeKernelFixture(fixture)
     await assertFreshIntelKernel(fixture)
     const wheel = await wheelIdentity(await candidateExecutable())
-    const temporary = await fixture.root.folder('baseline-kernel-bootstrap')
+    const temporary = join(fixtureRoot, 'baseline-kernel-bootstrap')
+    await mkdir(temporary)
     await mkdir(join(temporary, 'home'))
     await mkdir(join(temporary, 'tmp'))
     const constraint = join(temporary, 'constraint.txt')

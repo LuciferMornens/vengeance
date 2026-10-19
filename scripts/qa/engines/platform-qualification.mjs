@@ -193,11 +193,13 @@ async function runSuite(
     'VENGEANCE_PRIME_EXECUTABLE',
     'VENGEANCE_BUNDLED_ENGINES',
     'VENGEANCE_MOCK',
-    'ELECTRON_RUN_AS_NODE'
+    'ELECTRON_RUN_AS_NODE',
+    'QA_RELEASE_BASELINE_TMP_ROOT'
   ]) {
     delete environment[name]
   }
   Object.assign(environment, baselineEnvironment)
+  if (SUITE_GROUP === 'upgrade') environment.QA_RELEASE_BASELINE_TMP_ROOT = temporaryBase
   const stdout = createWriteStream(join(reportDirectory, 'stdout.log'))
   const stderr = createWriteStream(join(reportDirectory, 'stderr.log'))
   const result = { suite, reportDirectory, temporaryRoot, startedAt: new Date().toISOString() }
