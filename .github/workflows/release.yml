@@ -30,6 +30,7 @@ on:
       - scripts/ci/**
       - scripts/checks/qa-native-temp.mjs
       - scripts/checks/native-diagnostics.mjs
+      - scripts/checks/process-identity.mjs
       - scripts/dist.mjs
       - scripts/dist-qa.mjs
       - scripts/engines/**
@@ -188,6 +189,7 @@ jobs:
         run: |
           node scripts/checks/qa-native-temp.mjs
           node scripts/checks/native-diagnostics.mjs
+          node scripts/checks/process-identity.mjs
       - name: Validate the macOS application observer
         if: runner.os == 'macOS'
         run: |
@@ -277,7 +279,7 @@ jobs:
           echo "QA_PACKAGED_EXE=$executable" >> "$GITHUB_ENV"
       - name: Qualify both packaged engines
         env:
-          QA_REPORT_DIR: ${{ runner.temp }}/engine-qualification
+          QA_REPORT_DIR: .shots/qa/release/engine-qualification
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a -s '-screen 0 2560x1440x24' node scripts/qa/engines/platform-qualification.mjs
@@ -287,7 +289,7 @@ jobs:
       - name: Check background application visibility (macOS)
         if: runner.os == 'macOS'
         env:
-          QA_REPORT_DIR: ${{ runner.temp }}/background-applications
+          QA_REPORT_DIR: .shots/qa/release/background-applications
         run: |
           dock_autohide=$(defaults read com.apple.dock autohide 2>/dev/null || true)
           restore_dock() {
@@ -305,14 +307,15 @@ jobs:
       - name: Stage the published Engine 2 upgrade baseline
         if: runner.os != 'Windows'
         env:
-          QA_REPORT_DIR: ${{ runner.temp }}/release-baseline
+          QA_REPORT_DIR: .shots/qa/release/release-baseline
         run: node scripts/qa/engines/release-baseline.mjs
       - name: Qualify native Engine 2 upgrades
         if: runner.os != 'Windows'
         env:
           QA_PLATFORM_GROUP: upgrade
-          QA_RELEASE_BASELINE_ENV: ${{ runner.temp }}/release-baseline/release-baseline-env.json
-          QA_REPORT_DIR: ${{ runner.temp }}/engine-upgrade
+          QA_RELEASE_BASELINE_ENV: >-
+            ${{ github.workspace }}/.shots/qa/release/release-baseline/release-baseline-env.json
+          QA_REPORT_DIR: .shots/qa/release/engine-upgrade
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a -s '-screen 0 2560x1440x24' node scripts/qa/engines/platform-qualification.mjs
@@ -333,11 +336,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: engine-qualification-${{ matrix.id }}
+          # Relative paths also resolve inside the Linux build container.
           path: |
-            ${{ runner.temp }}/engine-qualification
-            ${{ runner.temp }}/background-applications
-            ${{ runner.temp }}/release-baseline
-            ${{ runner.temp }}/engine-upgrade
+            .shots/qa/release
             .shots/perf/first-navigation
           include-hidden-files: true
           if-no-files-found: error
