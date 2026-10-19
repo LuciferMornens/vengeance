@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { homedir, userInfo } from 'node:os'
 import { basename, isAbsolute } from 'node:path'
+import { electronNodeExecutable } from './electron-node'
 import { env } from './env'
 
 /**
@@ -50,13 +51,18 @@ function probeArguments(shell: string, marker: string): string[] {
     // PowerShell drops double quotes from native arguments, so the script quotes with single ones ('' escaped).
     const literal = (value: string): string => `'${value.replaceAll("'", "''")}'`
     const script = `'${marker}' + JSON.stringify(process.env) + '${marker}'`
-    return ['-Login', '-Command', `& ${literal(process.execPath)} -p ${literal(script)}`]
+    return ['-Login', '-Command', `& ${literal(electronNodeExecutable())} -p ${literal(script)}`]
   }
-  if (name === 'nu') return ['-i', '-l', '-c', `^'${process.execPath}' -p '${print}'`]
+  if (name === 'nu') return ['-i', '-l', '-c', `^'${electronNodeExecutable()}' -p '${print}'`]
   if (name === 'xonsh') {
-    return ['-i', '-l', '-c', `import os, json; print("${marker}" + json.dumps(dict(os.environ)) + "${marker}")`]
+    return [
+      '-i',
+      '-l',
+      '-c',
+      `import os, json; print("${marker}" + json.dumps(dict(os.environ)) + "${marker}")`
+    ]
   }
-  const command = `${posixQuote(process.execPath)} -p '${print}'`
+  const command = `${posixQuote(electronNodeExecutable())} -p '${print}'`
   // csh and tcsh accept no other option together with -c.
   return name === 'csh' || name === 'tcsh' ? ['-ic', command] : ['-i', '-l', '-c', command]
 }

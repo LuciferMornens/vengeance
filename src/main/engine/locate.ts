@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import { electronNodeExecutable } from '../electron-node'
 import { childBaseEnv, childEnvVariable, shellEnvironmentReady } from '../shell-env'
 import { bundledEngine } from './bundled'
 
@@ -168,7 +169,7 @@ async function findSystemNode(): Promise<NodeRuntime | null> {
 }
 
 function electronNode(): NodeRuntime {
-  return { path: process.execPath, version: `v${process.versions.node}`, isElectron: true }
+  return { path: electronNodeExecutable(), version: `v${process.versions.node}`, isElectron: true }
 }
 
 export class EngineNotFoundError extends Error {
