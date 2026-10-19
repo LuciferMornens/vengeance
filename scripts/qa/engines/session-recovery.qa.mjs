@@ -9,6 +9,7 @@ import { isAlive, killTree, processTable } from '../lib/processes.mjs'
 import { isInside } from '../lib/tmp.mjs'
 import { answerOpenDialog } from '../sessions/lib/main-stubs.mjs'
 import { createEngineFixture, PRIME_MODELS, PRIME_PROVIDER } from './integration-fixture.mjs'
+import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
 
 const OUTPUT_DIRECTORY = reportShotsDir('session-recovery')
 const WAIT_TIMEOUT_MS = 60_000
@@ -336,12 +337,14 @@ async function recoverHistory(engine) {
 
 try {
   application = await launchApp({
+    ...packagedLaunchOptions(fixture.environment),
     agentDir: fixture.piDirectory.dir,
-    env: fixture.environment,
     outDir: OUTPUT_DIRECTORY
   })
+  await recordPackagedTarget(application)
   await recoverHistory('pi')
   await recoverHistory('prime')
+  await recordPackagedTarget(application)
 } catch (error) {
   failure = error
   report.failureState = await application?.agentState().catch(() => undefined)

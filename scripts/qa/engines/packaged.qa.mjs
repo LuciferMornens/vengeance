@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { systemPath } from '../../engines/common.mjs'
 import { FAKE_MODELS, FAKE_PROVIDER } from '../lib/agent-dir.mjs'
@@ -13,6 +13,7 @@ import { launchApp, reportShotsDir, ROOT } from '../lib/app.mjs'
 import { turn } from '../lib/fake-llm.mjs'
 import { executableName } from '../lib/platform.mjs'
 import { createEngineFixture, PRIME_MODELS, PRIME_PROVIDER } from './integration-fixture.mjs'
+import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
 
 const executable = process.env.QA_PACKAGED_EXE
 const expectedProductName = process.env.QA_PACKAGED_NAME ?? 'Vengeance QA'
@@ -93,16 +94,11 @@ async function runPackagedChecks() {
   let application
   try {
     application = await launchApp({
-      exe: resolve(executable),
+      ...packagedLaunchOptions({ ...fixture.environment, ...systemOnlyPath }),
       agentDir: fixture.piDirectory.dir,
-      env: {
-        ...fixture.environment,
-        ...systemOnlyPath,
-        VENGEANCE_PRIME_EXECUTABLE: undefined,
-        VENGEANCE_BUNDLED_ENGINES: undefined
-      },
       outDir: reportShotsDir('packaged')
     })
+    await recordPackagedTarget(application)
     const packageMetadata = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'))
     const about = await application.app.evaluate(({ app }) => ({
       packaged: app.isPackaged,

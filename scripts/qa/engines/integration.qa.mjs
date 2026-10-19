@@ -7,6 +7,7 @@ import { launchApp, reportShotsDir } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
 import { isAlive } from '../lib/processes.mjs'
 import { softSteps } from '../lib/steps.mjs'
+import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
 import { checkEngineConfiguration } from './integration-configuration.mjs'
 import { checkNativeControls } from './integration-native-controls.mjs'
 import {
@@ -100,10 +101,11 @@ try {
     'README.md': '# Engine integration workspace\nOnly isolated QA files live here.\n'
   })
   application = await launchApp({
+    ...packagedLaunchOptions(fixture.environment),
     agentDir: fixture.piDirectory.dir,
-    env: fixture.environment,
     outDir: reportShotsDir('engines')
   })
+  await recordPackagedTarget(application)
   let piAgentId
   let primeAgentId
   let primeSessionFile
@@ -672,6 +674,7 @@ try {
   )
 
   await checks.check('no uncaught app errors across both engines', async () => {
+    await recordPackagedTarget(application)
     application.assertNoErrors()
   })
   checks.finish()

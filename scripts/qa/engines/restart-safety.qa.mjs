@@ -6,6 +6,7 @@ import { launchApp, reportShotsDir } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
 import { waitFor } from '../settings/settings-ui.mjs'
 import { createEngineFixture, PRIME_MODELS, PRIME_PROVIDER } from './integration-fixture.mjs'
+import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
 
 const outputDirectory = reportShotsDir('restart-safety')
 const refusalObservationMilliseconds = 250
@@ -104,10 +105,8 @@ async function deferredRestartAfterSettle(engine, agentId, method) {
   const request = await server.waitForRequest(undefined, { from })
   const settingsPath = join(agentDirectory, 'settings.json')
   const settings = JSON.parse(await readFile(settingsPath, 'utf8'))
-  await writeFile(
-    settingsPath,
-    `${JSON.stringify({ ...settings, shellCommandPrefix: `echo restart-safety-${method}` }, null, 2)}\n`
-  )
+  const updatedSettings = { ...settings, shellCommandPrefix: `echo restart-safety-${method}` }
+  await writeFile(settingsPath, `${JSON.stringify(updatedSettings, null, 2)}\n`)
   await application.page.getByText('Restart to apply', { exact: true }).waitFor()
   await application.page.getByRole('button', { name: 'Restart engines', exact: true }).click()
   await application.page.waitForTimeout(refusalObservationMilliseconds)
@@ -376,7 +375,8 @@ async function workingPrimeChild(agentId) {
       {
         code: [
           'import rlm',
-          `child = await rlm.spawn(${JSON.stringify(childTask)}, name=${JSON.stringify(childName)})`,
+          `child = await rlm.spawn(${JSON.stringify(childTask)}, ` +
+            `name=${JSON.stringify(childName)})`,
           'print(child.rlm_child_id)'
         ].join('\n')
       },
@@ -472,10 +472,11 @@ async function workingPrimeChild(agentId) {
 try {
   await mkdir(outputDirectory, { recursive: true })
   application = await launchApp({
+    ...packagedLaunchOptions(fixture.environment),
     agentDir: fixture.piDirectory.dir,
-    env: fixture.environment,
     outDir: outputDirectory
   })
+  await recordPackagedTarget(application)
   const workspace = await fixture.root.folder('workspace', { 'README.md': '# Restart safety\n' })
   const piId = await activeConversation('pi', workspace)
   await deferredRestartAfterSettle('pi', piId, 'stop')

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { FAKE_MODELS, FAKE_PROVIDER } from '../lib/agent-dir.mjs'
 import { launchApp, reportShotsDir } from '../lib/app.mjs'
+import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
 import { waitFor } from './settings-ui.mjs'
 import {
@@ -216,28 +217,19 @@ async function checkEngine(engine) {
   assert.ok(!restored.includes(projectFoundation))
   assert.ok(!(await file(engine, cwd, 'SYSTEM.md')).exists)
   console.log(
-    `    ✓ ${engine}: native requests reflect only explicit apply; account and scope isolation passed`
+    `    ✓ ${engine}: native requests reflect only explicit apply; ` +
+      'account and scope isolation passed'
   )
 }
 
 console.log(`▶ ${SUITE_NAME} (both real engines; local providers and temporary accounts)`)
 try {
   application = await launchApp({
-    exe: process.env.QA_PACKAGED_EXE,
+    ...packagedLaunchOptions(fixture.environment),
     agentDir: fixture.piDirectory.dir,
-    env: {
-      ...fixture.environment,
-      ...(process.env.QA_PACKAGED_EXE
-        ? { VENGEANCE_PRIME_EXECUTABLE: undefined, VENGEANCE_BUNDLED_ENGINES: undefined }
-        : {})
-    },
     outDir: reportShotsDir(SUITE_NAME)
   })
-  if (process.env.QA_PACKAGED_EXE) {
-    for (const engine of ['pi', 'prime']) {
-      assert.equal((await application.invoke('engine:describe', engine)).source, 'bundled')
-    }
-  }
+  await recordPackagedTarget(application)
   const state = await application.appState()
   await application.test('setPrefs', {
     features: {
