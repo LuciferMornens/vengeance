@@ -53,7 +53,20 @@ const MAIN_ERROR_MARKER = '[qa main error]'
 /** Inherited engine variables (e.g. when QA runs inside an agent) would change engine behavior. */
 const INHERITED_ENGINE_VARS = /^(PI_|AI_AGENT$)/
 const INHERITED_PRIME_VARS = /^PRIME_/
-const DAEMON_SHUTDOWN_TIMEOUT_MS = 5000
+/**
+ * An Engine 2 daemon answers the shutdown request before it stops its workers, and a slow runner
+ * (Intel macOS CI) can need well over five seconds for both. The request and the daemon's own exit
+ * share this budget before a force-stop is considered; a daemon that exits sooner returns at once.
+ */
+const DAEMON_GRACEFUL_STOP_MS = 15_000
+/**
+ * A daemon whose creation time is unavailable (macOS) can never be force-stopped, so cleanup keeps
+ * waiting for its own exit up to this total after the request. It stays below the platform
+ * qualification runner's 30-second cleanup deadline.
+ */
+const DAEMON_UNVERIFIED_STOP_MS = 25_000
+/** Each unverified wait re-reads the process table and executable path, so it polls slower. */
+const DAEMON_VERIFY_POLL_MS = 250
 /** Engine 2 daemon endpoints: a named pipe on Windows, an absolute Unix socket path elsewhere. */
 const DAEMON_ENDPOINT =
   process.platform === 'win32'
@@ -136,7 +149,7 @@ function buildEnv({ mode, agentDir, primeDir, userData, tempFolder, homeFolder, 
   return env
 }
 
-async function stopDaemonEndpoint(endpoint) {
+async function stopDaemonEndpoint(endpoint, timeoutMs) {
   await new Promise((resolveShutdown, rejectShutdown) => {
     const socket = createConnection(endpoint)
     const requestId = 'qa-owned-daemon-shutdown'
@@ -149,7 +162,7 @@ async function stopDaemonEndpoint(endpoint) {
     }
     const timer = setTimeout(
       () => finish(new Error('The isolated Engine 2 daemon did not stop')),
-      DAEMON_SHUTDOWN_TIMEOUT_MS
+      timeoutMs
     )
     socket.on('error', (error) =>
       finish(error.code === 'ENOENT' || error.code === 'ECONNREFUSED' ? undefined : error)
@@ -196,8 +209,38 @@ function executableKey(path) {
   return process.platform === 'win32' ? absolute.toLowerCase() : absolute
 }
 
-/** Cleanup requires a QA temp registry and a daemon started during this run. */
-export async function shutdownOwnedPrimeDaemons(agentDir, foreignProcesses) {
+/**
+ * The identity of a daemon process that still serves `record`'s endpoint from its registered
+ * executable, or null once it exited or its PID belongs to something else.
+ */
+async function runningDaemonIdentity(entry, record, identify) {
+  if (!isAlive(entry.pid)) return null
+  const current = (await processTable()).find((candidate) => candidate.pid === entry.pid)
+  if (!current || !hasDaemonEndpoint(current.commandLine, record.socketPath)) return null
+  const identity = await identify(entry.pid).catch(() => null)
+  if (
+    !identity ||
+    executableKey(identity.executablePath) !== executableKey(record.executablePath)
+  ) {
+    return null
+  }
+  return identity
+}
+
+/**
+ * Cleanup requires a QA temp registry and a daemon started during this run. The budgets and the
+ * identity query are parameters only so `scripts/checks/qa-daemon-cleanup.mjs` can exercise slow
+ * exits and macOS's unverifiable identities on every host.
+ */
+export async function shutdownOwnedPrimeDaemons(
+  agentDir,
+  foreignProcesses,
+  {
+    gracefulMs = DAEMON_GRACEFUL_STOP_MS,
+    unverifiedMs = DAEMON_UNVERIFIED_STOP_MS,
+    identify = processIdentity
+  } = {}
+) {
   assertTempPath(agentDir)
   assertOutsideRealHome(agentDir)
   const registry = await readFile(join(agentDir, 'vengeance-daemons.json'), 'utf8').catch(
@@ -222,7 +265,7 @@ export async function shutdownOwnedPrimeDaemons(agentDir, foreignProcesses) {
     )
     const owned = []
     for (const entry of candidates) {
-      const identity = await processIdentity(entry.pid).catch(() => null)
+      const identity = await identify(entry.pid).catch(() => null)
       if (
         identity &&
         (!(identity.createdMs > 0) || sameProcess(identity, entry)) &&
@@ -232,34 +275,44 @@ export async function shutdownOwnedPrimeDaemons(agentDir, foreignProcesses) {
       }
     }
     if (owned.length === 0) continue
-    try {
-      await stopDaemonEndpoint(record.socketPath)
-      // The daemon answers before it stops its workers. Killing it mid-stop leaves workers without
-      // their stop record, and the next daemon on this agent dir revives unfinished work.
-      const deadline = Date.now() + DAEMON_SHUTDOWN_TIMEOUT_MS
-      while (owned.some((entry) => isAlive(entry.pid)) && Date.now() < deadline) {
-        await sleep(POLL_MS)
+    const requestedAt = Date.now()
+    // A failed request only matters when the daemon then has to be force-stopped: one that exits
+    // anyway (for example, closing the socket as it stops) shut down cleanly.
+    const requestError = await stopDaemonEndpoint(record.socketPath, gracefulMs).catch(
+      (error) => error
+    )
+    // The daemon answers before it stops its workers. Killing it mid-stop leaves workers without
+    // their stop record, and the next daemon on this agent dir revives unfinished work.
+    let running = owned.filter((entry) => isAlive(entry.pid))
+    while (running.length && Date.now() < requestedAt + gracefulMs) {
+      await sleep(POLL_MS)
+      running = running.filter((entry) => isAlive(entry.pid))
+    }
+    let forced = false
+    for (const entry of running) {
+      let identity = await runningDaemonIdentity(entry, record, identify)
+      if (identity?.createdMs > 0) {
+        if (sameProcess(identity, entry)) {
+          await killTree(entry.pid)
+          forced = true
+        }
+        continue
       }
-    } finally {
-      for (const entry of owned) {
-        if (!isAlive(entry.pid)) continue
-        const current = (await processTable()).find((candidate) => candidate.pid === entry.pid)
-        if (!current || !hasDaemonEndpoint(current.commandLine, record.socketPath)) continue
-        const identity = await processIdentity(entry.pid).catch(() => null)
-        if (
-          !identity ||
-          executableKey(identity.executablePath) !== executableKey(record.executablePath)
-        ) {
-          continue
-        }
-        if (!(identity.createdMs > 0)) {
-          throw new Error(
-            `Cannot safely force-stop QA daemon ${entry.pid}: creation time unavailable`
-          )
-        }
-        if (sameProcess(identity, entry)) await killTree(entry.pid)
+      // Without a creation time the PID cannot be proven to be this daemon, so it is never
+      // force-stopped: wait for its own exit while it still serves this endpoint.
+      while (identity && Date.now() < requestedAt + unverifiedMs) {
+        await sleep(DAEMON_VERIFY_POLL_MS)
+        identity = await runningDaemonIdentity(entry, record, identify)
+      }
+      if (identity) {
+        throw new Error(
+          `Cannot safely force-stop QA daemon ${entry.pid}: creation time unavailable, and it ` +
+            `still runs ${unverifiedMs / 1000} s after the shutdown request`,
+          requestError ? { cause: requestError } : undefined
+        )
       }
     }
+    if (forced && requestError) throw requestError
   }
 }
 

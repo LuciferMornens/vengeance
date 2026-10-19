@@ -29,6 +29,7 @@ on:
       - scripts/build-prime-auth.mjs
       - scripts/ci/**
       - scripts/checks/qa-native-temp.mjs
+      - scripts/checks/qa-daemon-cleanup.mjs
       - scripts/checks/native-diagnostics.mjs
       - scripts/checks/process-identity.mjs
       - scripts/checks/prime-process-liveness.mjs
@@ -192,6 +193,7 @@ jobs:
       - name: Validate QA runtime paths and failure diagnostics
         run: |
           node scripts/checks/qa-native-temp.mjs
+          node scripts/checks/qa-daemon-cleanup.mjs
           node scripts/checks/native-diagnostics.mjs
           node scripts/checks/process-identity.mjs
           node scripts/checks/prime-process-liveness.mjs
