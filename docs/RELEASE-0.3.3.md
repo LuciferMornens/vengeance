@@ -5,9 +5,9 @@ restarts, and makes opening saved conversations respond immediately. Syntax high
 of the window's rendering thread. On macOS, background Engine and settings processes use Electron's
 background helper so they do not create extra Dock applications.
 
-**Cross-platform release qualification is pending.** Local Windows app, packaged-engine and benchmark
-checks pass, as does current ordinary CI. macOS arm64 passes its native core, Dock and upgrade gates;
-remaining platform, upgrade, benchmark and package-install results are still required.
+**Release qualification for the new Engine 2 `.12` candidate is pending.** Its reviewed Intel macOS
+kernel repair and earlier runtime/harness repairs still require final local builds and all-platform
+native qualification. Earlier `.11` passes and failed release attempts remain historical evidence.
 
 On 0.3.1 or 0.3.2, the Vengeance card in **Settings → Updates** offers the next published release.
 The Windows installer and Linux AppImage can download and install updates; macOS and the deb, rpm,
@@ -66,9 +66,14 @@ Verify downloads against `SHA256SUMS`, or use
   helper. The main Vengeance window retains its normal Dock presence. A missing or invalid helper
   reports an error. Windows, Linux and explicit custom system Node selection keep their existing
   behavior; this fix does not change either native engine's patches.
-- **Engine 2 append instructions reach the native prompt.** Build `0.10.0+vengeance.11` backports
-  upstream's append-file assembly, including native prompt diagnostics. Engine remains
+- **Engine 2 append instructions reach the native prompt.** Build `0.10.0+vengeance.12` retains the
+  backport of upstream append-file assembly, including native prompt diagnostics. Engine remains
   `1.3.0+vengeance.2`. Both keep their pinned stable upstream bases; engine upgrades ship with the app.
+- **Intel macOS kernel setup uses a bundled cryptography wheel.** Engine 2 packages cryptography
+  `50.0.2` with static OpenSSL `4.0.3`, retaining current security fixes without requiring users to
+  install Rust, a C compiler or OpenSSL. First kernel setup still needs uv and network access.
+  The engine verifies the packaged wheel before setup or cached-kernel reuse. Native build and
+  upgrade qualification for this repair remains pending.
 - **Linux Trash support.** Debian, RPM and pacman packages declare the `gio` dependency used by
   native Trash actions, including restoring inherited instructions.
 
@@ -114,27 +119,24 @@ failed attempts and clean reruns. That evidence covers its identified builds; it
 later changes or other operating systems. Live sign-in and paid-provider behavior remain outside
 that local qualification.
 
-Local Windows 0.3.3 qualification passes typecheck, build, contract checks and all 20 mock screenshot
-scenarios (383 captures). The prompt states and representative captures were visually inspected.
+The earlier local Windows 0.3.3 run with Engine 2 `.11` passes typecheck, build, contract checks and
+all 20 mock screenshot scenarios (383 captures). The prompt states and representative captures were visually inspected.
 All nine packaged-engine suites pass, with 79 PNGs visually reviewed. Their machine-readable record
 is `.shots/qa/0.3.3-platform-win32-x64/run-kChaQx/qualification.json`.
 
-The separate current Windows benchmark passes all six strict samples (three per engine), with all
+That run's separate Windows benchmark passes all six strict samples (three per engine), with all
 six PNGs visually reviewed. First-open, second-open and cached-return medians are 494.4 / 342.5 /
 71.6 ms for Engine and 860.1 / 571.9 / 49.9 ms for Engine 2. The record is
-`.shots/perf/first-navigation/release-0.3.3-win-local.json`. These current-candidate measurements are
-separate from the historical before/after comparison above.
+`.shots/perf/first-navigation/release-0.3.3-win-local.json`. These identified `.11` measurements are
+separate from the historical before/after comparison above and do not qualify `.12`.
 
-At `404d24d`, ordinary CI and all three CodeQL analyses pass. All 383 Windows/Linux and 363 macOS
-provided mock captures have clear static review coverage; 20 macOS display variants are absent. Windows, both Linux
-architectures and macOS arm64 pass all nine native core suites. macOS arm64 also passes the Dock
-observer and both official upgrade suites; its reviewed desktop shows one Vengeance icon and no exec
-icons. Remaining blockers concern macOS benchmark process identity, Windows benchmark setup and Linux
-resident-upgrade timeouts. Intel's retained logs identify a transitive cryptography source-build
-failure; current wheel packaging is being repaired without downgrading the dependency. Native visual
-review is clear for 95 macOS and 158 Linux captures. Follow-up QA fixes are committed; local liveness
-static/build/package gates pass, with source review, affected native reruns and the new build identity pending.
-Details and scoped evidence are in the qualification record; overall release qualification remains pending.
+The historical `404d24d` attempt has green ordinary CI and CodeQL analyses but failed release
+qualification. Its core, macOS arm64 Dock and upgrade passes do not qualify later repairs.
+Static review is clear for its provided 383 Windows/Linux and 363 macOS mock captures, plus 79
+Windows, 95 macOS and 158 Linux native PNGs; 20 macOS mock display variants are absent.
+The reviewed `.12` implementation uses 23 Prime patches and pinned wheel build inputs. Portable
+checks cover input and archive validation, while actual Intel kernel and upgrade results remain
+pending. The qualification record retains the failed attempts, reviewed repairs and scoped evidence.
 
 The final 0.3.3 candidate requires:
 
@@ -149,8 +151,9 @@ The final 0.3.3 candidate requires:
   Dock application while background processes stay out of it.
 - **Engine 2 upgrades on both macOS and both Linux architectures:** complete official 0.3.2 packages,
   verified against pinned public checksums, provide the same-platform `.10` baseline for the final
-  packaged `.11` candidate. Executable-transition and resident-upgrade checks retain their identities
-  and reports. Windows's native upgrade has prior PR evidence; Engine's build stays the same across
+  packaged `.12` candidate, including Intel's actual loaded kernel and cached-environment refresh.
+  Executable-transition and resident-upgrade checks retain their identities and reports. Windows's
+  prior native upgrade evidence identifies `.11`; Engine's build stays the same across
   these app releases.
 - **First-navigation benchmark on all five platforms:** three fresh processes per backend against
   the completed built app, retaining JSON, CPU profiles, PNGs and source/native identities. This is
@@ -161,10 +164,9 @@ The final 0.3.3 candidate requires:
   `SHA256SUMS` and a provenance attestation for the published packages.
 
 Final workflow run links, inspected desktop evidence and per-platform hashes must be recorded before
-publication. The remaining platform matrix, macOS witnesses, same-platform upgrades and per-platform
-benchmarks remain pending in
-[release run 39229025591](https://github.com/LuciferMornens/vengeance/actions/runs/39229025591)
-for candidate `404d24d`, with diagnostic, runtime and harness repairs awaiting qualification.
-[CI 39229025642](https://github.com/LuciferMornens/vengeance/actions/runs/39229025642)
-and [CodeQL 39229020899](https://github.com/LuciferMornens/vengeance/actions/runs/39229020899) pass.
-The local Windows results do not qualify another platform or a later source revision.
+publication. [Release run 39229025591](https://github.com/LuciferMornens/vengeance/actions/runs/39229025591)
+records the failed `404d24d` attempt; its green
+[ordinary CI](https://github.com/LuciferMornens/vengeance/actions/runs/39229025642) and
+[CodeQL analyses](https://github.com/LuciferMornens/vengeance/actions/runs/39229020899) cover that source.
+The new `.12` candidate still needs its own final local engine/helper build and five-platform native,
+Dock, upgrade, benchmark and package-install results. Historical passes do not qualify it.

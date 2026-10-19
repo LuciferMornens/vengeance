@@ -1,26 +1,29 @@
 # Vengeance 0.3.3 qualification checkpoint
 
-19 October 2026. Final five-platform release qualification is **pending** at
-`404d24dfde231a4f5937205a6f5f93461d4d091d`. Ordinary CI passes and several native gates pass;
-remaining failures and unrun gates below prevent an overall qualification claim. Historical
+19 October 2026. Final five-platform release qualification is **pending** for Engine 2
+`0.10.0+vengeance.12`, whose reviewed wheel implementation is committed in `f89b12a`.
+Final local engine/helper builds and native reruns remain pending. The failed `404d24d` release
+attempt and earlier Windows `.11` passes below identify older artifacts, not this candidate. Historical
 [PR #15 qualification](ENGINE-PROMPTS-QUALIFICATION-2026-10-18.md) and
 [navigation comparisons](PERFORMANCE-FIRST-NAVIGATION-2026-10-18.md) retain their own source scope.
 Ignored local evidence identifies tested artifacts, not published release assets.
 
 ## Source, review and analysis identity
 
-| Boundary                                                 | Commit                                     |
-| -------------------------------------------------------- | ------------------------------------------ |
-| Release comparison base, 0.3.2                           | `8b2319880580893356d7cc7d2fbc721c08936bf9` |
-| Production macOS launch fix                              | `1807866a050a080ab7296007a999cf6600ad098d` |
-| Version preparation                                      | `6384530044bd4e550c4de02739c75b19dc69f9ee` |
-| First failed release candidate                           | `e3cbf5d362837f0dacf83d8ac9184f4776025eba` |
-| Isolation/readiness repair candidate                     | `835f034aec60fa38b787f347256ecefa7d506797` |
-| Linux Trash dependency fix                               | `b6025224d6c52ebf1d8c613ac7f3c67dcdee6e1e` |
-| Current CI/QA candidate and bounded native diagnostics   | `404d24dfde231a4f5937205a6f5f93461d4d091d` |
-| Committed macOS identity / artifact-path repair          | `2a94d7bebbcaf01728b4aac336fa4e29c774dd6f` |
-| Committed benchmark seeding / restart diagnostics repair | `e3c6352cedc64175584cb2849cc78d77eb603a1c` |
-| Reviewed Linux resident-liveness repair                  | `5843076`                                  |
+| Boundary                                                   | Commit                                     |
+| ---------------------------------------------------------- | ------------------------------------------ |
+| Release comparison base, 0.3.2                             | `8b2319880580893356d7cc7d2fbc721c08936bf9` |
+| Production macOS launch fix                                | `1807866a050a080ab7296007a999cf6600ad098d` |
+| Version preparation                                        | `6384530044bd4e550c4de02739c75b19dc69f9ee` |
+| First failed release candidate                             | `e3cbf5d362837f0dacf83d8ac9184f4776025eba` |
+| Isolation/readiness repair candidate                       | `835f034aec60fa38b787f347256ecefa7d506797` |
+| Linux Trash dependency fix                                 | `b6025224d6c52ebf1d8c613ac7f3c67dcdee6e1e` |
+| Historical failed CI/QA candidate and bounded diagnostics  | `404d24dfde231a4f5937205a6f5f93461d4d091d` |
+| Committed macOS identity / artifact-path repair            | `2a94d7bebbcaf01728b4aac336fa4e29c774dd6f` |
+| Committed benchmark seeding / restart diagnostics repair   | `e3c6352cedc64175584cb2849cc78d77eb603a1c` |
+| Reviewed Linux resident-liveness repair                    | `5843076`                                  |
+| Reviewed Intel `.12` packaged-wheel implementation         | `f89b12aee5936b18d9fc711d2062a0cb98834878` |
+| Reviewed Intel kernel and immutable-baseline qualification | `c306d04`                                  |
 
 The macOS production fix uses Electron 44.7.0's signed background helper for Electron-as-Node work
 and login-shell probing, failing closed when unavailable. The main app retains normal Dock presence.
@@ -28,7 +31,7 @@ Windows/Linux and custom system Node selection retain their behavior; this fix a
 The coordinator records source review CLEAR at `e3cbf5d` against `8b23198` and separate QA review
 CLEAR. Those reviews apply to their identified source, not later runtime outcomes.
 
-Current [CI 39229025642](https://github.com/LuciferMornens/vengeance/actions/runs/39229025642) passes
+At `404d24d`, [CI 39229025642](https://github.com/LuciferMornens/vengeance/actions/runs/39229025642) passes
 all eight jobs, including macOS shots. [CodeQL 39229020899](https://github.com/LuciferMornens/vengeance/actions/runs/39229020899)
 passes all three analyses. The coordinator's current-PR open-code-alert query returned `[]`;
 this records that query's scope. Earlier `835f034` [CI 39222761658](https://github.com/LuciferMornens/vengeance/actions/runs/39222761658)
@@ -40,10 +43,39 @@ for `sprintf-js` is a development/build-transitive dependency already present be
 At this checkpoint no patched version is offered and no shipped dependency path was found in the
 reviewed graph. This is a scoped dependency finding, not a general security guarantee.
 
-## Current release attempt: `404d24d`
+## New `.12` implementation checkpoint
 
-[Release 39229025591](https://github.com/LuciferMornens/vengeance/actions/runs/39229025591) remains
-incomplete. Windows, Linux x64/arm64 and macOS arm64 pass all nine packaged core suites.
+Prime retains stable `v0.10.0` at `763094e1b6a7c17450ee8399b06cda1853847ca5` with 23 ordered patches.
+Reviewed patch `0023` and its builder package cryptography `50.0.2` for Intel macOS, static OpenSSL
+`4.0.3`, pinned CPython `3.11.17`, build dependencies and source SHA-256 locks. Current security fixes
+are retained; users need uv/network for first setup, without a Rust, C or OpenSSL toolchain.
+The engine verifies the manifest/wheel before cached readiness, explicitly supplies it to uv and
+includes wheel contents in runtime identity. The builder checks RECORD/archive safety and native
+constraints, ad-hoc signs, smoke-tests, and retains licenses plus receipts. Independent source reviews
+are CLEAR. `node scripts/checks/prime-runtime-wheels.mjs` covers pins, corruption guards and
+reproducible RECORD repair without executing an Intel build. Other platforms retain native resolution.
+The independently reviewed QA in `c306d04` provisions genuine `.10` readiness through its public
+bootstrap command and scopes the temporary wheel constraint to that child. Candidate probes verify
+the loaded extension, wheel archive, OpenSSL and automatic venv, absence of overrides, a valid new
+runtime SHA-256 and an unchanged complete baseline payload. Portable rejection checks pass in
+`node scripts/checks/native-kernel.mjs`; actual Intel execution remains a separate gate.
+Local `.12` typecheck passes in
+`.cache/0.3.3-prime12-typecheck.log`. No final `.12` build or native output hashes are recorded yet.
+
+| New candidate gate                                                         | Status  |
+| -------------------------------------------------------------------------- | ------- |
+| Final local `.12` engine/helper build and app/package checks               | Pending |
+| Final-head ordinary CI and CodeQL                                          | Pending |
+| Nine packaged core suites on all five native platforms                     | Pending |
+| Dock observer and desktop witnesses on both macOS architectures            | Pending |
+| Official `.10` → `.12` upgrades on both macOS and both Linux architectures | Pending |
+| Actual Intel kernel crypto/OpenSSL identity and old-cache refresh          | Pending |
+| Five-platform benchmarks, shipping hashes and package-install gates        | Pending |
+
+## Historical failed release attempt: `404d24d` / Engine 2 `.11`
+
+[Release 39229025591](https://github.com/LuciferMornens/vengeance/actions/runs/39229025591) failed
+qualification. Windows, Linux x64/arm64 and macOS arm64 pass all nine packaged core suites.
 macOS arm64 also passes the Dock observer and both official `.10` → `.11` upgrade suites.
 Its built-app benchmark then fails a process-ownership check based on mutable `ps comm` titles;
 the `libproc` identity repair is committed in `2a94d7b` but not runtime-qualified.
@@ -61,8 +93,8 @@ Its retained worker logs show runtime → `mcp` 2.3.0 → `pyjwt[crypto]` 2.15.1
 the cryptography source build invokes maturin, then rustup cannot select Cargo because isolated HOME
 has no default toolchain. Evidence is `mac-x64/_temp/engine-qualification/run-hcq1fY/2-engines-integration/engines-shots/native-diagnostics/`
 under `.cache/ci-39229025591`. `runtime.json` records eight untruncated logs, no capture errors and
-only seed packages installed. A current cryptography wheel packaging repair for Intel is being
-implemented without a dependency downgrade; no new native identity or qualified build is recorded yet.
+only seed packages installed. The reviewed `.12` wheel implementation addresses that source-build
+dependency; an actual native build and clean rerun must establish the repaired outcome.
 
 The Linux liveness source change has independent review CLEAR. Local typecheck, build (20.39 s), checks
 and QA packaging pass in `.cache/0.3.3-liveness-{typecheck,build,checks,package}.log`; those local gates
@@ -74,17 +106,19 @@ The root visually reviewed the macOS arm64 desktop PNG: one Vengeance icon, no g
 zero unexpected foreground applications, and the same Prime PID 76638 after detach/reconnect.
 A desktop image covers one checkpoint; policy frames cover the recorded observation interval.
 
-Current static visual receipts under `.cache/ci-39229025642/review-{linux,win}/review-receipt.json`
+Historical static visual receipts under `.cache/ci-39229025642/review-{linux,win}/review-receipt.json`
 are CLEAR with coverage of all 383 captures per platform, using direct/contact-sheet inspection and
 verified pixel-identical carry-forward. This does not mean every image was separately read at full
-size. Current macOS review is CLEAR for all 363 provided captures in `review-mac/review-receipt.json`;
+size. macOS review is CLEAR for all 363 provided captures in `review-mac/review-receipt.json`;
 20 absent display variants remain outside that artifact's coverage. Native review is CLEAR for 95
 macOS PNGs (79 core / 16 upgrades) in `.cache/ci-39229025591/review-mac-native/review-receipt.json`,
 and all 158 Linux core PNGs (79 per architecture) in `review-linux-native/coverage-receipt.json` under
-that same release root. A cropped macOS renderer capture has a complete native companion; this
-review does not use the crop alone as full-window evidence.
+that same release root. Windows native review is CLEAR for all 79 core PNGs in
+`review-win-native/review-receipt.json`: seven contact sheets and 14 full-size captures, no carried
+review. A cropped macOS renderer capture has a complete native companion; this review does not use
+the crop alone as full-window evidence. Static visual clearance does not qualify runtime behavior.
 
-| Platform / native release runner                    | Current core suites                                    | Dock                   | Official 0.3.2 upgrade               | Current benchmark / final receipts           |
+| Platform / native release runner                    | Historical `.11` core suites                           | Dock                   | Official 0.3.2 upgrade               | Historical benchmark / final receipts        |
 | --------------------------------------------------- | ------------------------------------------------------ | ---------------------- | ------------------------------------ | -------------------------------------------- |
 | `win32-x64` / `windows-2025`                        | Nine pass                                              | Not applicable         | Prior PR Windows transition evidence | Seed handoff readiness fails; repair pending |
 | `darwin-arm64` / `macos-15`                         | Nine pass                                              | Pass; desktop reviewed | Both suites pass                     | Process-identity check fails; repair pending |
@@ -118,9 +152,10 @@ Cleanup lost stderr; `404d24d` retains the logs establishing the cryptography fa
 Windows integration passed with 26 PNGs reviewed and no owned processes remaining
 (`.cache/0.3.3-integration-ci-repair.log`), without qualifying an entire release attempt.
 
-## Completed identified local Windows run
+## Historical completed local Windows run / Engine 2 `.11`
 
-Windows x64, Electron 44.7.0; isolated native accounts, sessions and kernel environments use
+This run predates the `.12` implementation and does not qualify it. Windows x64, Electron 44.7.0;
+isolated native accounts, sessions and kernel environments use
 `QA_TMP_ROOT=D:/Coding/vengeance-qa-engine-prompts`, outside the repository and real account homes.
 Commands are shown in Git Bash syntax from the managed checkout:
 
@@ -176,8 +211,8 @@ improvement or new causal estimate is inferred. Later QA/workflow paths require 
 
 ## Artifact identities and retrieval evidence
 
-Local QA executable/native hashes come from the packaged receipt and helper probe; built hashes come
-from the benchmark. These are not final shipping-installer hashes.
+Historical `.11` local QA executable/native hashes come from the packaged receipt and helper probe;
+built hashes come from the benchmark. These are not `.12` or final shipping-installer hashes.
 
 | Local Windows artifact           | SHA-256                                                                                                                                 |
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
@@ -217,7 +252,8 @@ not contained native/package files. A dash means no metadata ID is recorded here
   and `provenance-<platform>` shipping-file hashes. Signature/zip/dmg, glibc and package-install gates
   also must complete. The current artifact-path repair must retain the actual Linux upgrade logs.
 - The official baseline loader pins public 0.3.2 checksums, complete native inventories and macOS
-  signatures. Upgrade coverage proves the identified `.10`/`.11` pair. pi remains `.2`; its older
+  signatures. Existing upgrade coverage proves only the identified `.10`/`.11` pair; final `.12`
+  upgrades remain pending. pi remains `.2`; its older
   1.2 → 1.3 fixture is historical, not this release's gate.
 - Core QA excludes paid-provider inference, completed external OAuth, installer/window-manager and
   AppImage-mount lifecycle coverage. The arm64 Dock receipt is platform/scenario-specific. Physical
