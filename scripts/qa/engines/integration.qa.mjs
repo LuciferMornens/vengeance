@@ -5,6 +5,7 @@ import { performance } from 'node:perf_hooks'
 import { FAKE_MODELS, FAKE_PROVIDER } from '../lib/agent-dir.mjs'
 import { launchApp, reportShotsDir } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
+import { captureFailedNativeDiagnostics } from '../lib/native-diagnostics.mjs'
 import { isAlive } from '../lib/processes.mjs'
 import { softSteps } from '../lib/steps.mjs'
 import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
@@ -714,6 +715,12 @@ try {
   await application?.close({ beforeCleanup: fixture.stopNativeDaemon }).catch((error) => {
     failure ??= error
   })
+  if (failure) {
+    await captureFailedNativeDiagnostics({
+      fixtureDirectory: fixture.root.dir,
+      outputDirectory: reportShotsDir('engines')
+    }).catch((error) => console.error(`Native failure diagnostics unavailable (${error.name})`))
+  }
   await fixture.cleanup().catch((error) => {
     failure ??= error
   })

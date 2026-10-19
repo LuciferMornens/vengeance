@@ -29,6 +29,7 @@ on:
       - scripts/build-prime-auth.mjs
       - scripts/ci/**
       - scripts/checks/qa-native-temp.mjs
+      - scripts/checks/native-diagnostics.mjs
       - scripts/dist.mjs
       - scripts/dist-qa.mjs
       - scripts/engines/**
@@ -183,8 +184,10 @@ jobs:
           targets: ${{ matrix.rust-target }}
           components: clippy, rustfmt
       - run: npm ci
-      - name: Validate QA native runtime paths
-        run: node scripts/checks/qa-native-temp.mjs
+      - name: Validate QA runtime paths and failure diagnostics
+        run: |
+          node scripts/checks/qa-native-temp.mjs
+          node scripts/checks/native-diagnostics.mjs
       - name: Validate the macOS application observer
         if: runner.os == 'macOS'
         run: |
