@@ -264,6 +264,72 @@ async function assertUpgradeNotice(application, agentId, baseline, selected) {
   )
 }
 
+async function observeUpgradeAction(application) {
+  await application.page.evaluate(() => {
+    const maximumEvents = 16
+    const maximumTextLength = 2000
+    const events = []
+    const record = (entry) => {
+      events.push({ time: Date.now(), ...entry })
+      if (events.length > maximumEvents) events.shift()
+    }
+    const pointerEvents = new AbortController()
+    for (const type of ['pointerdown', 'pointerup', 'click']) {
+      document.addEventListener(
+        type,
+        (event) => {
+          const button = document.querySelector('[data-engine-upgrade] button')
+          record({
+            type,
+            point: { x: event.clientX, y: event.clientY },
+            target: event.target.tagName,
+            text: event.target.textContent?.slice(0, maximumTextLength),
+            button: button?.getBoundingClientRect().toJSON(),
+            disabled: button?.disabled,
+            viewport: { width: innerWidth, height: innerHeight }
+          })
+        },
+        { capture: true, signal: pointerEvents.signal }
+      )
+    }
+    const unsubscribe = window.vengeance.on('engine:status', ({ agentId, status, info }) =>
+      record({ type: 'engine:status', agentId, status, pid: info.pid, error: info.error })
+    )
+    let previousToast = ''
+    const toasts = new MutationObserver(() => {
+      const text = document.querySelector('[data-toaster]')?.textContent ?? ''
+      if (text === previousToast) return
+      previousToast = text
+      record({ type: 'toast', text: text.slice(0, maximumTextLength) })
+    })
+    toasts.observe(document.body, { subtree: true, childList: true, characterData: true })
+    window.__residentUpgradeAction = {
+      events,
+      stop() {
+        pointerEvents.abort()
+        unsubscribe()
+        toasts.disconnect()
+      }
+    }
+  })
+}
+
+async function upgradeActionEvidence(application) {
+  return application.page.evaluate(() => {
+    const maximumTextLength = 2000
+    const observation = window.__residentUpgradeAction
+    observation?.stop()
+    return {
+      events: observation?.events,
+      notice: document
+        .querySelector('[data-engine-upgrade]')
+        ?.textContent?.slice(0, maximumTextLength),
+      toast: document.querySelector('[data-toaster]')?.textContent?.slice(0, maximumTextLength),
+      viewport: { width: innerWidth, height: innerHeight }
+    }
+  })
+}
+
 async function main() {
   const baselineExecutable = process.env.QA_PRIME_BASELINE_EXECUTABLE
   const baselineHash = process.env.QA_PRIME_BASELINE_SHA256?.toLowerCase()
@@ -291,6 +357,7 @@ async function main() {
   }
   let application
   let failure
+  let upgradeAgentId
 
   async function check(label, action) {
     console.log(`  • ${label}`)
@@ -596,6 +663,8 @@ async function main() {
       }
     })
 
+    upgradeAgentId = agentId
+    await observeUpgradeAction(application)
     const restartButton = application.page
       .locator('[data-engine-upgrade]')
       .getByRole('button', { name: 'Restart session', exact: true })
@@ -615,6 +684,7 @@ async function main() {
       },
       { label: 'selected resident worker restored', timeoutMs: KERNEL_TIMEOUT_MS }
     )
+    report.observations.upgradeAction = await upgradeActionEvidence(application)
     const after = await residentIdentity(application, agentId)
     const afterMessages = await application.rpc({ type: 'get_messages' }, agentId)
     report.after = { ...after, messages: afterMessages }
@@ -670,6 +740,44 @@ async function main() {
     if (failed.length) throw new Error(`${failed.length} older resident upgrade checks failed`)
   } catch (error) {
     failure = error
+    if (upgradeAgentId) {
+      const maximumAgents = 8
+      const maximumStderrLength = 4096
+      report.observations.upgradeFailure = {
+        action: await upgradeActionEvidence(application).catch(String),
+        linuxProcesses:
+          process.platform === 'linux'
+            ? await Promise.all(
+                [report.before.worker.pid, report.before.daemon.pid, 1].map(async (pid) => ({
+                  pid,
+                  stat: await readFile(join('/proc', String(pid), 'stat'), 'utf8').catch(String)
+                }))
+              )
+            : undefined,
+        engines: await application
+          .invoke('engine:list')
+          .then((agents) =>
+            agents
+              .slice(0, maximumAgents)
+              .map(({ agentId, status, pid, busy, error, runtime }) => ({
+                agentId,
+                status,
+                pid,
+                busy,
+                error,
+                runtime
+              }))
+          )
+          .catch(String),
+        stderr: await application
+          .invoke('engine:stderr', upgradeAgentId)
+          .then((stderr) => stderr.slice(-maximumStderrLength))
+          .catch(String)
+      }
+      console.error(
+        `Upgrade failure evidence: ${JSON.stringify(report.observations.upgradeFailure)}`
+      )
+    }
     await application?.screenshot('FAILED').catch(() => undefined)
   } finally {
     await application?.close({ beforeCleanup: fixture.stopNativeDaemon }).catch((error) => {

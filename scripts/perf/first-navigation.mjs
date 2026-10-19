@@ -132,11 +132,14 @@ function environment(userData, scratch) {
 
 async function histories(workspace) {
   const pi = []
+  const markers = []
   const directory = workspaceSessionDir(fixture.piDirectory, workspace)
   for (const title of ['First conversation', 'Second conversation']) {
     const session = longSession(workspace, { turns: HISTORY_TURNS, name: title })
-    session.assistant(`${title} final benchmark marker.`)
+    const marker = `${title} final benchmark marker.`
+    session.assistant(marker)
     pi.push(await session.write(directory))
+    markers.push(marker)
   }
   if (!engines.includes('prime')) return { pi }
   const setup = await launchApp({
@@ -146,20 +149,31 @@ async function histories(workspace) {
   const prime = []
   const seedWorkers = []
   try {
-    for (const path of pi) {
-      const source = await setup.test('openSession', path, 'pi')
-      assert.ok(source)
-      const destination = await setup.invoke('engine:switch', source, {
+    for (const [index, path] of pi.entries()) {
+      // Keep renderer refreshes out of the seed's awaited create/query/handoff sequence.
+      const source = await setup.invoke('engine:create', {
+        engine: 'pi',
+        cwd: workspace,
+        sessionPath: path
+      })
+      assert.equal(source.engine, 'pi')
+      const sourceCount = await assertSeededHistory(setup.rpc, source, markers[index])
+      assert.equal(resolve(source.sessionFile), resolve(path))
+      const destination = await setup.invoke('engine:switch', source.agentId, {
         engine: 'prime',
         cwd: workspace,
         provider: PRIME_PROVIDER,
         model: PRIME_MODELS.reasoning,
         thinking: 'off'
       })
-      assert.ok(destination.sessionFile)
+      assert.equal(destination.agentId, source.agentId, 'The seed keeps its conversation identity')
+      assert.equal(destination.engine, 'prime')
+      assert.notEqual(destination.sessionFile, path, 'The seed uses a native destination archive')
+      const destinationCount = await assertSeededHistory(setup.rpc, destination, markers[index])
+      assert.equal(destinationCount, sourceCount, 'The seed transfers every benchmark message')
       seedWorkers.push(await processIdentity(destination.pid))
       prime.push(destination.sessionFile)
-      await setup.invoke('engine:dispose', source)
+      await setup.invoke('engine:dispose', source.agentId)
     }
   } finally {
     try {
@@ -173,6 +187,25 @@ async function histories(workspace) {
   }
   report.seedWorkers = seedWorkers
   return { pi, prime }
+}
+
+async function assertSeededHistory(rpc, info, marker) {
+  assert.equal(info.status, 'ready', info.error ?? 'The seed engine must finish starting')
+  assert.equal(info.mock, false, 'The seed uses a native engine')
+  assert.ok(info.sessionFile, 'The seed has a persisted archive')
+  const state = await rpc({ type: 'get_state' }, info.agentId)
+  assert.equal(state.isStreaming, false, 'The seed is idle before the next operation')
+  assert.ok(state.sessionFile, 'The running seed reports its persisted archive')
+  assert.equal(resolve(state.sessionFile), resolve(info.sessionFile))
+  const { messages } = await rpc({ type: 'get_messages' }, info.agentId)
+  assert.ok(messages.length > HISTORY_TURNS, 'The running seed contains the long benchmark history')
+  const lastMessage = messages.at(-1)
+  assert.equal(lastMessage?.role, 'assistant')
+  assert.ok(
+    lastMessage.content.some((part) => part.type === 'text' && part.text === marker),
+    'The running seed contains the final benchmark marker'
+  )
+  return messages.length
 }
 
 async function bundledIdentity(page, engine, agentId) {
