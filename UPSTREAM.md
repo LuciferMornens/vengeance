@@ -22,7 +22,7 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 `engines.lock.json` is the source of truth. Current stable bases are pi `v1.3.0` at
 `71023aec1546d6d677a65669c5665c0927ce0dd0` and Prime `v0.10.0` at
 `763094e1b6a7c17450ee8399b06cda1853847ca5`. The builds identify as `1.3.0+vengeance.2` and
-`0.10.0+vengeance.11`. Never reuse a Vengeance build version for different shipped behavior.
+`0.10.0+vengeance.12`. Never reuse a Vengeance build version for different shipped behavior.
 
 The current stable-release verification and Prime patch decisions are recorded in
 [ENGINE-STABLE-AUDIT-2026-10-18.md](docs/ENGINE-STABLE-AUDIT-2026-10-18.md), with the preceding
@@ -78,17 +78,19 @@ Rust/Cargo 1.98.1, which `rust-toolchain.toml` selects, with the host's Rust tar
   installing 1.98.1, so `rust-toolchain.toml` resolves to it), a MinGW-w64 `gcc` and GNU `objdump` on
   PATH (`OBJDUMP` can select it), and Git Bash as the development shell.
 - **macOS arm64 and x64:** the Xcode Command Line Tools for clang, `codesign` and `otool`. The builders
-  set `MACOSX_DEPLOYMENT_TARGET=13.0` and sign ad-hoc; no Apple Developer account is needed.
+  set `MACOSX_DEPLOYMENT_TARGET=13.0` and sign ad-hoc; no Apple Developer account is needed. Intel
+  builds also use system Perl and make for the runtime wheel described below.
 - **Linux x64 and arm64:** `build-essential`, binutils (`objdump`) and Python 3. Release builds run in
   an Ubuntu 22.04 container for the glibc 2.35 baseline. On a newer distribution the glibc check fails;
   build in that container, or set `VENGEANCE_GLIBC_BASELINE=host` for engines used only on that machine.
   Packaging also needs `rpmbuild` and `bsdtar` (`rpm` and `libarchive-tools` on Debian and Ubuntu).
 
 Users need none of these to load the engines: pi uses Electron's Node; Prime includes its Python kernel
-package, skills and catalogs. Native kernel provisioning and tools may still acquire their own language
-environments/dependencies when first used. Package installation and developer tools keep their native
-prerequisites, such as npm, Git or Bash; on macOS and Linux the app finds them through the login shell's
-environment (SPEC §2.4).
+package, skills and catalogs. Engine 2's first kernel setup needs uv and network access to acquire Python
+and dependencies. Intel macOS uses the bundled cryptography wheel, so users need no Rust, C or OpenSSL
+toolchain for kernel setup. Package installation and developer tools keep their native prerequisites,
+such as npm, Git or Bash; on macOS and Linux the app finds them through the login shell's environment
+(SPEC §2.4).
 `VENGEANCE_NATIVE_BUILD_JOBS=1` limits Engine 2 and helper build concurrency on smaller machines;
 the default is four. Run native qualification and package builds serially when memory is limited.
 
@@ -110,6 +112,43 @@ builders, helper source and notices are committed.
 Runtime cache folders are immutable per payload. Keep old Engine 2 caches while resident processes or
 recovery references use them. App installers can replace their own resources without deleting those
 residents' executable files. Validate transitions on isolated session copies before releasing an update.
+
+### Intel macOS Python runtime wheel
+
+Prime build `.12` adds temporary patch `0023` and a source-built cryptography `50.0.2` wheel for
+packaged Intel macOS runtimes. The current dependency otherwise falls back to a source build on that
+platform. Keep the current cryptography security fixes rather than downgrading to an older release
+with an Intel wheel. The native upstream base and account, session and helper protocol formats are
+unchanged; the lock now lists 23 ordered Prime patches.
+
+`prime.runtimeWheels.darwin-x64` in `engines.lock.json` pins source URLs and SHA-256 values for
+cryptography, static OpenSSL `4.0.3`, CPython `3.11.17` and every Python build dependency.
+`scripts/engines/build-prime-wheels.mjs` verifies those downloads and builds on native Intel macOS
+with the locked Rust toolchain, Xcode tools, Perl and make. It checks wheel paths and RECORD hashes,
+x86_64 Mach-O architecture, the macOS 13 deployment target and system-only dynamic dependencies;
+then it ad-hoc signs the extension, updates RECORD and smoke-tests cryptography, OpenSSL, AES-GCM,
+Ed25519 and hashing. The wheel, input/output receipt and source/Rust license notices ship under
+`prime-agent-runtime/wheels` before the complete payload inventory is generated.
+
+That directory's `manifest.json` records schema version 1, platform `darwin-x64`, and the wheel's
+distribution, version, safe filename and SHA-256. Packaged Vengeance Intel builds verify the manifest
+and wheel before accepting even a cached kernel environment, then give uv the verified local wheel
+as an explicit requirement. Missing or corrupt wheel data fails setup. All wheel-directory contents
+contribute to runtime identity so an old ready environment refreshes when the payload changes.
+Source checkouts, upstream developer builds and other platforms retain native dependency resolution.
+
+Rebuild Engine 2 and its helper after changing these inputs. Requalify wheel metadata, signatures,
+architecture, minimum OS, dynamic dependencies and notices, then the actual loaded cryptography and
+OpenSSL versions in an isolated packaged kernel. Repeat the official `.10`-to-`.12` upgrade with
+genuine old kernel state, no candidate bootstrap overrides, and unchanged baseline package inventory.
+Native Intel build, kernel and upgrade qualification for `.12` remains pending; source checks alone
+do not establish those results. Record actual output hashes in the build and release receipts.
+
+On every upstream or dependency update, review current cryptography/OpenSSL security releases and
+official Intel wheel availability, refresh the source/checksum locks, and rerun these gates. Retire
+`0023` when a supported upstream stable release provides equivalent verified bundled-wheel support,
+or current official Intel wheels make it unnecessary, and packaged bootstrap plus cached-kernel
+upgrade regressions pass without the patch. See the [native patch guide](patches/prime-agent/README.md).
 
 ## Platforms
 
@@ -183,7 +222,7 @@ Inspect the desktop captures as well as the OS observations; page screenshots ca
 background activity stays out of the Dock. The main Vengeance app must remain a regular application.
 
 For 0.3.3, the macOS arm64/x64 and Linux arm64/x64 release runners then qualify the official
-same-platform 0.3.2 Engine 2 package (`0.10.0+vengeance.10`) against the final packaged `.11` candidate.
+same-platform 0.3.2 Engine 2 package (`0.10.0+vengeance.10`) against the final packaged `.12` candidate.
 `scripts/qa/engines/release-baseline.mjs` pins both the public release's `SHA256SUMS` and each archive's
 SHA-256, verifies the complete extracted native inventories and macOS app signature, and emits
 `release-baseline.json` plus `release-baseline-env.json`. It never launches the production app.
@@ -195,8 +234,9 @@ candidate and actually loaded packaged resources. Retain both the loader and sui
 
 This upgrade group follows the nine core suites and macOS visibility gate, before navigation
 benchmarking. Windows's `.10` to `.11` native transition is covered by the retained PR qualification
-report; the macOS launch fix changes no Windows native behavior. pi is `1.3.0+vengeance.2` in both
-0.3.2 and 0.3.3. Its historical 1.2 to 1.3 transition fixture is not used as this release's upgrade gate.
+report; that historical evidence does not qualify `.12`. The Intel wheel patch changes no Windows
+dependency resolution. pi is `1.3.0+vengeance.2` in both 0.3.2 and 0.3.3. Its historical 1.2 to 1.3
+transition fixture is not used as this release's upgrade gate.
 
 Each of the five release runners then runs
 `node scripts/perf/first-navigation.mjs --label release-<platform> --runs 3` against the completed
@@ -520,7 +560,7 @@ base contains the upstream fix and the provider-payload and diagnostic regressio
 No session format, account schema, or helper protocol revision changes. Rebuild the helper against the
 new engine fingerprint, and qualify an idle resident transition from the complete `.10` package.
 
-The `.11` lock now carries 22 ordered Prime patches. Patches `0021` and `0022` are test-only
+The `.11` qualification used 22 ordered Prime patches. Patches `0021` and `0022` are test-only
 qualification changes after runtime backport `0020`; the upstream base and protocol revisions remain
 pinned. The first native attempt exposed both a Windows ACP cleanup hang and refinement-fixture lock
 starvation. Its ACP EOF assertion had passed before a stderr-reader join stalled; stopping that

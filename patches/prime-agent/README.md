@@ -3,7 +3,7 @@
 Follow [UPSTREAM.md](../../UPSTREAM.md) for reconstruction and qualification.
 
 Vengeance ships a source build of stable `v0.10.0`, upstream commit
-`763094e1b6a7c17450ee8399b06cda1853847ca5`, identified as `0.10.0+vengeance.11`.
+`763094e1b6a7c17450ee8399b06cda1853847ca5`, identified as `0.10.0+vengeance.12`.
 The exact source, catalog revision, toolchain and patch order live in
 [engines.lock.json](../../engines.lock.json). The native helper links this same stable base.
 
@@ -31,6 +31,7 @@ The exact source, catalog revision, toolchain and patch order live in
 | 0020  | Include native APPEND_SYSTEM sources in session prompts and prompt dumps, preserving raw text.            |
 | 0021  | Bound ACP fixture shutdown and collect stderr without waiting for inherited Windows pipe handles.         |
 | 0022  | Backport upstream's bounded-lock concurrency fixture while asserting all 80 writes land.                  |
+| 0023  | Verify and explicitly install the bundled Intel macOS cryptography wheel; refresh kernel identity.        |
 
 Patch 0014 comes from upstream commit
 [`7b89c111da0f1d9e67849b34f10552bbb4bd1bd1`](https://github.com/PrimeIntellect-ai/prime-agent/commit/7b89c111da0f1d9e67849b34f10552bbb4bd1bd1).
@@ -84,6 +85,29 @@ accepted update. The stable fixture failed five isolated runs on Windows; the lo
 round. This is a test-only backport, not a runtime lock fix; lock behavior and timeouts do not change.
 Retire it when a candidate upstream base incorporates the hunk and passes repeated isolated runs
 and the full native suite. Qualification of this local backport is recorded with the release checks.
+
+Patch 0023 supports the source-built Intel macOS cryptography wheel shipped by Vengeance. Current
+cryptography releases no longer publish Intel macOS wheels; installing the kernel must not require
+an end-user Rust/OpenSSL build or select an older security release. The builder pins cryptography,
+OpenSSL, the build Python and build dependencies in `prime.runtimeWheels` in the engine lock. It
+stages the wheel, provenance receipt and license notices under `prime-agent-runtime/wheels` before
+the outer payload inventory is recorded.
+
+The native manifest is `wheels/manifest.json`, with `schemaVersion: 1`, `platform: "darwin-x64"`
+and one `wheels` entry containing `distribution`, `version`, `file` and `sha256`. The native bootstrap
+checks the manifest, a safe wheel basename matching its version and the wheel's SHA-256 before
+accepting kernel readiness or running uv. It supplies the verified wheel file as an explicit install
+requirement, so a future index source distribution cannot replace it during bootstrap. Missing or
+corrupt files fail visibly. All wheel-directory content participates in runtime identity, forcing an
+environment created by an earlier payload to refresh. Vengeance Intel macOS packages enforce this
+contract; source checkouts, upstream developer builds and other platforms keep native resolution.
+
+Requalify the source build, wheel metadata/RECORD, Mach-O architecture, deployment target, system-only
+dependencies, notices, actual loaded cryptography/OpenSSL versions and isolated cached-kernel upgrade
+on every new base or dependency update. Retire the native patch when upstream supports an equivalent
+verified bundled-wheel bootstrap, or Intel macOS is again covered by current official wheels and the
+packaged kernel and old-to-new environment regressions pass without it. No native account, session or
+helper protocol format changes.
 
 The first three patches originated on development commit
 `fa20be8e487b1889c2395ea33906149aef983ca0`. Patch 0002 was rebased onto stable source:

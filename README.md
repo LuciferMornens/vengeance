@@ -207,7 +207,7 @@ command palette and inspector are shared.
 
 |            | Engine                                                                                      | Engine 2                                                                                                                                               |
 | ---------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Built from | [pi](https://github.com/earendil-works/pi) `v1.3.0`, build `1.3.0+vengeance.2`              | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) `v0.10.0`, build `0.10.0+vengeance.11`                                                 |
+| Built from | [pi](https://github.com/earendil-works/pi) `v1.3.0`, build `1.3.0+vengeance.2`              | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) `v0.10.0`, build `0.10.0+vengeance.12`                                                 |
 | Runs on    | Electron's Node, so no separate Node install                                                | A native executable that includes its Python kernel package, skills and catalogs                                                                       |
 | Sessions   | One process per open session                                                                | Saved resident sessions that survive closing a tab and are listed under **Background sessions**                                                        |
 | Highlights | Extension gallery, extension dialogs and widgets, project-trust dialog, Abliteration models | Native subagents, goals, schedules (heartbeat and cron), side questions, trace inspection and export, native Fast and Ultrafast OpenAI speed transport |
@@ -365,7 +365,8 @@ To run Vengeance:
 - [uv](https://docs.astral.sh/uv/) for Engine 2's Python kernel. Engine 2 sets the kernel up with uv
   the first time it needs it, and Vengeance does not install uv for you: put it on `PATH` or in
   `~/.local/bin`. That setup downloads Python and the kernel's packages, so it needs a network
-  connection.
+  connection. Intel macOS packages include a Vengeance-built cryptography wheel with static OpenSSL;
+  kernel setup does not require Rust, a C compiler or an OpenSSL installation.
 
 To build from source:
 
@@ -376,7 +377,9 @@ To build from source:
   `x86_64-unknown-linux-gnu` or `aarch64-unknown-linux-gnu`.
 - **Windows:** Git Bash, Rust's GNU host toolchain, a MinGW-w64 GCC, and GNU `objdump` on `PATH`
   (`OBJDUMP` can point at it).
-- **macOS:** the Xcode Command Line Tools (`xcode-select --install`).
+- **macOS:** the Xcode Command Line Tools (`xcode-select --install`). Intel builds also use the
+  system Perl and make to build the locked cryptography/OpenSSL wheel; the builder downloads and
+  verifies its pinned Python and build dependencies. See [UPSTREAM.md](UPSTREAM.md#intel-macos-python-runtime-wheel).
 - **Linux:** a compiler and binutils (`build-essential` and `binutils` on Debian and Ubuntu,
   `base-devel` on Arch). `npm run dist` also needs `rpmbuild` for the rpm and, on x64,
   `bsdtar` for the pacman package (the `rpm` and `libarchive-tools` packages on Debian and Ubuntu).

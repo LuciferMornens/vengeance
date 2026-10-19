@@ -38,7 +38,7 @@
     "repository": "https://github.com/PrimeIntellect-ai/prime-agent.git",
     "tag": "v0.10.0",
     "revision": "763094e1b6a7c17450ee8399b06cda1853847ca5",
-    "version": "0.10.0+vengeance.11",
+    "version": "0.10.0+vengeance.12",
     "patches": [
       "patches/prime-agent/0001-fix-cancel-provider-HTTP-streams-when-compaction-is-.patch",
       "patches/prime-agent/0002-fix-synchronize-persisted-user-shell-output-with-liv.patch",
@@ -61,8 +61,61 @@
       "patches/prime-agent/0019-native-fixture-coordination.patch",
       "patches/prime-agent/0020-native-append-system-prompt.patch",
       "patches/prime-agent/0021-acp-fixture-cleanup.patch",
-      "patches/prime-agent/0022-upstream-harness-lock-fixture.patch"
+      "patches/prime-agent/0022-upstream-harness-lock-fixture.patch",
+      "patches/prime-agent/0023-bundled-python-wheel.patch"
     ],
+    "runtimeWheels": {
+      "darwin-x64": {
+        "deploymentTarget": "13.0",
+        "cryptography": {
+          "version": "50.0.2",
+          "url": "https://files.pythonhosted.org/packages/9d/af/182eb91b0df3fe75c4d9f26fe70684569566745f6ba7e5c9c73a862c5252/cryptography-50.0.2.tar.gz",
+          "sha256": "7b46165bb56eb4704e2eaaf86f3c940d19154535d9b0ca7d6d590b04060e00d5"
+        },
+        "openssl": {
+          "version": "4.0.3",
+          "url": "https://github.com/openssl/openssl/releases/download/openssl-4.0.3/openssl-4.0.3.tar.gz",
+          "sha256": "325b5c806167c13b40b1ffeadfe0248197c00eccc4cf123ec1e28d2d2fd216d9"
+        },
+        "python": {
+          "version": "3.11.17",
+          "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.11.17%2B20261013-x86_64-apple-darwin-install_only.tar.gz",
+          "sha256": "3acde87324867dab4e63329be3010130c75bfc4a3709db00866862d750a3bba3"
+        },
+        "buildDependencies": [
+          {
+            "name": "pip",
+            "version": "26.2.1",
+            "url": "https://files.pythonhosted.org/packages/f3/6e/1736e5b4ae2b778ef2f81c47d797de9f891d4d8acb047a24ca37a60294dd/pip-26.2.1-py3-none-any.whl",
+            "sha256": "71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e"
+          },
+          {
+            "name": "maturin",
+            "version": "1.15.0",
+            "url": "https://files.pythonhosted.org/packages/51/36/e23a21cb34a648b711036b9b2fe1d4f3f4ee24f8db54215d73f1a9a3a3ec/maturin-1.15.0-py3-none-macosx_10_12_x86_64.whl",
+            "sha256": "c40b4eae7bf5ef1f4b1af8d623fe4105016f93578fb15b764e741d08ec3b92dd"
+          },
+          {
+            "name": "cffi",
+            "version": "2.1.1",
+            "url": "https://files.pythonhosted.org/packages/70/d2/16d99a0c4948febc0ebd133a13b2f688ff7f8cb04da971e1128872ce0c03/cffi-2.1.1-cp311-cp311-macosx_10_15_x86_64.whl",
+            "sha256": "c8d2c9fd1f2d16f780d15127abb050d13d1a76c03a4bd87d7e4980e45e511e12"
+          },
+          {
+            "name": "setuptools",
+            "version": "84.0.0",
+            "url": "https://files.pythonhosted.org/packages/95/9c/c510029fc6ef33a6275cd2c5d3cecd6613dfd6aa401d57c54f1c18852ccf/setuptools-84.0.0-py3-none-any.whl",
+            "sha256": "51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670"
+          },
+          {
+            "name": "pycparser",
+            "version": "3.11",
+            "url": "https://files.pythonhosted.org/packages/90/11/0e6f11117525ff0eec40ebac3d313376f102df93ca44ad9e893ee85e4f89/pycparser-3.11-py3-none-any.whl",
+            "sha256": "51d5a8ba2be0bbe440b99d2112604c95bbbc3c2748a64260186c541e1729cd80"
+          }
+        ]
+      }
+    },
     "catalogRevision": "b90e08807c37ccdfab04eb31b23de6a86dd6e7fe",
     "rustVersion": "1.98.1",
     "packageDir": "prime",
