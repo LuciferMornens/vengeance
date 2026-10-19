@@ -5,9 +5,10 @@ restarts, and makes opening saved conversations respond immediately. Syntax high
 of the window's rendering thread. On macOS, background Engine and settings processes use Electron's
 background helper so they do not create extra Dock applications.
 
-**Release qualification for the new Engine 2 `.12` candidate is pending.** Its reviewed Intel macOS
-kernel repair and earlier runtime/harness repairs still require final local builds and all-platform
-native qualification. Earlier `.11` passes and failed release attempts remain historical evidence.
+**Cross-platform release qualification is pending.** The Engine 2 `.12` candidate passes local Windows
+builds, checks, screenshots, all nine packaged suites and six benchmark samples. Remote core checks
+pass on four platforms, but Intel verification, upgrades and final benchmark/install gates still
+require the combined repair and a clean rerun.
 
 On 0.3.1 or 0.3.2, the Vengeance card in **Settings → Updates** offers the next published release.
 The Windows installer and Linux AppImage can download and install updates; macOS and the deb, rpm,
@@ -72,8 +73,8 @@ Verify downloads against `SHA256SUMS`, or use
 - **Intel macOS kernel setup uses a bundled cryptography wheel.** Engine 2 packages cryptography
   `50.0.2` with static OpenSSL `4.0.3`, retaining current security fixes without requiring users to
   install Rust, a C compiler or OpenSSL. First kernel setup still needs uv and network access.
-  The engine verifies the packaged wheel before setup or cached-kernel reuse. Native build and
-  upgrade qualification for this repair remains pending.
+  The engine verifies the packaged wheel before setup or cached-kernel reuse. Intel compilation
+  succeeds; packaged runtime and upgrade qualification remain pending.
 - **Linux Trash support.** Debian, RPM and pacman packages declare the `gio` dependency used by
   native Trash actions, including restoring inherited instructions.
 
@@ -119,24 +120,22 @@ failed attempts and clean reruns. That evidence covers its identified builds; it
 later changes or other operating systems. Live sign-in and paid-provider behavior remain outside
 that local qualification.
 
-The earlier local Windows 0.3.3 run with Engine 2 `.11` passes typecheck, build, contract checks and
-all 20 mock screenshot scenarios (383 captures). The prompt states and representative captures were visually inspected.
-All nine packaged-engine suites pass, with 79 PNGs visually reviewed. Their machine-readable record
-is `.shots/qa/0.3.3-platform-win32-x64/run-kChaQx/qualification.json`.
+The local `.12` Windows run passes engine/helper builds, typecheck, app build, contract checks,
+QA packaging and all nine core suites. All 20 mock scenarios produce 383 captures with visual review
+CLEAR. The core receipt is `.shots/qa/0.3.3-prime12-win32-x64/run-Xedts5/qualification.json`.
+After the benchmark seed identity repair, all six strict samples pass with zero scroll failures.
+Visual review is CLEAR for all 79 native core and six benchmark PNGs.
+First-open, second-open and cached-return medians are 496.6 / 364.5 / 72.2 ms for Engine and
+908.6 / 542.5 / 46.8 ms for Engine 2; first-visit renderer blocking is 5 / 21 ms.
+The separate built-app record is `.shots/perf/first-navigation/release-0.3.3-prime12-win-seed-id.json`.
+These identified local results do not establish a cross-platform speed improvement.
 
-That run's separate Windows benchmark passes all six strict samples (three per engine), with all
-six PNGs visually reviewed. First-open, second-open and cached-return medians are 494.4 / 342.5 /
-71.6 ms for Engine and 860.1 / 571.9 / 49.9 ms for Engine 2. The record is
-`.shots/perf/first-navigation/release-0.3.3-win-local.json`. These identified `.11` measurements are
-separate from the historical before/after comparison above and do not qualify `.12`.
-
-The historical `404d24d` attempt has green ordinary CI and CodeQL analyses but failed release
-qualification. Its core, macOS arm64 Dock and upgrade passes do not qualify later repairs.
-Static review is clear for its provided 383 Windows/Linux and 363 macOS mock captures, plus 79
-Windows, 95 macOS and 158 Linux native PNGs; 20 macOS mock display variants are absent.
-The reviewed `.12` implementation uses 23 Prime patches and pinned wheel build inputs. Portable
-checks cover input and archive validation, while actual Intel kernel and upgrade results remain
-pending. The qualification record retains the failed attempts, reviewed repairs and scoped evidence.
+At product candidate `dd82ee3`, the remote release attempt fails all five build jobs despite nine
+core-suite passes on Windows, macOS arm64 and both Linux architectures. macOS arm64 also passes the
+Dock observer. Remaining failures concern benchmark seed identity, the upgrade fixture's temporary
+root boundary and Intel Mach-O verification after successful wheel compilation. Repairs are committed
+and independently reviewed; final native reruns remain pending. The `.12` implementation uses 23 Prime patches and pinned
+wheel build inputs. The qualification record preserves precise outcomes and older `.11` evidence.
 
 The final 0.3.3 candidate requires:
 
@@ -164,9 +163,10 @@ The final 0.3.3 candidate requires:
   `SHA256SUMS` and a provenance attestation for the published packages.
 
 Final workflow run links, inspected desktop evidence and per-platform hashes must be recorded before
-publication. [Release run 39229025591](https://github.com/LuciferMornens/vengeance/actions/runs/39229025591)
-records the failed `404d24d` attempt; its green
-[ordinary CI](https://github.com/LuciferMornens/vengeance/actions/runs/39229025642) and
-[CodeQL analyses](https://github.com/LuciferMornens/vengeance/actions/runs/39229020899) cover that source.
-The new `.12` candidate still needs its own final local engine/helper build and five-platform native,
-Dock, upgrade, benchmark and package-install results. Historical passes do not qualify it.
+publication. [Release run 39237513104](https://github.com/LuciferMornens/vengeance/actions/runs/39237513104)
+records the failed `dd82ee3` attempt. Its
+[ordinary CI](https://github.com/LuciferMornens/vengeance/actions/runs/39237513125) has seven jobs
+passing with macOS shots still running; all three
+[CodeQL analyses](https://github.com/LuciferMornens/vengeance/actions/runs/39237508760) pass.
+The combined repair still needs final-head five-platform native, Dock, upgrade, benchmark and
+package-install results. Prior passes do not qualify later source revisions.

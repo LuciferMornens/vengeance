@@ -1,165 +1,76 @@
 # Vengeance 0.3.3 qualification checkpoint
 
-19 October 2026. Final five-platform release qualification is **pending** for Engine 2
-`0.10.0+vengeance.12`, whose reviewed wheel implementation is committed in `f89b12a`.
-Final local engine/helper builds and native reruns remain pending. The failed `404d24d` release
-attempt and earlier Windows `.11` passes below identify older artifacts, not this candidate. Historical
-[PR #15 qualification](ENGINE-PROMPTS-QUALIFICATION-2026-10-18.md) and
-[navigation comparisons](PERFORMANCE-FIRST-NAVIGATION-2026-10-18.md) retain their own source scope.
+19 October 2026. Final five-platform release qualification is **pending**. Product candidate
+`dd82ee3` uses Engine `1.3.0+vengeance.2` and Engine 2 `0.10.0+vengeance.12`; benchmark repair
+`bf004ff` passes locally. Local Windows gates below pass, but release run `39237513104` fails all
+five build jobs. The combined native-verifier and upgrade-fixture repairs are committed and reviewed;
+their native rerun still needs qualification.
 Ignored local evidence identifies tested artifacts, not published release assets.
 
-## Source, review and analysis identity
+## Source and review identity
 
-| Boundary                                                   | Commit                                     |
-| ---------------------------------------------------------- | ------------------------------------------ |
-| Release comparison base, 0.3.2                             | `8b2319880580893356d7cc7d2fbc721c08936bf9` |
-| Production macOS launch fix                                | `1807866a050a080ab7296007a999cf6600ad098d` |
-| Version preparation                                        | `6384530044bd4e550c4de02739c75b19dc69f9ee` |
-| First failed release candidate                             | `e3cbf5d362837f0dacf83d8ac9184f4776025eba` |
-| Isolation/readiness repair candidate                       | `835f034aec60fa38b787f347256ecefa7d506797` |
-| Linux Trash dependency fix                                 | `b6025224d6c52ebf1d8c613ac7f3c67dcdee6e1e` |
-| Historical failed CI/QA candidate and bounded diagnostics  | `404d24dfde231a4f5937205a6f5f93461d4d091d` |
-| Committed macOS identity / artifact-path repair            | `2a94d7bebbcaf01728b4aac336fa4e29c774dd6f` |
-| Committed benchmark seeding / restart diagnostics repair   | `e3c6352cedc64175584cb2849cc78d77eb603a1c` |
-| Reviewed Linux resident-liveness repair                    | `5843076`                                  |
-| Reviewed Intel `.12` packaged-wheel implementation         | `f89b12aee5936b18d9fc711d2062a0cb98834878` |
-| Reviewed Intel kernel and immutable-baseline qualification | `c306d04`                                  |
+| Boundary                                        | Commit                                     |
+| ----------------------------------------------- | ------------------------------------------ |
+| Release comparison base, 0.3.2                  | `8b2319880580893356d7cc7d2fbc721c08936bf9` |
+| Production macOS launch fix                     | `1807866a050a080ab7296007a999cf6600ad098d` |
+| Version preparation                             | `6384530044bd4e550c4de02739c75b19dc69f9ee` |
+| Linux resident-liveness repair                  | `5843076`                                  |
+| Intel .12 wheel implementation                  | `f89b12aee5936b18d9fc711d2062a0cb98834878` |
+| Intel kernel / immutable-baseline qualification | `c306d04`                                  |
+| Product / remote qualification candidate        | `dd82ee33b65320062fb43a8e6923ed968471630a` |
+| Explicit benchmark seed identity repair         | `bf004ffd9282c0d61e946c43d9683e84bac9c252` |
+| Mach-O load classification / regression repair  | `23dff5cb1bbb3547a0825d9f4bbf3289896ad10e` |
+| Bounded baseline ownership / writable fixtures  | `e8d06fa725bd66bf79a538404cd78175bf7b4c5f` |
 
-The macOS production fix uses Electron 44.7.0's signed background helper for Electron-as-Node work
-and login-shell probing, failing closed when unavailable. The main app retains normal Dock presence.
-Windows/Linux and custom system Node selection retain their behavior; this fix adds no engine patch.
-The coordinator records source review CLEAR at `e3cbf5d` against `8b23198` and separate QA review
-CLEAR. Those reviews apply to their identified source, not later runtime outcomes.
-
-At `404d24d`, [CI 39229025642](https://github.com/LuciferMornens/vengeance/actions/runs/39229025642) passes
-all eight jobs, including macOS shots. [CodeQL 39229020899](https://github.com/LuciferMornens/vengeance/actions/runs/39229020899)
-passes all three analyses. The coordinator's current-PR open-code-alert query returned `[]`;
-this records that query's scope. Earlier `835f034` [CI 39222761658](https://github.com/LuciferMornens/vengeance/actions/runs/39222761658)
-and [CodeQL 39222757745](https://github.com/LuciferMornens/vengeance/actions/runs/39222757745) also
-completed successfully; successful analyses alone do not establish absence of vulnerabilities.
+The coordinator records final product source review CLEAR at `dd82ee3` by GPT-6.1 Sol / xhigh and
+separate narrow review CLEAR for `bf004ff`. The verifier and baseline repairs also have independent
+GPT-6.1 Sol / xhigh review CLEAR. Full contract checks pass after these repairs in
+`.cache/0.3.3-ci-boundaries-checks.log`. Reviews and portable checks do not substitute for native gates.
+[CI 39237513125](https://github.com/LuciferMornens/vengeance/actions/runs/39237513125) has seven jobs
+passing, with macOS shots still running at this checkpoint.
+[CodeQL 39237508760](https://github.com/LuciferMornens/vengeance/actions/runs/39237508760) passes all
+three analyses. The coordinator's open-PR code-alert query returns `[]`; successful analyses and
+that scoped query do not establish absence of vulnerabilities.
 
 Existing moderate [Dependabot #2](https://github.com/LuciferMornens/vengeance/security/dependabot/2)
-for `sprintf-js` is a development/build-transitive dependency already present before this PR.
-At this checkpoint no patched version is offered and no shipped dependency path was found in the
-reviewed graph. This is a scoped dependency finding, not a general security guarantee.
+for `sprintf-js` is a development/build-transitive dependency present before this PR. No patched
+version is offered and no shipped dependency path was found in the reviewed graph. This is a scoped
+finding, not a general security guarantee.
 
-## New `.12` implementation checkpoint
+## Engine 2 .12 implementation and portable checks
 
 Prime retains stable `v0.10.0` at `763094e1b6a7c17450ee8399b06cda1853847ca5` with 23 ordered patches.
-Reviewed patch `0023` and its builder package cryptography `50.0.2` for Intel macOS, static OpenSSL
-`4.0.3`, pinned CPython `3.11.17`, build dependencies and source SHA-256 locks. Current security fixes
-are retained; users need uv/network for first setup, without a Rust, C or OpenSSL toolchain.
-The engine verifies the manifest/wheel before cached readiness, explicitly supplies it to uv and
-includes wheel contents in runtime identity. The builder checks RECORD/archive safety and native
-constraints, ad-hoc signs, smoke-tests, and retains licenses plus receipts. Independent source reviews
-are CLEAR. `node scripts/checks/prime-runtime-wheels.mjs` covers pins, corruption guards and
-reproducible RECORD repair without executing an Intel build. Other platforms retain native resolution.
-The independently reviewed QA in `c306d04` provisions genuine `.10` readiness through its public
-bootstrap command and scopes the temporary wheel constraint to that child. Candidate probes verify
-the loaded extension, wheel archive, OpenSSL and automatic venv, absence of overrides, a valid new
-runtime SHA-256 and an unchanged complete baseline payload. Portable rejection checks pass in
-`node scripts/checks/native-kernel.mjs`; actual Intel execution remains a separate gate.
-Local `.12` typecheck passes in
-`.cache/0.3.3-prime12-typecheck.log`. No final `.12` build or native output hashes are recorded yet.
+Patch `0023` and its builder package cryptography `50.0.2` for Intel macOS, static OpenSSL `4.0.3`,
+pinned CPython `3.11.17`, build dependencies and source SHA-256 locks. Current security fixes are
+retained; users need uv/network for first setup, without a Rust, C or OpenSSL toolchain. Other
+platforms retain native dependency resolution.
 
-| New candidate gate                                                         | Status  |
-| -------------------------------------------------------------------------- | ------- |
-| Final local `.12` engine/helper build and app/package checks               | Pending |
-| Final-head ordinary CI and CodeQL                                          | Pending |
-| Nine packaged core suites on all five native platforms                     | Pending |
-| Dock observer and desktop witnesses on both macOS architectures            | Pending |
-| Official `.10` → `.12` upgrades on both macOS and both Linux architectures | Pending |
-| Actual Intel kernel crypto/OpenSSL identity and old-cache refresh          | Pending |
-| Five-platform benchmarks, shipping hashes and package-install gates        | Pending |
+The engine verifies the manifest/wheel before cached readiness, supplies the wheel explicitly to uv,
+and includes wheel contents in runtime identity. The builder checks RECORD/archive safety and native
+constraints, ad-hoc signs, smoke-tests, and retains licenses plus input/output receipts. Independent
+source reviews are CLEAR. These completed portable checks do not establish Intel runtime success:
 
-## Historical failed release attempt: `404d24d` / Engine 2 `.11`
+- `node scripts/checks/prime-runtime-wheels.mjs`: input pins, RECORD repair, reproducible ZIP and
+  corruption guards pass.
+- `node scripts/checks/native-kernel.mjs`: kernel-evidence rejection checks pass. Candidate readiness
+  must be a valid SHA-256 and differ from the genuine old ready hash; the full baseline inventory
+  must remain unchanged. The temporary wheel constraint applies only to the old bootstrap child;
+  candidate probes require automatic setup with overrides absent.
+- Exported reconstruction `prime-763094e1-48494616` passes
+  `node scripts/checks/prime-workspace.mjs test -p pa-core --lib kernel::bootstrap::venv::`:
+  15 pass, one existing live-only test ignored. The same runner's
+  `clippy -p pa-core --lib --tests -- -D warnings` and `fmt --package pa-core --check` pass, with
+  both real-account guards intact. Results are retained in the tool transcript, not a standalone log.
 
-[Release 39229025591](https://github.com/LuciferMornens/vengeance/actions/runs/39229025591) failed
-qualification. Windows, Linux x64/arm64 and macOS arm64 pass all nine packaged core suites.
-macOS arm64 also passes the Dock observer and both official `.10` → `.11` upgrade suites.
-Its built-app benchmark then fails a process-ownership check based on mutable `ps comm` titles;
-the `libproc` identity repair is committed in `2a94d7b` but not runtime-qualified.
-No current macOS benchmark pass is recorded.
+## Completed local Windows .12 run
 
-Both Linux architectures pass candidate-transition, then resident-upgrade times out; diagnosis is
-pending. A Linux resident-liveness semantic repair is committed in `5843076`; its relationship to the exact
-`404d24d` timeout remains a hypothesis pending new native evidence. Linux upgrade artifact files were
-omitted by absolute multiline path translation in the container upload step. The relative-report-path
-repair is committed in `2a94d7b`, without gate/assertion changes or a qualifying rerun.
-Windows reaches benchmark seed-history handoff, then
-refuses with “Wait for the current session operation to finish before switching engines”; a harness
-readiness repair is committed in `e3c6352`, awaiting rerun. Intel macOS repeats the integration failure.
-Its retained worker logs show runtime → `mcp` 2.3.0 → `pyjwt[crypto]` 2.15.1 → `cryptography` 50.0.2;
-the cryptography source build invokes maturin, then rustup cannot select Cargo because isolated HOME
-has no default toolchain. Evidence is `mac-x64/_temp/engine-qualification/run-hcq1fY/2-engines-integration/engines-shots/native-diagnostics/`
-under `.cache/ci-39229025591`. `runtime.json` records eight untruncated logs, no capture errors and
-only seed packages installed. The reviewed `.12` wheel implementation addresses that source-build
-dependency; an actual native build and clean rerun must establish the repaired outcome.
-
-The Linux liveness source change has independent review CLEAR. Local typecheck, build (20.39 s), checks
-and QA packaging pass in `.cache/0.3.3-liveness-{typecheck,build,checks,package}.log`; those local gates
-do not establish the affected Linux native restart outcome.
-
-The root visually reviewed the macOS arm64 desktop PNG: one Vengeance icon, no generic exec icons.
-`.cache/ci-39229025591/review-mac-dock/receipt.json` records CLEAR within that observed scope:
-249 OS frames, seven checkpoints, foreground-executable witness policy 0, helper policy 1,
-zero unexpected foreground applications, and the same Prime PID 76638 after detach/reconnect.
-A desktop image covers one checkpoint; policy frames cover the recorded observation interval.
-
-Historical static visual receipts under `.cache/ci-39229025642/review-{linux,win}/review-receipt.json`
-are CLEAR with coverage of all 383 captures per platform, using direct/contact-sheet inspection and
-verified pixel-identical carry-forward. This does not mean every image was separately read at full
-size. macOS review is CLEAR for all 363 provided captures in `review-mac/review-receipt.json`;
-20 absent display variants remain outside that artifact's coverage. Native review is CLEAR for 95
-macOS PNGs (79 core / 16 upgrades) in `.cache/ci-39229025591/review-mac-native/review-receipt.json`,
-and all 158 Linux core PNGs (79 per architecture) in `review-linux-native/coverage-receipt.json` under
-that same release root. Windows native review is CLEAR for all 79 core PNGs in
-`review-win-native/review-receipt.json`: seven contact sheets and 14 full-size captures, no carried
-review. A cropped macOS renderer capture has a complete native companion; this review does not use
-the crop alone as full-window evidence. Static visual clearance does not qualify runtime behavior.
-
-| Platform / native release runner                    | Historical `.11` core suites                           | Dock                   | Official 0.3.2 upgrade               | Historical benchmark / final receipts        |
-| --------------------------------------------------- | ------------------------------------------------------ | ---------------------- | ------------------------------------ | -------------------------------------------- |
-| `win32-x64` / `windows-2025`                        | Nine pass                                              | Not applicable         | Prior PR Windows transition evidence | Seed handoff readiness fails; repair pending |
-| `darwin-arm64` / `macos-15`                         | Nine pass                                              | Pass; desktop reviewed | Both suites pass                     | Process-identity check fails; repair pending |
-| `darwin-x64` / `macos-15-intel`                     | Integration fails: cryptography source-build toolchain | Pending                | Pending                              | Wheel packaging repair not yet qualified     |
-| `linux-x64` / `ubuntu-24.04`, 22.04 container       | Nine pass                                              | Not applicable         | Transition passes; resident timeout  | Pending; upgrade artifact upload incomplete  |
-| `linux-arm64` / `ubuntu-24.04-arm`, 22.04 container | Nine pass                                              | Not applicable         | Transition passes; resident timeout  | Pending; upgrade artifact upload incomplete  |
-
-Receipts under `.cache/ci-39229025591` identify macOS core `run-7sQLNl`, upgrade `run-rHhSec` and Linux
-arm64 core `run-pJlkxk`; other job outcomes come from the coordinator. Every platform builds natively;
-Linux uses pinned Ubuntu 22.04/glibc 2.35. One host's results do not qualify another.
-
-## Earlier failures and focused repairs
-
-At `e3cbf5d`, [release 39217933713](https://github.com/LuciferMornens/vengeance/actions/runs/39217933713)
-failed all five jobs/skipped installs despite green CI: macOS sockets needed 106 bytes versus a
-104-byte limit, and Linux/Windows lacked uv. `835f034` fixes isolated temp paths, byte budgets and
-activation/disposal waits, and installs uv 0.13.1 using setup-uv v10.3.0 at
-`1c37ad07a6a961277cf70c0d37d6f313000f5884`, caching disabled.
-
-At `835f034`, [release 39222762172](https://github.com/LuciferMornens/vengeance/actions/runs/39222762172)
-again failed all five jobs/skipped installs. Linux lacked `gio`; `b602522` adds Debian `libglib2.0-bin`,
-RPM `/usr/bin/gio`, pacman `glib2` and CI prerequisites. macOS arm64 passed nine core suites, then
-called Playwright `process()` after close; the repair caches the child. Windows passed six suites
-before queue deletion timed out. A controlled 1024×736 witness reproduces an arriving preview moving
-the button during a press; waiting for all three previews preserves neighbors and deletes once.
-This proves fixture susceptibility, not the archived CI sequence.
-Logs: `.cache/0.3.3-bash-queue-{pointer-witness,fixed-compact,ci-repair}.log`.
-
-Intel's `835f034` packaged suite passed, then pip exited 1 after 16.543 s and a subagent timed out.
-Cleanup lost stderr; `404d24d` retains the logs establishing the cryptography failure above. Focused
-Windows integration passed with 26 PNGs reviewed and no owned processes remaining
-(`.cache/0.3.3-integration-ci-repair.log`), without qualifying an entire release attempt.
-
-## Historical completed local Windows run / Engine 2 `.11`
-
-This run predates the `.12` implementation and does not qualify it. Windows x64, Electron 44.7.0;
-isolated native accounts, sessions and kernel environments use
-`QA_TMP_ROOT=D:/Coding/vengeance-qa-engine-prompts`, outside the repository and real account homes.
-Commands are shown in Git Bash syntax from the managed checkout:
+Windows x64, Electron 44.7.0; temporary accounts, sessions and kernels remain outside real homes.
+Commands below use Git Bash syntax from the managed checkout. The native engine/helper and app
+builds precede the packaged run; `bf004ff` repairs only the separate benchmark seed fixture.
 
 ```sh
+npm run build:engines
+npm run build:auth
 npm run typecheck
 npm run build
 QA_TMP_ROOT='D:/Coding/vengeance-qa-engine-prompts' npm run checks
@@ -167,99 +78,121 @@ QA_TMP_ROOT='D:/Coding/vengeance-qa-engine-prompts' npm run shots
 node scripts/dist-qa.mjs --dir
 QA_TMP_ROOT='D:/Coding/vengeance-qa-engine-prompts' \
 QA_PACKAGED_EXE='C:/Users/mitte/.codex/worktrees/engine-prompts-performance/vengeance/release/qa/win-unpacked/VengeanceQA.exe' \
-QA_REPORT_DIR='C:/Users/mitte/.codex/worktrees/engine-prompts-performance/vengeance/.shots/qa/0.3.3-platform-win32-x64' \
+QA_REPORT_DIR='C:/Users/mitte/.codex/worktrees/engine-prompts-performance/vengeance/.shots/qa/0.3.3-prime12-win32-x64' \
   node scripts/qa/engines/platform-qualification.mjs
 QA_TMP_ROOT='D:/Coding/vengeance-qa-engine-prompts' \
-  node scripts/perf/first-navigation.mjs --label release-0.3.3-win-local --runs 3
+  node scripts/perf/first-navigation.mjs --label release-0.3.3-prime12-win-seed-id --runs 3
 ```
 
-| Gate                | Result / evidence                                                                  |
-| ------------------- | ---------------------------------------------------------------------------------- |
-| Typecheck           | Both projects pass; coordinator's completed `npm run typecheck` record             |
-| Build               | Pass, renderer 20.00 s; `.cache/0.3.3-build.log`                                   |
-| Contract checks     | Pass; `.cache/0.3.3-checks.log`                                                    |
-| Mock screenshots    | 20 scenarios / 383 PNG records; `.cache/0.3.3-shots.log`                           |
-| QA package          | pi 14,932 files / Prime 61 files verified; `.cache/0.3.3-package.log`              |
-| Packaged matrix     | Nine suites pass, no timeout/unrun suite; `.cache/0.3.3-platform.log`              |
-| Built-app benchmark | Six strict samples pass, zero scroll failures; `.cache/0.3.3-first-navigation.log` |
+| Gate                   | Result / evidence                                                                  |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| Engine / helper builds | Pass; `.cache/0.3.3-prime12-{engines,auth}.log`                                    |
+| Typecheck / app build  | Pass, renderer 19.79 s; `.cache/0.3.3-prime12-{typecheck,build}.log`               |
+| Contract checks        | Pass; `.cache/0.3.3-prime12-checks.log`                                            |
+| Mock screenshots       | 20 scenarios / 383 captures, visual review CLEAR; `.cache/0.3.3-prime12-shots.log` |
+| QA package             | pi 14,932 files / Prime 61 files verified; `.cache/0.3.3-prime12-package.log`      |
+| Packaged core          | All nine pass, no timeout or unrun suite; `.cache/0.3.3-prime12-platform.log`      |
+| Built-app benchmark    | Six strict samples pass; `.cache/0.3.3-prime12-first-navigation-seed-id.log`       |
 
-Receipt `.shots/qa/0.3.3-platform-win32-x64/run-kChaQx/qualification.json` covers 07:35:03–07:43:50 UTC,
-with a 900,000 ms per-suite deadline. The suites are packaged, integration, model-isolation,
-system-prompts, restart-safety, stop-compaction, bash-queue, session-recovery and resident-close.
-Restart safety includes 12 native checks; Stop/compaction includes 10. Per-suite packaged-target
-receipts identify Vengeance QA 0.3.3, actual resources and isolated accounts. Root viewed all 11 mock
-prompt states and representative layouts; independent review covered all 79 native and six benchmark
-PNGs. This does not claim review of all 383 local mock captures. The transcript-recovery null/trim
-log is its asserted malformed-frame fixture, not normal rendering.
+Core receipt `.shots/qa/0.3.3-prime12-win32-x64/run-Xedts5/qualification.json` covers
+10:41:02–10:49:48 UTC, with a 900,000 ms per-suite deadline. The nine suites are packaged,
+integration, model-isolation, system-prompts, restart-safety, stop-compaction, bash-queue,
+session-recovery and resident-close. Per-suite receipts identify the actual packaged app/resources.
+The transcript-recovery null/trim log is the asserted malformed-frame fixture.
 
-Benchmark `.shots/perf/first-navigation/release-0.3.3-win-local.json` records three fresh processes
-per backend, `qualified: true`, no scroll-failure recording, zero scroll failures and no warmup,
-forced focus or trace diagnostics. Its six PNGs/CPU profiles are adjacent. Histories have 60 turns;
-the endpoint is the marker visibly inside transcript/window without the opening layer.
+Local visual review is CLEAR for all 79 core and six benchmark PNGs in
+`.cache/review-bf004ff-local-native/review-receipt.json`: eight contact sheets, 14 full-size captures
+(including every benchmark PNG), no carry-forward. Static visual review does not prove runtime gates.
 
-| Visible endpoint median, ms      | Engine | Engine 2 |
+Benchmark `.shots/perf/first-navigation/release-0.3.3-prime12-win-seed-id.json` records three fresh
+processes per engine, `qualified: true`, zero scroll failures, 60-turn histories, and no forced
+focus, warmup or trace diagnostics. PNGs and CPU profiles are adjacent. Its endpoint is the expected
+marker visible inside transcript/window without the opening layer. This uses built output,
+separately from `QA_PACKAGED_EXE`.
+
+| Median, ms                       | Engine | Engine 2 |
 | -------------------------------- | -----: | -------: |
-| Shell                            |  323.7 |    312.6 |
-| First conversation               |  494.4 |    860.1 |
-| Second conversation, first visit |  342.5 |    571.9 |
-| Cached return                    |   71.6 |     49.9 |
+| First conversation               |  496.6 |    908.6 |
+| Second conversation, first visit |  364.5 |    542.5 |
+| Cached return                    |   72.2 |     46.8 |
+| First-visit renderer blocking    |      5 |       21 |
 
-This uses built output, not `QA_PACKAGED_EXE`, and remains separate from the historical comparison:
-Engine opens 825/544 → 491/340 ms; Engine 2 877/487 → 901/549 ms; blocking 128 → 4 and 122 → 19 ms.
-Cached returns added 20–25 ms; a roughly 210 ms startup frame gap remained. No cross-platform speed
-improvement or new causal estimate is inferred. Later QA/workflow paths require their own results.
+These local results do not establish another platform's speed or qualify the next combined repair.
 
-## Artifact identities and retrieval evidence
+## Current remote attempt: dd82ee3
 
-Historical `.11` local QA executable/native hashes come from the packaged receipt and helper probe;
-built hashes come from the benchmark. These are not `.12` or final shipping-installer hashes.
+[Release 39237513104](https://github.com/LuciferMornens/vengeance/actions/runs/39237513104) fails all
+five build jobs. Four platforms pass the nine core suites; Intel stops during wheel verification.
+No final native upgrade, Intel runtime, remote benchmark or package-install pass is claimed.
 
-| Local Windows artifact           | SHA-256                                                                                                                                 |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| QA executable                    | `20eaf634c6abc222ec2edbc564ebe9adf2e7785065b79b8681eedb59177d1758`                                                                      |
-| Built main                       | `b870c3570c89e6bf1486930843f1e6871cf494b24430f2af4a6047f7abdbab07`                                                                      |
-| Built renderer index             | `facedcab9f2b1f9f9065b08cbcfe42d05097c31f8c6480798d6f61eff8ad1564`                                                                      |
-| pi `.2` payload / CLI entry      | `97f796c58c176d6f78f1bbb45564c26225d53826bcb34b479865900002d18a39` / `e79626f2dd6f94aa45d30f3fa63cd84319a6eefcd150b353cfaf274366926774` |
-| Prime `.11` payload / executable | `64f695dd72aa9ddad9a41b3e70344522512c50654c89a2d78a6164ff14f654b2` / `d5b58cad3bb96f2c7075626cbf4215125ad8a118281b10a2717904d0ebdbdad1` |
-| Native helper                    | `1de7bea53c7f128ba5e7801e5570ac3b34e996475b1069a13f8a4b471df6774f`                                                                      |
+| Native platform / runner                            | Core / Dock              | Later result                                                                          |
+| --------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------- |
+| `win32-x64` / `windows-2025`                        | Nine core pass           | Benchmark seed omits explicit agent ID; fixed in bf004ff, locally rerun               |
+| `darwin-arm64` / `macos-15`                         | Nine core and Dock pass  | Upgrade fixture fails the QA-root sibling-boundary check; e8d06fa awaits native rerun |
+| `darwin-x64` / `macos-15-intel`                     | No runtime qualification | Wheel compiles; verifier rejects LC_ID_DYLIB self-name; 23dff5c awaits native rerun   |
+| `linux-x64` / `ubuntu-24.04`, 22.04 container       | Nine core pass           | Upgrade fixture fails the QA-root sibling-boundary check; e8d06fa awaits native rerun |
+| `linux-arm64` / `ubuntu-24.04-arm`, 22.04 container | Nine core pass           | Upgrade fixture fails the QA-root sibling-boundary check; e8d06fa awaits native rerun |
 
-pi `1.3.0+vengeance.2` is based on `71023aec1546d6d677a65669c5665c0927ce0dd0`; Prime
-`0.10.0+vengeance.11` on `763094e1b6a7c17450ee8399b06cda1853847ca5`. Local input fingerprints are
-`57ade0946aad71efecac33ae268ada9c3f0e6de9e206cfdd246d097432d8f841` (pi) and
-`ddc7335e5f42fad308e6f5465e2497cfa07bc3d8686f816150bcaedd9e37135f` (Prime).
+The Intel build produces `cryptography-50.0.2-cp39-abi3-macosx_13_0_x86_64.whl` before the verifier
+failure. Compilation is evidence of that stage only: installed import, signatures, packaged kernel
+and official-baseline upgrades still need a clean native run.
 
-Authenticated downloads are retained in `.cache/ci-<run>`; verified hashes below identify ZIP archives,
-not contained native/package files. A dash means no metadata ID is recorded here.
+macOS arm64 Dock evidence at
+`.cache/ci-39237513104/mac-arm64/qa/release/background-applications/background-apps-shots/background-apps-evidence.json`
+records 238 OS frames over 23.346 s, seven checkpoints, zero unexpected foreground applications,
+and the same Prime PID 71015 after reconnect. This is an identified platform/scenario pass, not an
+Intel or next-head Dock result. Artifacts are retained under `.cache/ci-39237513104`.
 
-| Run / ZIP                 | Artifact ID   | SHA-256                                                            |
-| ------------------------- | ------------- | ------------------------------------------------------------------ |
-| `39217933713/mac-arm64`   | `12171013241` | `135fa0af1357924d5ad3fd3ba318d403ede2027f749d6b6cdeebb4f4a3fdd4e8` |
-| `39217933713/linux-arm64` | `12171875481` | `9aebf4dd38792d3170b341f2d848f0e84dda9c4380abdd10cb30825b56e6abf1` |
-| `39217933713/win-x64`     | `12171523112` | `34a7d4b049fda6ca071821744c73c9713edb6554a5ed98470dae8e656486e7b9` |
-| `39222762172/linux-x64`   | —             | `9dbd8dd6232355887154e9cba9a6084ef06e6de3633f29128f7500a1876aeda8` |
-| `39222762172/mac-arm64`   | —             | `fcc361a2c5fd7c8594b68a1656ecd8d888c39b1e380b7b39d1e372081619a8be` |
-| `39222762172/mac-x64`     | `12174372611` | `cff71ffb0af857edd33763519dfac8647d29d818d3a795a7b26401c745d70620` |
-| `39222762172/win-x64`     | —             | `9f88b09940961a47eae02c96cd43bcd9d0fb11464def2fd409224dda2a62dc1d` |
-| `39229025591/linux-arm64` | `12177502495` | `ee835291cd3708348be1f32bb6dc84320ae8a63a55bd149907b94424c56ebfb7` |
-| `39229025591/linux-x64`   | `12178332895` | `c9f119e30c67ec8543eebc51f8a746fde88921a1ad8f338447837bf9fb57d907` |
-| `39229025591/mac-arm64`   | `12177522297` | `638aaadebad5507d1f5087b767050f618656426111fece9077754b2fe17e568f` |
-| `39229025591/mac-x64`     | `12177119720` | `7abd2fa7633ece8840dc0f86400c796f5ad52a49a57810f61cf45e45f5002efa` |
-| `39229025591/win-x64`     | `12178442609` | `4a608dc4587a36a1cbe8b0d3365b9cefdd20c92e5e6ccc2be730a1dd4e9ab8ce` |
+Current CI Windows/Linux mock visual review is CLEAR for all 383 captures per platform under
+`.cache/ci-39237513125/review-{win,linux}`. macOS arm64 core/Dock review is CLEAR in
+`.cache/ci-39237513104/review-mac-native/review-receipt.json`, covering 79 core plus two background
+PNGs and the OS observations; 14 core captures use verified identical-pixel carry-forward. These
+receipts do not qualify Intel, upgrades or unobserved desktop behavior.
+
+## Local artifact identities
+
+These hashes identify the local .12 receipt and benchmark, not final shipping installers or the
+unqualified Intel wheel. Full input fingerprints, revisions and patch hashes remain in the receipts.
+
+| Windows artifact     | SHA-256                                                            |
+| -------------------- | ------------------------------------------------------------------ |
+| QA executable        | `6567a92c70f76c00791776d832921f3e06364576c307ba9155fcf266ba9331b0` |
+| Built main           | `76a2f4e8d922e4d8b15e2d8475decd49fc9f89445fd99ebd4ddee745715ec285` |
+| Built renderer index | `facedcab9f2b1f9f9065b08cbcfe42d05097c31f8c6480798d6f61eff8ad1564` |
+| pi .2 payload        | `97f796c58c176d6f78f1bbb45564c26225d53826bcb34b479865900002d18a39` |
+| Prime .12 payload    | `e0a9ca3646e5a9fd95057d0b0390bdb9bb8674d8ea74b0f0d93223d3c73cddc8` |
+| Prime .12 executable | `e5625fd35d5b3720455c6a80a98c787eeb55f48a1ef83f9506ee00ec8372131b` |
+
+## Retained historical evidence
+
+The [preceding checkpoint](https://github.com/LuciferMornens/vengeance/blob/dd82ee33b65320062fb43a8e6923ed968471630a/docs/RELEASE-QUALIFICATION-0.3.3.md)
+preserves exact commands, hashes, authenticated archive IDs/digests, failures and visual receipts for
+the .11 local run and failed release attempts `e3cbf5d`, `835f034` and `404d24d`. The latter had green
+ordinary CI/CodeQL and core/Dock/upgrade passes within its scope, but failed overall release qualification.
+Its 79 Windows native PNGs have CLEAR static review in
+`.cache/ci-39229025591/review-win-native/review-receipt.json` (seven sheets, 14 full-size captures,
+no carry-forward). Its macOS/Linux native and mock visual coverage remains scoped to those artifacts.
+
+The [original prompt/restart qualification](ENGINE-PROMPTS-QUALIFICATION-2026-10-18.md) and
+[navigation comparison](PERFORMANCE-FIRST-NAVIGATION-2026-10-18.md) retain their own source scope.
+Historical Windows Engine first/second visits improve 825/544 → 491/340 ms; Engine 2 is mixed at
+877/487 → 901/549 ms. Renderer blocking falls 128 → 4 and 122 → 19 ms, cached returns add 20–25 ms,
+and a roughly 210 ms startup gap remains. The separate older .11 local benchmark records
+494.4/342.5/71.6 ms for Engine and 860.1/571.9/49.9 ms for Engine 2. None qualifies later changes or
+an unmeasured cross-platform improvement.
 
 ## Remaining gates and limits
 
-- Keep final-head packaged identities, desktop evidence, baseline/upgrade reports, benchmark results
-  and `provenance-<platform>` shipping-file hashes. Signature/zip/dmg, glibc and package-install gates
-  also must complete. The current artifact-path repair must retain the actual Linux upgrade logs.
-- The official baseline loader pins public 0.3.2 checksums, complete native inventories and macOS
-  signatures. Existing upgrade coverage proves only the identified `.10`/`.11` pair; final `.12`
-  upgrades remain pending. pi remains `.2`; its older
-  1.2 → 1.3 fixture is historical, not this release's gate.
+- Qualify the combined repairs on the final source: all five native builds/core suites, both macOS
+  Dock witnesses, official .10 → .12 upgrades on macOS/Linux, and actual Intel loaded
+  cryptography/OpenSSL, automatic venv and old-cache refresh with baseline inventory unchanged.
+- Complete final-head ordinary CI/CodeQL, five-platform benchmarks and visual review, macOS
+  signature/zip/dmg verification, Linux glibc 2.35 and package-install gates. Retain final native/helper
+  identities, desktop/upgrade receipts, shipping-file hashes, `SHA256SUMS` and provenance.
 - Core QA excludes paid-provider inference, completed external OAuth, installer/window-manager and
-  AppImage-mount lifecycle coverage. The arm64 Dock receipt is platform/scenario-specific. Physical
-  Mac/compositor coverage is not inferred from CI. macOS remains ad-hoc signed, without notarization.
-- Process-cold samples do not flush filesystem caches or establish broad statistics. Historical
-  startup-frame and synthetic scroll-follow geometry limits remain in the performance report.
+  AppImage-mount lifecycle coverage. CI does not establish physical Mac/compositor behavior. macOS
+  remains ad-hoc signed, without notarization. Process-cold samples do not flush filesystem caches;
+  historical synthetic scroll-follow geometry and startup-gap limits remain in the performance report.
 - By user request, stopped diagnostic folders `vengeance-qa-run-rbuzFd` and
   `vengeance-qa-engines-D7ECf0` remain under `D:/Coding/vengeance-qa-engine-prompts`. They are not active
-  processes or passing evidence; this follow-up does not delete them. Real user accounts remain untouched.
+  processes or passing evidence. Real user accounts remain untouched.
