@@ -2,6 +2,7 @@
 // Run after building: node scripts/perf/first-navigation.mjs --label before --runs 3
 import assert from 'node:assert/strict'
 import { _electron as electron } from 'playwright'
+import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
@@ -151,11 +152,13 @@ async function histories(workspace) {
   try {
     for (const [index, path] of pi.entries()) {
       // Keep renderer refreshes out of the seed's awaited create/query/handoff sequence.
-      const source = await setup.invoke('engine:create', {
-        engine: 'pi',
-        cwd: workspace,
-        sessionPath: path
-      })
+      const sourceAgentId = randomUUID()
+      const source = await setup.invoke(
+        'engine:create',
+        { engine: 'pi', cwd: workspace, sessionPath: path },
+        sourceAgentId
+      )
+      assert.equal(source.agentId, sourceAgentId)
       assert.equal(source.engine, 'pi')
       const sourceCount = await assertSeededHistory(setup.rpc, source, markers[index])
       assert.equal(resolve(source.sessionFile), resolve(path))
