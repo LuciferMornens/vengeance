@@ -6,3 +6,6 @@
 *.icns binary
 *.woff2 binary
 *.exe binary
+# The macOS QA observer is compiled by the QA run, not shipped; keep it out of language detection
+# so code scanning does not try to build a Swift project the repository does not have.
+scripts/qa/lib/*.swift linguist-detectable=false
