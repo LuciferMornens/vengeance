@@ -69,6 +69,8 @@ Verify downloads against `SHA256SUMS`, or use
 - **Engine 2 append instructions reach the native prompt.** Build `0.10.0+vengeance.11` backports
   upstream's append-file assembly, including native prompt diagnostics. Engine remains
   `1.3.0+vengeance.2`. Both keep their pinned stable upstream bases; engine upgrades ship with the app.
+- **Linux Trash support.** Debian, RPM and pacman packages declare the `gio` dependency used by
+  native Trash actions, including restoring inherited instructions.
 
 ## Windows navigation measurements
 
@@ -123,6 +125,16 @@ six PNGs visually reviewed. First-open, second-open and cached-return medians ar
 `.shots/perf/first-navigation/release-0.3.3-win-local.json`. These current-candidate measurements are
 separate from the historical before/after comparison above.
 
+At `835f034`, ordinary CI and CodeQL pass. Windows and Linux have 383 mock captures each; macOS has
+363, with responsive layouts beyond its 1024×684 runner work area skipped by the existing guards.
+Selected Windows/Linux/macOS mock reviews and all 79 macOS native core captures are visually clear.
+Release QA remains partial: macOS arm64 passes nine core suites; Linux instruction restore, the
+Windows queue fixture, macOS Dock cleanup and Intel Python bootstrap still need a clean release run.
+The Linux dependency fix is committed, and the queue-readiness and Dock cleanup repairs have clear
+independent reviews. The queue witness establishes fixture susceptibility, not the archived CI cause.
+Intel's bootstrap cause remains unknown; the next attempt preserves native worker logs before cleanup.
+All five release build jobs failed and installation jobs were skipped.
+
 The final 0.3.3 candidate requires:
 
 - **CI:** typecheck, build, workflow lint, contract checks and screenshot scenarios on Windows x64,
@@ -148,7 +160,10 @@ The final 0.3.3 candidate requires:
   `SHA256SUMS` and a provenance attestation for the published packages.
 
 Final workflow run links, inspected desktop evidence and per-platform hashes must be recorded before
-publication. The expanded platform matrix, macOS witness, same-platform upgrade checks and new
-per-platform benchmark runs remain pending in
-[CI run 39217933713](https://github.com/LuciferMornens/vengeance/actions/runs/39217933713)
-for candidate `e3cbf5d`. The local Windows results do not qualify another platform or a later source revision.
+publication. The remaining platform matrix, macOS witnesses, same-platform upgrades and per-platform
+benchmarks remain pending after
+[release run 39222762172](https://github.com/LuciferMornens/vengeance/actions/runs/39222762172)
+for candidate `835f034`. The next attempt tests the reviewed repairs and captures Intel bootstrap diagnostics.
+[CI 39222761658](https://github.com/LuciferMornens/vengeance/actions/runs/39222761658)
+and [CodeQL 39222757745](https://github.com/LuciferMornens/vengeance/actions/runs/39222757745) pass.
+The local Windows results do not qualify another platform or a later source revision.
