@@ -17,6 +17,7 @@ import { assertPrimeSideQuestionsIdle } from './daemon-activity'
 import { validatePrimeDaemonEnvironment } from './daemon-environment'
 import { locatePrimeEngine } from './locate'
 import { thinkingLevel } from './normalize'
+import { nativeProcessIsAlive } from './process-liveness'
 import {
   checkPrimeRestartHelper,
   nativePrimeRestartCommand,
@@ -586,23 +587,11 @@ async function waitForNativeExit(supervisorPid: unknown, workers: number[]): Pro
   }
   const deadline = Date.now() + EXIT_TIMEOUT_MS
   const processes = [...workers, supervisorPid]
-  while (processes.some(processIsAlive)) {
+  while ((await Promise.all(processes.map(nativeProcessIsAlive))).some(Boolean)) {
     if (Date.now() >= deadline) {
       throw new Error('Engine 2 did not stop every resident after preparing its restart')
     }
     await delay(POLL_INTERVAL_MS)
-  }
-}
-
-function processIsAlive(processId: number): boolean {
-  try {
-    process.kill(processId, 0)
-    return true
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    // On macOS and Linux, EPERM means another user's process has the ID now: this user's runtime is gone.
-    if (code === 'ESRCH' || (code === 'EPERM' && process.platform !== 'win32')) return false
-    throw error
   }
 }
 
@@ -669,13 +658,14 @@ async function replacementProcessesStopped(
   checkpoint: PrimeRestartCheckpoint
 ): Promise<boolean> {
   try {
-    if (processIsAlive(error.supervisorPid)) return false
+    if (await nativeProcessIsAlive(error.supervisorPid)) return false
     const inspected = await nativePrimeRestartCommand('workers', checkpoint)
     if (!Array.isArray(inspected.workerPids)) return false
-    return inspected.workerPids.every(
-      (processId: unknown) =>
-        typeof processId === 'number' && processId > 0 && !processIsAlive(processId)
+    const workers = inspected.workerPids.filter(
+      (processId: unknown): processId is number => typeof processId === 'number' && processId > 0
     )
+    if (workers.length !== inspected.workerPids.length) return false
+    return !(await Promise.all(workers.map(nativeProcessIsAlive))).some(Boolean)
   } catch {
     return false
   }

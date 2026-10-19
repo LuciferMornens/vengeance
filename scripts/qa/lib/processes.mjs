@@ -2,6 +2,7 @@
 // (orphan checks on quit), and killing only trees the harness owns. Windows asks tasklist, taskkill
 // and CIM; Linux reads /proc; macOS uses ps and the kernel's executable-path query.
 import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { readdir, readFile, readlink, realpath } from 'node:fs/promises'
 import { basename, isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
@@ -23,9 +24,16 @@ const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)
 export function isAlive(pid) {
   try {
     process.kill(pid, 0)
-    return true
   } catch (error) {
     return error.code === 'EPERM'
+  }
+  if (process.platform !== 'linux') return true
+  try {
+    const state = linuxStat(readFileSync(join('/proc', String(pid), 'stat'), 'utf8'))[1][0]
+    return state !== 'Z' && state !== 'X' && state !== 'x'
+  } catch (error) {
+    // Uninspectable processes remain alive for cleanup and exit assertions.
+    return error.code !== 'ENOENT' && error.code !== 'ESRCH'
   }
 }
 
