@@ -310,7 +310,12 @@ deletes the temp profile and workspaces, and throws on: renderer `console.error`
 uncaught main-process exceptions or rejections (minus `allowErrors`), a Vengeance process
 (`APP_PROCESS_NAME`) that was running before the launch and is gone now, or (REAL mode) a changed real
 config file. Engine 2 daemon endpoints it cleans up are named pipes on Windows and
-`vengeance-engine2-<id>.sock` Unix sockets elsewhere.
+`vengeance-engine2-<id>.sock` Unix sockets elsewhere. Each owned daemon gets a shutdown request and
+15 s for it and its own exit; a quick exit returns at once. Only a daemon whose creation time proves
+its identity is then force-stopped. macOS has no precise creation time, so there cleanup keeps
+re-checking the PID's endpoint and executable and waits up to 25 s after the request for the daemon
+to exit, then reports it instead of killing it. `scripts/checks/qa-daemon-cleanup.mjs` covers these
+paths and runs in release dry runs on every platform.
 
 At launch the harness checks that the app's userData is the temp folder and that it does not hold
 the single-instance lock (`VENGEANCE_TEST=1` skips the lock), so it can run next to the user's own
