@@ -5,10 +5,9 @@ restarts, and makes opening saved conversations respond immediately. Syntax high
 of the window's rendering thread. On macOS, background Engine and settings processes use Electron's
 background helper so they do not create extra Dock applications.
 
-**Release qualification is pending.** The historical Windows checks described below cover the
-identified PR #15 builds. The final 0.3.3 candidate, including the macOS fix and expanded packaged
-matrix, still needs its own CI and release dry-run results on all five platforms. These notes do
-not describe those new gates as passed.
+**Cross-platform release qualification is pending.** Local Windows app, packaged-engine and benchmark
+checks pass. The final 0.3.3 candidate still needs the five-platform CI and release dry-run results,
+including macOS Dock observations and macOS/Linux upgrades.
 
 On 0.3.1 or 0.3.2, the Vengeance card in **Settings → Updates** offers the next published release.
 The Windows installer and Linux AppImage can download and install updates; macOS and the deb, rpm,
@@ -104,15 +103,25 @@ through a supported app action; the performance report retains the limitation an
 
 ## Qualification record
 
+The [0.3.3 qualification record](https://github.com/LuciferMornens/vengeance/blob/v0.3.3/docs/RELEASE-QUALIFICATION-0.3.3.md)
+identifies the current app bytes, local results, platform gates and retained evidence.
+
 The [prompt and restart report](https://github.com/LuciferMornens/vengeance/blob/v0.3.3/docs/ENGINE-PROMPTS-QUALIFICATION-2026-10-18.md)
 records the completed Windows native, packaged and restart checks, with exact build identities,
 failed attempts and clean reruns. That evidence covers its identified builds; it does not qualify
 later changes or other operating systems. Live sign-in and paid-provider behavior remain outside
 that local qualification.
 
-The current local Windows typecheck, build, contract checks and full mock screenshot run pass;
-the prompt states and representative captures were visually inspected. Final packaged and
-cross-platform runtime qualification remain pending.
+Local Windows 0.3.3 qualification passes typecheck, build, contract checks and all 20 mock screenshot
+scenarios (383 captures). The prompt states and representative captures were visually inspected.
+All nine packaged-engine suites pass, with 79 PNGs visually reviewed. Their machine-readable record
+is `.shots/qa/0.3.3-platform-win32-x64/run-kChaQx/qualification.json`.
+
+The separate current Windows benchmark passes all six strict samples (three per engine), with all
+six PNGs visually reviewed. First-open, second-open and cached-return medians are 494.4 / 342.5 /
+71.6 ms for Engine and 860.1 / 571.9 / 49.9 ms for Engine 2. The record is
+`.shots/perf/first-navigation/release-0.3.3-win-local.json`. These current-candidate measurements are
+separate from the historical before/after comparison above.
 
 The final 0.3.3 candidate requires:
 
@@ -140,4 +149,6 @@ The final 0.3.3 candidate requires:
 
 Final workflow run links, inspected desktop evidence and per-platform hashes must be recorded before
 publication. The expanded platform matrix, macOS witness, same-platform upgrade checks and new
-per-platform benchmark runs remain pending for this candidate.
+per-platform benchmark runs remain pending in
+[CI run 39217933713](https://github.com/LuciferMornens/vengeance/actions/runs/39217933713)
+for candidate `e3cbf5d`. The local Windows results do not qualify another platform or a later source revision.
