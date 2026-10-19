@@ -86,6 +86,8 @@ export function useTranscriptVirtualizer({
       if (followsLatest.current) follow()
       else elementScroll(offset, options, instance)
     },
-    useFlushSync: false
+    // A reader's size compensation needs the new sizer in the same frame to avoid a bottom clamp.
+    // Pinned startup can defer these renders because follow owns the full transcript bottom.
+    useFlushSync: !followsLatest.current
   })
 }
