@@ -166,17 +166,52 @@ a key of their inputs. Its `test` job restores exactly that key on the plain run
 screenshots. `.github/workflows/release.yml` runs as a dry run on pull requests that touch engines,
 patches, the helper, packaging, toolchain pins or the workflow, and on manual dispatch. Each of the five
 platforms then builds from a clean runner, packages, passes the baked-feed check, the GLIBC gate (Linux)
-and signature, zip and dmg verification (macOS), and runs `scripts/qa/engines/packaged.qa.mjs` against the
-QA app that `node scripts/dist-qa.mjs --dir` prints. The deb is install-tested on both Linux
+and signature, zip and dmg verification (macOS), and runs
+`scripts/qa/engines/platform-qualification.mjs` against the QA app that
+`node scripts/dist-qa.mjs --dir` prints. This runner executes nine suites serially against the packaged
+application: packaged, integration, model isolation, system prompts, restart safety, Stop/compaction,
+bash queues, saved-session recovery and resident closure. Each suite uses isolated accounts and local
+providers; a smoke or version probe alone does not replace this matrix. The deb is install-tested on both Linux
 architectures and the pacman package in an Arch container.
+
+On macOS arm64 and x64, `scripts/qa/engines/background-apps.qa.mjs` additionally observes native
+application activation policies while the packaged app exercises Engine RPC, SDK/provider hosts,
+CLI commands, both engines and its normal-mode login-shell probe. It uses temporary accounts and
+retains actual desktop PNGs, observed process identities and a red/green witness. The witness must
+detect the previous main-executable child behavior before the corrected helper path can pass.
+Inspect the desktop captures as well as the OS observations; page screenshots cannot prove that
+background activity stays out of the Dock. The main Vengeance app must remain a regular application.
+
+Each of the five release runners then runs
+`node scripts/perf/first-navigation.mjs --label release-<platform> --runs 3` against the completed
+built app. Upload the JSON, CPU profiles and PNGs from `.shots/perf/first-navigation`, including
+source-bundle and native-payload hashes. This harness does not support `QA_PACKAGED_EXE`; its evidence
+is separate from the packaged matrix. A passing current-candidate run does not establish an improvement
+over an unmeasured platform baseline, and Windows before/after timings do not transfer to other hosts.
 
 Treat those runs, their logs and uploaded screenshots as each platform's evidence and record them with
 the platform's payload and package hashes. A Windows run never qualifies another platform. The native
 workspace suites below and the transition and resident-upgrade suites are not part of CI; run them on a
 host of the affected platform when a change touches platform-specific native behavior. Vengeance had no
-macOS or Linux package before 0.3.0, so those platforms have no retained baseline: their
-executable-transition and resident-upgrade qualification starts with the release after it, using the
-retained 0.3.0 packages as the baseline.
+macOS or Linux package before 0.3.0. Their executable-transition and resident-upgrade suites require
+a retained package of the same platform; 0.3.0 is the earliest possible release baseline. Record the
+actual baseline identity rather than substituting a Windows package or an unbuilt source revision.
+
+### Electron's macOS background runtime
+
+`src/main/electron-node.ts` centralizes Electron-as-Node executable selection. Windows and Linux use
+`process.execPath`. On macOS, the pinned Electron 44.7.0 exposes an internal `process.helperExecPath`
+property outside its public TypeScript declarations. The app validates that typed boundary and uses
+the executable helper from the Electron bundle, whose signed `LSUIElement` identity keeps background
+Node work out of the Dock. Missing, invalid or unavailable helper paths fail closed. Do not fall back
+to the main app executable on macOS or hide the main app's Dock icon to compensate. Explicit custom
+system Node locations keep their existing selection behavior.
+
+This is an app runtime compatibility boundary, not a native engine patch. Requalify it whenever Electron
+changes: verify the internal property and executable's availability, helper bundle identity and signature,
+`LSUIElement` behavior, Engine RPC/SDK/provider/CLI operation, and the login-shell environment probe.
+Repeat the packaged activation-policy and desktop-capture gate on both macOS architectures. Keep the
+engine patch series unchanged for fixes that belong to this app-owned launch boundary.
 
 ## Adopting an upstream release
 
@@ -315,6 +350,8 @@ sign-in testing only with explicit user authorization; report coverage gaps rath
 | Old history, cross-workspace recovery and executable transition     | `scripts/qa/engines/session-recovery.qa.mjs`, `scripts/qa/engines/candidate-transition.qa.mjs`                                                                     |
 | Mixed-version resident attachment and Close tab versus Stop session | `scripts/qa/engines/resident-upgrade.qa.mjs`, `scripts/qa/engines/resident-close.qa.mjs`; selected-state and transport regressions                                 |
 | Packaged app, external bridge and native helper                     | `scripts/qa/engines/packaged.qa.mjs`, `scripts/checks/prime-auth-native.mjs`, `scripts/checks/prime-auth-oauth.mjs`                                                |
+| Packaged native-engine matrix on all five platforms                 | `scripts/qa/engines/platform-qualification.mjs`; nine serial suites against the final packaged QA app                                                              |
+| macOS background application identity and Dock behavior             | `scripts/qa/engines/background-apps.qa.mjs`; OS activation policies, normal-mode shell probe, desktop PNGs and red/green witness on arm64 and x64                  |
 | Scale and lifecycle retention when those contracts change           | `scripts/qa/performance/session-listing.qa.mjs`, `scripts/qa/performance/session-churn.qa.mjs`, `scripts/qa/performance/long-tools.qa.mjs`                         |
 | Process-cold launch and first conversation navigation               | `scripts/perf/first-navigation.mjs`; both native engines, rich saved histories, frame gaps, CPU profiles and rendered syntax verification                          |
 | Engine 2 native long-history activation and retention               | `scripts/qa/performance/prime-long-history.qa.mjs`; public native writer, cold/resident opening, cached workspace switching and frame/heap bounds                  |

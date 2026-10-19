@@ -97,7 +97,9 @@ vengeance/
 - Each open pi session = one `EngineProcess` = one child `pi --mode rpc` process with `cwd` = workspace folder.
   Multiple sessions can run **in parallel** (a headline feature: several agents working at once, visible in the
   sidebar with live activity indicators).
-- Spawn: run the bundled CLI with `process.execPath` and `ELECTRON_RUN_AS_NODE=1`.
+- Spawn: run the bundled CLI with the app's Electron-as-Node executable and
+  `ELECTRON_RUN_AS_NODE=1`: `process.execPath` on Windows and Linux, the pinned Electron helper
+  executable on macOS (§2.4).
   Explicit custom locations can use compatible system Node, with Electron's Node as the fallback.
   `windowsHide: true`; on macOS and Linux the child leads its own process group (§2.4). Env:
   `childBaseEnv()` plus the managed variables. Args built from session options: `--session <path>` to resume,
@@ -206,6 +208,14 @@ beside the Windows one, never in its place.
   PID tree walk. Engine 2 daemons listen on named pipes on Windows and on Unix sockets elsewhere, in a
   folder only the user can open (`$XDG_RUNTIME_DIR/vengeance` on Linux, then the user's temporary
   folder, then `/tmp`), within the platform's socket path limit.
+  - On macOS the main Vengeance application remains a normal Dock application. Electron-as-Node
+    children use the signed Electron helper with `LSUIElement`, so Engine RPC, SDK/provider hosts,
+    CLI subcommands and the login-shell probe never create extra Dock applications or activate an
+    app of their own. The helper executable comes from Electron's internal `process.helperExecPath`
+    through `src/main/electron-node.ts`; a missing, invalid or unavailable helper fails the operation
+    rather than launching the main app executable as a child. Qualification is tied to
+    the pinned Electron version and must be repeated on upgrades. Explicit custom system Node
+    locations retain their existing behavior.
 - **Paths.** On macOS and Linux workspace folders enter the app as their physical path (symlinks
   resolved), the way POSIX `getcwd` reports them and pi records sessions. Canonical paths returned by
   native components map back below the roots they were listed under. Windows paths stay as given.
@@ -639,22 +649,38 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   boundaries with separate temporary account/session roots and local fake providers, native resident
   attachment/detachment, session provenance and configuration isolation. Live provider checks use tiny
   prompts and never write the user's real configuration during development.
-- For an unpacked release smoke, run `node scripts/dist-qa.mjs --dir` after the final build on each
+- For unpacked release qualification, run `node scripts/dist-qa.mjs --dir` after the final build on each
   platform. It prints the QA executable (`QA executable: …`): `release/qa/win-unpacked/VengeanceQA.exe`
   on Windows, `release/qa/mac-arm64/VengeanceQA.app/Contents/MacOS/VengeanceQA` on Apple silicon
   (`release/qa/mac/…` on Intel) and `release/qa/linux-unpacked/vengeance-qa` on Linux
-  (`linux-arm64-unpacked` on arm64). Run `scripts/qa/engines/packaged.qa.mjs` with `QA_PACKAGED_EXE`
+  (`linux-arm64-unpacked` on arm64). Run `scripts/qa/engines/platform-qualification.mjs` with `QA_PACKAGED_EXE`
   pointing at it and `QA_TMP_ROOT` outside the user's home and repository (the macOS and Linux defaults
-  already are), under Xvfb on a Linux host without a display. This exercises both native engines with
-  local providers, pi bridge loading and native helper loading through the public sign-in API. The helper
+  already are), under Xvfb on a Linux host without a display. It runs packaged, integration,
+  model-isolation, system-prompts, restart-safety, stop-compaction, bash-queue, session-recovery and
+  resident-close suites serially against the same packaged app. This exercises both native engines
+  with local providers, pi bridge loading and native helper loading through the public sign-in API. The helper
   also runs with a system-only PATH (`System32`, or `/usr/bin:/bin`) to expose missing DLLs or shared
   libraries. Inspect the generated PNGs. No installer launch or modification of a user's Vengeance
   installation is needed for this gate.
+  On both macOS architectures, also run `scripts/qa/engines/background-apps.qa.mjs` against the
+  packaged app in normal mode with separate temporary accounts. Observe operating-system activation
+  policies during Engine RPC, SDK/provider hosts, CLI commands, both native engines and the login-shell
+  probe; the main app must remain regular and background descendants must not become regular
+  applications. Retain actual desktop PNGs and a red/green witness proving the observer detects the
+  previous main-executable child behavior. Inspect the captures; renderer-only screenshots do not
+  establish Dock behavior.
+  After packaged qualification, run `scripts/perf/first-navigation.mjs --label <platform> --runs 3`
+  against the completed built app on every platform. Retain `.shots/perf/first-navigation` JSON,
+  CPU profiles and PNGs with source-bundle and native-payload hashes. This runner does not select
+  `QA_PACKAGED_EXE`; its built-app measurements are separate from packaged QA. A current-platform
+  run qualifies that candidate's benchmark checks, not an improvement over an unmeasured baseline
+  or another platform.
 - Releases come from `.github/workflows/release.yml`. A tag `vX.Y.Z` (or `vX.Y.Z-rc.N`, a prerelease) must
   match `package.json`. Each of the five platforms builds on its own clean runner without caches (Linux
   inside the pinned Ubuntu 22.04 container): engines, helper, app and packages, then the baked update
-  feed check, the GLIBC gate on Linux and signature, zip and dmg verification on macOS, then the smoke
-  above. The deb is install-tested on x64 and arm64 and the pacman package on Arch. One publish job then
+  feed check, the GLIBC gate on Linux and signature, zip and dmg verification on macOS, then the
+  packaged qualification, macOS background-process gate and built-app navigation benchmark above. The deb is
+  install-tested on x64 and arm64 and the pacman package on Arch. One publish job then
   drafts the GitHub release with every package, the update files (the two `latest-mac.yml` merged),
   `SHA256SUMS` and a build provenance attestation; a maintainer reviews and publishes it. Build jobs only
   read the repository. Pull requests that touch engines, patches, the helper, packaging, toolchain pins,
