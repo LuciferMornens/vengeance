@@ -11,10 +11,10 @@ import {
   PRIME_MODELS,
   PRIME_PROVIDER
 } from '../qa/engines/integration-fixture.mjs'
-import { launchApp, ROOT } from '../qa/lib/app.mjs'
+import { assertNativeWorkerSocketBudget, launchApp, ROOT } from '../qa/lib/app.mjs'
 import { ELECTRON_SWITCHES } from '../qa/lib/platform.mjs'
 import { isAlive, killTree, processIdentity } from '../qa/lib/processes.mjs'
-import { qaTempDir } from '../qa/lib/tmp.mjs'
+import { assertOutsideRealHome, isInside, QA_TMP_ROOT, qaTempDir } from '../qa/lib/tmp.mjs'
 import { workspaceSessionDir } from '../qa/sessions/lib/session-files.mjs'
 import { longSession } from './lib/fixtures.mjs'
 
@@ -113,13 +113,20 @@ function environment(userData, scratch) {
     HOME: join(scratch, 'home'),
     TEMP: join(scratch, 'tmp'),
     TMP: join(scratch, 'tmp'),
-    TMPDIR: join(scratch, 'tmp')
+    TMPDIR: process.platform === 'win32' ? join(scratch, 'tmp') : QA_TMP_ROOT
   }
   for (const [name, value] of Object.entries(fixture.environment)) {
     if (value === undefined) delete isolated[name]
     else isolated[name] = value
   }
   isolated.VENGEANCE_BUNDLED_ENGINES = enginesRoot
+  if (process.platform !== 'win32') {
+    assertNativeWorkerSocketBudget(isolated.TMPDIR)
+    assert.ok(
+      isInside(QA_TMP_ROOT, assertOutsideRealHome(isolated.TMPDIR)),
+      'Benchmark TMPDIR must stay inside QA_TMP_ROOT'
+    )
+  }
   return isolated
 }
 

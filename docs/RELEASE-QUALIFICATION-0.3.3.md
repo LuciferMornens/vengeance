@@ -1,7 +1,7 @@
 # Vengeance 0.3.3 qualification checkpoint
 
-19 October 2026. Local Windows qualification passes. Final five-platform release qualification is
-**pending**. This record supplements the historical
+19 October 2026. The identified local Windows run passes; the `e3cbf5d` release dry run has harness
+and prerequisite failures. Final five-platform release qualification is **pending**. This record supplements the historical
 [PR #15 qualification](ENGINE-PROMPTS-QUALIFICATION-2026-10-18.md) and
 [navigation comparison](PERFORMANCE-FIRST-NAVIGATION-2026-10-18.md); it does not replace their scope,
 failed attempts or known limits. Ignored logs and generated artifacts below identify the local run,
@@ -24,10 +24,49 @@ behavior; the Dock fix adds no native engine patches.
 The coordinating task records final source review **CLEAR** for `e3cbf5d` against `8b23198`, and a
 separate QA source review **CLEAR**. These are source reviews, not platform runtime passes.
 [CodeQL run 39217927625](https://github.com/LuciferMornens/vengeance/actions/runs/39217927625)
-passed. At this checkpoint,
-[CI 39217933806](https://github.com/LuciferMornens/vengeance/actions/runs/39217933806) and
+passed. These clear reviews apply to `e3cbf5d`; the repaired harness still needs a clean runtime rerun.
+[CI 39217933806](https://github.com/LuciferMornens/vengeance/actions/runs/39217933806) completed
+successfully in every job, including macOS screenshots, for `e3cbf5d`.
 [Release dry run 39217933713](https://github.com/LuciferMornens/vengeance/actions/runs/39217933713)
-are still running for `e3cbf5d`; final results and receipts have not been incorporated here.
+failed all five platform build jobs; downstream installation jobs were skipped. The ordinary CI
+pass does not replace the failed release matrix. A clean release rerun at the repaired head is pending.
+
+## Failed `e3cbf5d` release dry run
+
+Authenticated artifacts from run 39217933713 are retained under `.cache/ci-39217933713`.
+The downloaded ZIPs were hashed and match their public artifact metadata; these identify archives,
+not individual packaged binaries. Extracted reports are under each platform directory's
+`_temp/engine-qualification` (Linux: `__w/_temp/engine-qualification`).
+
+| Artifact          | Metadata ID   | Verified ZIP SHA-256                                               |
+| ----------------- | ------------- | ------------------------------------------------------------------ |
+| `mac-arm64.zip`   | `12171013241` | `135fa0af1357924d5ad3fd3ba318d403ede2027f749d6b6cdeebb4f4a3fdd4e8` |
+| `linux-arm64.zip` | `12171875481` | `9aebf4dd38792d3170b341f2d848f0e84dda9c4380abdd10cb30825b56e6abf1` |
+| `win-x64.zip`     | `12171523112` | `34a7d4b049fda6ca071821744c73c9713edb6554a5ed98470dae8e656486e7b9` |
+
+macOS arm64's first packaged suite streams pi, then times out opening Prime; macOS x64 has the same
+confirmed Engine-ready timeout. The new per-suite
+temporary nesting deterministically produces a native worker socket address requiring 106 bytes,
+beyond Darwin's 104-byte capacity. The harness repair uses isolated `QA_TMP_ROOT` as POSIX `TMPDIR`
+and validates the native worker address byte budget; it does not change native engine socket limits.
+
+Linux arm64/x64 and Windows pass the first packaged suite, then fail integration at the first Python
+kernel operation because `uv` is absent. Later Python/child failures cascade from that missing
+bootstrap prerequisite. Separate activation and disposal-completion races also require harness
+repairs. Root inspection of Linux arm64 and Windows `engines-integration-FAILED.png` confirms the
+uv failure. The release workflow now pins `astral-sh/setup-uv` v10.3.0 at
+`1c37ad07a6a961277cf70c0d37d6f313000f5884`, installing uv 0.13.1 with caching disabled.
+First kernel setup still needs network access. These repairs are pending a clean rerun; later core
+suites, Dock observation, upgrades and release benchmarks are not converted into passes.
+
+### Focused repaired integration pass
+
+`.cache/0.3.3-integration-ci-repair.log` records a passing focused Windows integration run after the
+harness repairs. Every integration step passes, including native Python output, subagent controls,
+activation, temporary-session disposal and detach/relaunch. The integration agent reviewed all 26
+PNG captures with no blocking visual issue and reported no owned processes remaining. This focused
+result does not qualify the full repaired release matrix. The direct first-navigation harness's
+POSIX `TMPDIR` handling is also being repaired; that path has no clean rerun yet.
 
 ## Completed local Windows checks
 
@@ -138,13 +177,13 @@ Each platform builds natively. Linux release builds use the pinned Ubuntu 22.04 
 2.35. Ordinary CI tests Windows x64, macOS arm64 and Linux x64; the release workflow covers all five
 rows. A Windows result does not qualify another host.
 
-| Platform / release runner                           | Core nine suites       | Dock observer  | Official 0.3.2 upgrade               | Release benchmark / package receipts     |
-| --------------------------------------------------- | ---------------------- | -------------- | ------------------------------------ | ---------------------------------------- |
-| `win32-x64` / `windows-2025`                        | Local pass; CI pending | Not applicable | Prior PR Windows transition evidence | Pending; separate local benchmark passes |
-| `darwin-arm64` / `macos-15`                         | Pending                | Pending        | Pending                              | Pending                                  |
-| `darwin-x64` / `macos-15-intel`                     | Pending                | Pending        | Pending                              | Pending                                  |
-| `linux-x64` / `ubuntu-24.04`, 22.04 container       | Pending                | Not applicable | Pending                              | Pending                                  |
-| `linux-arm64` / `ubuntu-24.04-arm`, 22.04 container | Pending                | Not applicable | Pending                              | Pending                                  |
+| Platform / release runner                           | Core nine suites                                                  | Dock observer  | Official 0.3.2 upgrade               | Release benchmark / package receipts     |
+| --------------------------------------------------- | ----------------------------------------------------------------- | -------------- | ------------------------------------ | ---------------------------------------- |
+| `win32-x64` / `windows-2025`                        | Local nine pass; release integration fails; focused repair passes | Not applicable | Prior PR Windows transition evidence | Pending; separate local benchmark passes |
+| `darwin-arm64` / `macos-15`                         | Release first suite fails; rerun pending                          | Pending        | Pending                              | Pending                                  |
+| `darwin-x64` / `macos-15-intel`                     | Release first suite fails; rerun pending                          | Pending        | Pending                              | Pending                                  |
+| `linux-x64` / `ubuntu-24.04`, 22.04 container       | Release suite 1 pass, integration fails; rerun pending            | Not applicable | Pending                              | Pending                                  |
+| `linux-arm64` / `ubuntu-24.04-arm`, 22.04 container | Release suite 1 pass, integration fails; rerun pending            | Not applicable | Pending                              | Pending                                  |
 
 The release sequence is core packaged QA; macOS activation-policy/desktop observation; official
 same-platform upgrade QA on both macOS and Linux architectures; then the built-app benchmark.

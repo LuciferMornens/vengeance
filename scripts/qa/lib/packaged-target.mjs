@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { readFile, realpath, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { ROOT } from './app.mjs'
 import { resourcesDirOf } from './platform.mjs'
 import { assertOutsideRealHome, isInside, QA_TMP_ROOT } from './tmp.mjs'
@@ -32,6 +32,16 @@ async function canonicalPath(path) {
   return process.platform === 'win32' ? canonical.toLowerCase() : canonical
 }
 
+function assertBundledEngineLocation(descriptor, engine) {
+  assert.ok(descriptor, `${engine} did not return an engine descriptor`)
+  assert.equal(descriptor.found, true, descriptor.error)
+  assert.equal(descriptor.mock, false, `${engine} must use its native backend`)
+  assert.equal(descriptor.source, 'bundled', `${engine} must come from the package`)
+  assert.equal(typeof descriptor.cliPath, 'string', `${engine} did not return its native entry`)
+  assert.ok(isAbsolute(descriptor.cliPath), `${engine} returned a relative native entry`)
+  assert.match(descriptor.version, /\+vengeance\./)
+}
+
 export async function validatePackagedTarget(target, expectedExecutable) {
   assert.equal(target.application.packaged, true, 'Qualification requires a packaged app')
   assert.equal(
@@ -59,10 +69,7 @@ export async function validatePackagedTarget(target, expectedExecutable) {
   assert.equal(manifest.platform, PLATFORM)
   for (const engine of ['pi', 'prime']) {
     const descriptor = target.engines[engine]
-    assert.equal(descriptor.found, true, descriptor.error)
-    assert.equal(descriptor.mock, false, `${engine} must use its native backend`)
-    assert.equal(descriptor.source, 'bundled', `${engine} must come from the package`)
-    assert.match(descriptor.version, /\+vengeance\./)
+    assertBundledEngineLocation(descriptor, engine)
     const identity = target.identities[engine]
     assert.equal(identity.version, descriptor.version)
     assert.equal(identity.version, manifest.engines[engine].version)
@@ -106,6 +113,7 @@ export async function recordPackagedTarget(application) {
   )
   for (const engine of ['pi', 'prime']) {
     const descriptor = await application.invoke('engine:describe', engine)
+    assertBundledEngineLocation(descriptor, engine)
     target.engines[engine] = descriptor
     target.identities[engine] = {
       version: descriptor.version,

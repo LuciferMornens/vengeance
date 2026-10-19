@@ -23,6 +23,11 @@ node scripts/qa/settings/thinking.qa.mjs   # one suite directly
   `.agents/skills` in any ancestor of a workspace as project resources (Trust dialog), so
   workspaces never sit below the profile; a git-ignored folder would hide workspace files from
   `git ls-files` (@-mentions).
+- **Native worker sockets need a short POSIX temp path.** App launches use isolated `QA_TMP_ROOT`
+  as `TMPDIR` on macOS and Linux, rather than nesting it beneath the per-suite app profile. Before
+  launch, the harness validates the complete native worker socket's byte budget, including its
+  terminator (Darwin 104 bytes; Linux 108). An explicit `TMPDIR` must remain inside `QA_TMP_ROOT`
+  and fit that budget. Windows keeps its per-launch temporary directory and named pipes.
 - **Fake mode runs the app with a temp `HOME`**, so the user's own `~/.agents/skills` never load
   (on Windows Electron's `app.getPath('home')` still follows USERPROFILE; userData is always the temp
   profile). Real mode keeps the real HOME. `scripts/qa/shell/harness-isolation.qa.mjs` checks both.
@@ -53,6 +58,11 @@ node scripts/qa/settings/thinking.qa.mjs   # one suite directly
   Engine 2 and helper package builds. Both accept 1–32 jobs and default to four. For native tests,
   `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0` omits debug symbols while keeping test
   assertions, reducing GNU linker memory use on Windows.
+- **Engine 2 Python-tool suites require uv on PATH.** The first native kernel operation downloads
+  Python and kernel packages into isolated QA storage, so it also needs network access even when
+  model replies use local providers. Release runners install uv 0.13.1 with the pinned setup-uv
+  action and caching disabled. A Python tool or child failure after missing uv is failed setup,
+  not evidence that the intended native assertion ran.
 - Prime workspace formatting on Windows runs per-package native checks across the workspace and its
   recursive path dependencies. This keeps full `cargo fmt --all --check` coverage within Windows'
   command-line length limit; other hosts use the single native workspace command.
@@ -257,7 +267,8 @@ through `launchApp({ env })`, since a variable deleted in main later does not re
 ```ts
 launchApp({ mode?, agentDir?, exe?, outDir?, env?, allowErrors?, size? }): Promise<QaApp>
   // built out/ app, or `exe`, an unpacked app's executable (platform.mjs unpackedExecutable)
-  // env: VENGEANCE_TEST=1, VENGEANCE_NO_MICA=1, VENGEANCE_USER_DATA=<temp>, TEMP/TMP/TMPDIR=<temp>,
+  // env: VENGEANCE_TEST=1, VENGEANCE_NO_MICA=1, VENGEANCE_USER_DATA=<temp>, TEMP/TMP=<temp>,
+  //      TMPDIR=<temp> on Windows; the short isolated QA_TMP_ROOT on macOS/Linux (byte-budget checked),
   //      VENGEANCE_MOCK and inherited PI_* / AI_AGENT removed; fake mode also removes PRIME_*.
   //      Fake mode adds temp HOME, PI_CODING_AGENT_DIR, PRIME_AGENT_CODING_AGENT_DIR,
   //      PRIME_AGENT_SESSION_DIR, PRIME_AGENT_CODING_AGENT_SESSION_DIR, PRIME_AGENT_KERNEL_VENV,

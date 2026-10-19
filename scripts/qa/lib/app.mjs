@@ -11,7 +11,7 @@ import { _electron as electron } from 'playwright'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, posix, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { APP_PROCESS_NAME, ELECTRON_SWITCHES } from './platform.mjs'
 import {
@@ -24,14 +24,14 @@ import {
   sameProcess
 } from './processes.mjs'
 import { snapshotRealConfig, REAL_PROMPT_MAX_CHARS } from './real-guard.mjs'
-import { assertOutsideRealHome, isInside, qaTempDir } from './tmp.mjs'
+import { assertOutsideRealHome, isInside, QA_TMP_ROOT, qaTempDir } from './tmp.mjs'
 import { assertTempPath } from './agent-dir.mjs'
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 export const DEFAULT_SHOTS_DIR = join(ROOT, '.shots', 'qa')
 
 /**
- * Folder for one area's report screenshots: `<QA_REPORT_DIR>/<area>-shots`. QA_REPORT_DIR defaults to
+ * Folder for one area's screenshots: `<QA_REPORT_DIR>/<area>-shots`. QA_REPORT_DIR defaults to
  * the git-ignored `.shots/qa`, so a run never writes outside the repo.
  */
 export function reportShotsDir(area) {
@@ -62,6 +62,33 @@ const DAEMON_ENDPOINT =
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms))
 
+// Native Prime uses two 12-character worker IDs under TMPDIR, outside the app's socket fallback.
+const NATIVE_WORKER_NAME = 'worker-000000000000-000000000000.sock'
+const UNIX_SOCKET_PATH_CAPACITY = { darwin: 104, linux: 108 }
+
+export function assertNativeWorkerSocketBudget(
+  temporaryDirectory,
+  { platform = process.platform, userId = process.getuid?.() } = {}
+) {
+  if (platform === 'win32') return
+  const capacity = UNIX_SOCKET_PATH_CAPACITY[platform]
+  if (!capacity) throw new Error(`QA has no native socket path budget for ${platform}`)
+  if (typeof temporaryDirectory !== 'string' || !posix.isAbsolute(temporaryDirectory)) {
+    throw new Error('QA requires an absolute TMPDIR for native Engine 2 workers')
+  }
+  if (!Number.isInteger(userId) || userId < 0) {
+    throw new Error('QA could not determine the native Engine 2 worker user ID')
+  }
+  const endpoint = `${temporaryDirectory}/prime-agent-${userId}/${NATIVE_WORKER_NAME}`
+  const requiredBytes = Buffer.byteLength(endpoint) + 1
+  if (requiredBytes > capacity) {
+    throw new Error(
+      `Native Engine 2 worker socket needs ${requiredBytes} bytes; ${platform} allows ` +
+        `${capacity}. Set a shorter QA_TMP_ROOT or a shorter TMPDIR inside it.`
+    )
+  }
+}
+
 function buildEnv({ mode, agentDir, primeDir, userData, tempFolder, homeFolder, extraEnv }) {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
@@ -76,7 +103,8 @@ function buildEnv({ mode, agentDir, primeDir, userData, tempFolder, homeFolder, 
     VENGEANCE_USER_DATA: userData,
     TEMP: tempFolder,
     TMP: tempFolder,
-    TMPDIR: tempFolder
+    // Prime scopes worker sockets by supervisor hash and worker ID under this short root.
+    TMPDIR: process.platform === 'win32' ? tempFolder : QA_TMP_ROOT
   })
   if (mode === 'fake') {
     // The fake LLM is local; no catalog refresh, version check or telemetry should leave the box.
@@ -98,6 +126,12 @@ function buildEnv({ mode, agentDir, primeDir, userData, tempFolder, homeFolder, 
   for (const [name, value] of Object.entries(extraEnv)) {
     if (value === undefined) delete env[name]
     else env[name] = value
+  }
+  if (process.platform !== 'win32') {
+    assertNativeWorkerSocketBudget(env.TMPDIR)
+    if (!isInside(QA_TMP_ROOT, assertOutsideRealHome(env.TMPDIR))) {
+      throw new Error('QA requires TMPDIR inside QA_TMP_ROOT for native Engine 2 workers')
+    }
   }
   return env
 }
@@ -162,7 +196,7 @@ function executableKey(path) {
   return process.platform === 'win32' ? absolute.toLowerCase() : absolute
 }
 
-/** Only a registry under the QA temp root and a daemon started during this run can be cleaned up. */
+/** Cleanup requires a QA temp registry and a daemon started during this run. */
 export async function shutdownOwnedPrimeDaemons(agentDir, foreignProcesses) {
   assertTempPath(agentDir)
   assertOutsideRealHome(agentDir)
@@ -201,7 +235,7 @@ export async function shutdownOwnedPrimeDaemons(agentDir, foreignProcesses) {
     try {
       await stopDaemonEndpoint(record.socketPath)
       // The daemon answers before it stops its workers. Killing it mid-stop leaves workers without
-      // their stop record, and the next daemon on this agent dir revives those with unfinished work.
+      // their stop record, and the next daemon on this agent dir revives unfinished work.
       const deadline = Date.now() + DAEMON_SHUTDOWN_TIMEOUT_MS
       while (owned.some((entry) => isAlive(entry.pid)) && Date.now() < deadline) {
         await sleep(POLL_MS)
@@ -292,7 +326,7 @@ async function startApp(options, runRoot, initialPrimeProcesses) {
     throw new Error('Build output missing: run `npm run build` first.')
   }
 
-  // The folder names are a contract: sessions/lib/kept-profile.mjs keys on `vengeance-qa-run-*/user-data`.
+  // sessions/lib/kept-profile.mjs keys on the `vengeance-qa-run-*/user-data` folder names.
   const tempRoot = runRoot ?? (await qaTempDir('vengeance-qa-run-'))
   const userData = join(tempRoot, 'user-data')
   const tempFolder = join(tempRoot, 'tmp')
@@ -390,7 +424,7 @@ async function startApp(options, runRoot, initialPrimeProcesses) {
 
   let closed = false
 
-  /** Quit, kill what survived of this app's tree, run the guards; keeps the run folder when asked. */
+  /** Quit, kill this app's surviving tree, run the guards; keep the run folder when asked. */
   async function shutdown({ keepRunFolder, beforeCleanup }) {
     if (closed) return {}
     closed = true
@@ -509,7 +543,7 @@ async function startApp(options, runRoot, initialPrimeProcesses) {
       return (await activeComposer()).getByRole('textbox', { name: 'Message' })
     },
 
-    /** Type `text` into the active session's composer and press Enter; resolves once the engine took it. */
+    /** Type `text`, press Enter, and wait for the active session's engine to accept it. */
     async send(text) {
       if (mode === 'real' && text.length > REAL_PROMPT_MAX_CHARS) {
         throw new Error(`REAL mode only sends tiny prompts (max ${REAL_PROMPT_MAX_CHARS} chars)`)

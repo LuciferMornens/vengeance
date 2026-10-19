@@ -24,6 +24,7 @@ import {
 
 const SUITE_NAME = 'engines-integration'
 const WAIT_TIMEOUT_MS = 60_000
+const KERNEL_BOOTSTRAP_TIMEOUT_MS = 180_000
 const POLL_INTERVAL_MS = 50
 const STREAM_DELAY_MS = 25
 const STREAM_CHUNK_SIZE = 1
@@ -88,6 +89,22 @@ async function setWorkspaceEngine(application, label) {
 
 async function nativeCommand(application, agentId, type, payload = {}) {
   return application.invoke('prime:command', agentId, type, payload)
+}
+
+async function restartAfterSessionOperations(application, agentId, patch) {
+  return until(async () => {
+    try {
+      return await application.invoke('engine:restart', agentId, patch)
+    } catch (error) {
+      // Settled events also start renderer state and statistics queries.
+      if (
+        error.message.endsWith('Wait for the current session operation to finish before restarting')
+      ) {
+        return undefined
+      }
+      throw error
+    }
+  }, 'session operations to finish before restart')
 }
 
 console.log(`▶ ${SUITE_NAME} (native Engine2 and local fake providers)`)
@@ -234,7 +251,7 @@ try {
         turn.text('The native tool finished.')
       )
       await application.send('Run the short native tool probe')
-      await application.waitForSettle()
+      await application.waitForSettle({ timeoutMs: KERNEL_BOOTSTRAP_TIMEOUT_MS })
       const nextRequest = await fixture.primeServer.waitForRequest(
         (request) =>
           inspectRequest(request).toolResults.some((result) => result.toolCallId === toolId),
@@ -579,68 +596,80 @@ try {
   await checks.check(
     'temporary Engine2 restart is refused and repeated sessions release their workers',
     async () => {
-      for (let index = 0; index < EPHEMERAL_RUNS; index++) {
-        const name = `Engine2 ephemeral cleanup ${index + 1}`
-        const ephemeral = await application.openWorkspace({
-          cwd: workspace,
-          args: {
-            engine: 'prime',
-            noSession: true,
-            provider: PRIME_PROVIDER,
-            model: PRIME_MODELS.reasoning,
-            name
-          }
-        })
-        fixture.primeServer.queue(turn.text('Ephemeral Engine2 answer.'))
-        await application.send('Reply briefly for the ephemeral cleanup probe')
-        await application.waitForSettle()
-        const info = (await application.invoke('engine:list')).find(
-          (agent) => agent.agentId === ephemeral.agentId
-        )
-        assert.ok(info.pid, 'the public engine descriptor reports its worker')
-        if (index === 0) {
-          const messagesBefore = await application.rpc({ type: 'get_messages' }, ephemeral.agentId)
-          await assert.rejects(
-            application.invoke('engine:restart', ephemeral.agentId, {
-              launch: { prime: { systemPrompt: 'Temporary restart must be refused.' } }
-            }),
-            /Temporary conversations with messages cannot be restarted safely/i
-          )
-          const unchanged = (await application.invoke('engine:list')).find(
-            (agent) => agent.agentId === ephemeral.agentId
-          )
-          assert.equal(unchanged.nativeAgentId, info.nativeAgentId)
-          assert.equal(unchanged.pid, info.pid)
-          assert.ok(isAlive(info.pid), 'rejected restart leaves its temporary worker alive')
-          assert.deepEqual(
-            await application.rpc({ type: 'get_messages' }, ephemeral.agentId),
-            messagesBefore
-          )
-          fixture.primeServer.queue(turn.text('Temporary worker remains usable.'))
-          await application.send('Reply after the refused temporary restart')
-          await application.waitForSettle()
-          assert.ok(assistantText(await application.agentState()).includes('remains usable'))
-        }
-        const row = application.page
-          .locator('section[aria-label="Open sessions"]')
-          .locator('[data-session-row]', { hasText: name })
-        await row.hover()
-        await row.locator('xpath=..').getByRole('button', { name: 'Close tab' }).click()
-        await until(
-          async () =>
-            !(await application.invoke('engine:list')).some(
+      try {
+        for (let index = 0; index < EPHEMERAL_RUNS; index++) {
+          const name = `Engine2 ephemeral cleanup ${index + 1}`
+          const ephemeral = await application.openWorkspace({
+            cwd: workspace,
+            args: {
+              engine: 'prime',
+              noSession: true,
+              provider: PRIME_PROVIDER,
+              model: PRIME_MODELS.reasoning,
+              name
+            }
+          })
+          const row = application.page
+            .locator('section[aria-label="Open sessions"]')
+            .locator('[data-session-row]', { hasText: name })
+          let info
+          try {
+            fixture.primeServer.queue(turn.text('Ephemeral Engine2 answer.'))
+            await application.send('Reply briefly for the ephemeral cleanup probe')
+            await application.waitForSettle()
+            info = (await application.invoke('engine:list')).find(
               (agent) => agent.agentId === ephemeral.agentId
-            ),
-          'ephemeral session disposed'
-        )
-        await until(() => !isAlive(info.pid), 'ephemeral native worker stopped')
-        assert.ok(
-          !(await application.invoke('engine:background-list', 'prime')).some(
-            (agent) => agent.id === info.nativeAgentId
+            )
+            assert.ok(info.pid, 'the public engine descriptor reports its worker')
+            if (index === 0) {
+              const messagesBefore = await application.rpc(
+                { type: 'get_messages' },
+                ephemeral.agentId
+              )
+              await assert.rejects(
+                restartAfterSessionOperations(application, ephemeral.agentId, {
+                  launch: { prime: { systemPrompt: 'Temporary restart must be refused.' } }
+                }),
+                /Temporary conversations with messages cannot be restarted safely/i
+              )
+              const unchanged = (await application.invoke('engine:list')).find(
+                (agent) => agent.agentId === ephemeral.agentId
+              )
+              assert.equal(unchanged.nativeAgentId, info.nativeAgentId)
+              assert.equal(unchanged.pid, info.pid)
+              assert.ok(isAlive(info.pid), 'rejected restart leaves its temporary worker alive')
+              assert.deepEqual(
+                await application.rpc({ type: 'get_messages' }, ephemeral.agentId),
+                messagesBefore
+              )
+              fixture.primeServer.queue(turn.text('Temporary worker remains usable.'))
+              await application.send('Reply after the refused temporary restart')
+              await application.waitForSettle()
+              assert.ok(assistantText(await application.agentState()).includes('remains usable'))
+            }
+          } finally {
+            await row.hover()
+            await row.locator('xpath=..').getByRole('button', { name: 'Close tab' }).click()
+            // The tab leaves only after native disposal finishes retiring its identity.
+            await row.waitFor({ state: 'detached' })
+          }
+          await until(
+            async () =>
+              !(await application.invoke('engine:list')).some(
+                (agent) => agent.agentId === ephemeral.agentId
+              ),
+            'ephemeral session disposed'
           )
-        )
+          await until(() => !isAlive(info.pid), 'ephemeral native worker stopped')
+          assert.ok(
+            !(await application.invoke('engine:background-list', 'prime')).some(
+              (agent) => agent.id === info.nativeAgentId
+            )
+          )
+        }
+      } finally {
+        await activateSession(application, PRIME_SESSION_NAME)
       }
-      await activateSession(application, PRIME_SESSION_NAME)
     }
   )
 
