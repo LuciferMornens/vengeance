@@ -177,6 +177,11 @@ jobs:
           targets: ${{ matrix.rust-target }}
           components: clippy, rustfmt
       - run: npm ci
+      - name: Validate the macOS application observer
+        if: runner.os == 'macOS'
+        run: |
+          xcrun swift-format lint --strict scripts/qa/lib/macos-application-observer.swift
+          xcrun swiftc scripts/qa/lib/macos-application-observer.swift -o "$RUNNER_TEMP/application-observer-check"
       - name: Build the engines
         run: npm run build:engines
       - name: Build the Engine 2 helper
@@ -273,7 +278,6 @@ jobs:
         env:
           QA_REPORT_DIR: ${{ runner.temp }}/background-applications
         run: |
-          xcrun swift-format lint --strict scripts/qa/lib/macos-application-observer.swift
           dock_autohide=$(defaults read com.apple.dock autohide 2>/dev/null || true)
           restore_dock() {
             if [ -n "$dock_autohide" ]; then
@@ -287,6 +291,23 @@ jobs:
           defaults write com.apple.dock autohide -bool false
           killall Dock || true
           node scripts/qa/engines/background-apps.qa.mjs
+      - name: Stage the published Engine 2 upgrade baseline
+        if: runner.os != 'Windows'
+        env:
+          QA_REPORT_DIR: ${{ runner.temp }}/release-baseline
+        run: node scripts/qa/engines/release-baseline.mjs
+      - name: Qualify native Engine 2 upgrades
+        if: runner.os != 'Windows'
+        env:
+          QA_PLATFORM_GROUP: upgrade
+          QA_RELEASE_BASELINE_ENV: ${{ runner.temp }}/release-baseline/release-baseline-env.json
+          QA_REPORT_DIR: ${{ runner.temp }}/engine-upgrade
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a -s '-screen 0 2560x1440x24' node scripts/qa/engines/platform-qualification.mjs
+          else
+            node scripts/qa/engines/platform-qualification.mjs
+          fi
       - name: Benchmark first conversation navigation
         env:
           BENCHMARK_LABEL: release-${{ matrix.id }}
@@ -304,6 +325,8 @@ jobs:
           path: |
             ${{ runner.temp }}/engine-qualification
             ${{ runner.temp }}/background-applications
+            ${{ runner.temp }}/release-baseline
+            ${{ runner.temp }}/engine-upgrade
             .shots/perf/first-navigation
           include-hidden-files: true
           if-no-files-found: error

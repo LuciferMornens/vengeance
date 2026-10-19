@@ -481,7 +481,9 @@ The [release workflow](.github/workflows/release.yml) runs when a `v<version>` t
 builds and packages all five platforms on their own runners, checks the baked update feed, the glibc
 baseline and the macOS signatures, and runs nine native-engine suites serially against each packaged
 QA app. macOS also checks that background processes stay out of the Dock using OS application
-observations and desktop captures. A separate first-navigation benchmark runs against the built app
+observations and desktop captures. Both macOS and Linux architectures also qualify Engine 2 upgrades
+from checksum-pinned official 0.3.2 packages to the final packaged candidate. A separate
+first-navigation benchmark runs against the built app
 on all five platforms and retains timings, native identities, profiles and captures. The workflow
 install-tests the deb, rpm and pacman packages.
 Then it creates a draft GitHub release with every package, `SHA256SUMS` and a

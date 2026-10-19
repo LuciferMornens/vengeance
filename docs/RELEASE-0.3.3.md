@@ -110,6 +110,10 @@ failed attempts and clean reruns. That evidence covers its identified builds; it
 later changes or other operating systems. Live sign-in and paid-provider behavior remain outside
 that local qualification.
 
+The current local Windows typecheck, build, contract checks and full mock screenshot run pass;
+the prompt states and representative captures were visually inspected. Final packaged and
+cross-platform runtime qualification remain pending.
+
 The final 0.3.3 candidate requires:
 
 - **CI:** typecheck, build, workflow lint, contract checks and screenshot scenarios on Windows x64,
@@ -121,6 +125,11 @@ The final 0.3.3 candidate requires:
 - **macOS arm64 and x64 background-process checks:** OS activation-policy observations, normal-mode
   login-shell probing, actual desktop PNGs and a red/green witness. The main app must remain a normal
   Dock application while background processes stay out of it.
+- **Engine 2 upgrades on both macOS and both Linux architectures:** complete official 0.3.2 packages,
+  verified against pinned public checksums, provide the same-platform `.10` baseline for the final
+  packaged `.11` candidate. Executable-transition and resident-upgrade checks retain their identities
+  and reports. Windows's native upgrade has prior PR evidence; Engine's build stays the same across
+  these app releases.
 - **First-navigation benchmark on all five platforms:** three fresh processes per backend against
   the completed built app, retaining JSON, CPU profiles, PNGs and source/native identities. This is
   separate from packaged QA and qualifies the current benchmark checks. It does not establish a
@@ -130,5 +139,5 @@ The final 0.3.3 candidate requires:
   `SHA256SUMS` and a provenance attestation for the published packages.
 
 Final workflow run links, inspected desktop evidence and per-platform hashes must be recorded before
-publication. The expanded matrix, macOS witness and new per-platform benchmark runs have not yet
-been executed for this candidate.
+publication. The expanded platform matrix, macOS witness, same-platform upgrade checks and new
+per-platform benchmark runs remain pending for this candidate.

@@ -182,6 +182,22 @@ detect the previous main-executable child behavior before the corrected helper p
 Inspect the desktop captures as well as the OS observations; page screenshots cannot prove that
 background activity stays out of the Dock. The main Vengeance app must remain a regular application.
 
+For 0.3.3, the macOS arm64/x64 and Linux arm64/x64 release runners then qualify the official
+same-platform 0.3.2 Engine 2 package (`0.10.0+vengeance.10`) against the final packaged `.11` candidate.
+`scripts/qa/engines/release-baseline.mjs` pins both the public release's `SHA256SUMS` and each archive's
+SHA-256, verifies the complete extracted native inventories and macOS app signature, and emits
+`release-baseline.json` plus `release-baseline-env.json`. It never launches the production app.
+The complete extracted package remains in temporary storage for the upgrade suites and diagnosis.
+Pass the absolute environment JSON path as `QA_RELEASE_BASELINE_ENV` with `QA_PLATFORM_GROUP=upgrade`
+to `platform-qualification.mjs`. This group runs `candidate-transition.qa.mjs` and
+`resident-upgrade.qa.mjs` serially against `QA_PACKAGED_EXE`, with receipts identifying the baseline,
+candidate and actually loaded packaged resources. Retain both the loader and suite reports.
+
+This upgrade group follows the nine core suites and macOS visibility gate, before navigation
+benchmarking. Windows's `.10` to `.11` native transition is covered by the retained PR qualification
+report; the macOS launch fix changes no Windows native behavior. pi is `1.3.0+vengeance.2` in both
+0.3.2 and 0.3.3. Its historical 1.2 to 1.3 transition fixture is not used as this release's upgrade gate.
+
 Each of the five release runners then runs
 `node scripts/perf/first-navigation.mjs --label release-<platform> --runs 3` against the completed
 built app. Upload the JSON, CPU profiles and PNGs from `.shots/perf/first-navigation`, including
@@ -190,9 +206,10 @@ is separate from the packaged matrix. A passing current-candidate run does not e
 over an unmeasured platform baseline, and Windows before/after timings do not transfer to other hosts.
 
 Treat those runs, their logs and uploaded screenshots as each platform's evidence and record them with
-the platform's payload and package hashes. A Windows run never qualifies another platform. The native
-workspace suites below and the transition and resident-upgrade suites are not part of CI; run them on a
-host of the affected platform when a change touches platform-specific native behavior. Vengeance had no
+the platform's payload and package hashes. A Windows run never qualifies another platform. The release
+workflow runs the two upgrade suites above on macOS and Linux; ordinary `ci.yml` does not. Native
+workspace suites and other transition matrices remain separate gates on a host of the affected
+platform when native behavior changes. Vengeance had no
 macOS or Linux package before 0.3.0. Their executable-transition and resident-upgrade suites require
 a retained package of the same platform; 0.3.0 is the earliest possible release baseline. Record the
 actual baseline identity rather than substituting a Windows package or an unbuilt source revision.
@@ -351,6 +368,7 @@ sign-in testing only with explicit user authorization; report coverage gaps rath
 | Mixed-version resident attachment and Close tab versus Stop session | `scripts/qa/engines/resident-upgrade.qa.mjs`, `scripts/qa/engines/resident-close.qa.mjs`; selected-state and transport regressions                                 |
 | Packaged app, external bridge and native helper                     | `scripts/qa/engines/packaged.qa.mjs`, `scripts/checks/prime-auth-native.mjs`, `scripts/checks/prime-auth-oauth.mjs`                                                |
 | Packaged native-engine matrix on all five platforms                 | `scripts/qa/engines/platform-qualification.mjs`; nine serial suites against the final packaged QA app                                                              |
+| Official same-platform Engine 2 release upgrade on macOS and Linux  | `scripts/qa/engines/release-baseline.mjs`, then `platform-qualification.mjs` with `QA_PLATFORM_GROUP=upgrade` and its verified `QA_RELEASE_BASELINE_ENV`           |
 | macOS background application identity and Dock behavior             | `scripts/qa/engines/background-apps.qa.mjs`; OS activation policies, normal-mode shell probe, desktop PNGs and red/green witness on arm64 and x64                  |
 | Scale and lifecycle retention when those contracts change           | `scripts/qa/performance/session-listing.qa.mjs`, `scripts/qa/performance/session-churn.qa.mjs`, `scripts/qa/performance/long-tools.qa.mjs`                         |
 | Process-cold launch and first conversation navigation               | `scripts/perf/first-navigation.mjs`; both native engines, rich saved histories, frame gaps, CPU profiles and rendered syntax verification                          |

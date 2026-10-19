@@ -32,17 +32,53 @@ const SUITE_TIMEOUT_MS = 15 * 60 * 1000
 const CLEANUP_TIMEOUT_MS = 30_000
 const MAXIMUM_TIMEOUT_MS = 2_147_483_647
 const RECEIPT_NAME = 'packaged-target.json'
-const SUITES = [
-  'engines/packaged.qa.mjs',
-  'engines/integration.qa.mjs',
-  'engines/model-isolation.qa.mjs',
-  'settings/system-prompts.qa.mjs',
-  'engines/restart-safety.qa.mjs',
-  'engines/stop-compaction.qa.mjs',
-  'engines/bash-queue.qa.mjs',
-  'engines/session-recovery.qa.mjs',
-  'engines/resident-close.qa.mjs'
-]
+const SUITE_GROUPS = {
+  core: [
+    'engines/packaged.qa.mjs',
+    'engines/integration.qa.mjs',
+    'engines/model-isolation.qa.mjs',
+    'settings/system-prompts.qa.mjs',
+    'engines/restart-safety.qa.mjs',
+    'engines/stop-compaction.qa.mjs',
+    'engines/bash-queue.qa.mjs',
+    'engines/session-recovery.qa.mjs',
+    'engines/resident-close.qa.mjs'
+  ],
+  upgrade: ['engines/candidate-transition.qa.mjs', 'engines/resident-upgrade.qa.mjs']
+}
+const SUITE_GROUP = process.env.QA_PLATFORM_GROUP ?? 'core'
+assert.ok(Object.hasOwn(SUITE_GROUPS, SUITE_GROUP), 'QA_PLATFORM_GROUP must be core or upgrade')
+const SUITES = SUITE_GROUPS[SUITE_GROUP]
+
+async function upgradeEnvironment(executable, manifest) {
+  if (SUITE_GROUP !== 'upgrade') return {}
+  const environmentPath = process.env.QA_RELEASE_BASELINE_ENV
+  assert.ok(environmentPath && isAbsolute(environmentPath), 'Set absolute QA_RELEASE_BASELINE_ENV')
+  const environment = JSON.parse(await readFile(environmentPath, 'utf8'))
+  const keys = [
+    'QA_PRIME_BASELINE_EXECUTABLE',
+    'QA_PRIME_BASELINE_SHA256',
+    'QA_PRIME_BASELINE_VISION_SWITCH',
+    'QA_PRIME_EXECUTABLE',
+    'QA_PRIME_SHA256'
+  ]
+  assert.deepEqual(Object.keys(environment).sort(), keys.sort(), 'Unexpected baseline environment')
+  for (const key of keys) assert.equal(typeof environment[key], 'string')
+  assert.equal(environment.QA_PRIME_BASELINE_VISION_SWITCH, 'working')
+  const candidate = await realpath(
+    join(resourcesDirOf(executable), 'engines', manifest.engines.prime.entry)
+  )
+  assert.equal(await realpath(environment.QA_PRIME_EXECUTABLE), candidate)
+  assert.match(environment.QA_PRIME_SHA256, /^[a-f0-9]{64}$/)
+  assert.equal(await hashFile(candidate), environment.QA_PRIME_SHA256)
+  const baseline = await realpath(environment.QA_PRIME_BASELINE_EXECUTABLE)
+  assertOutsideRealHome(baseline)
+  assert.ok(isInside(await realpath(QA_TMP_ROOT), baseline), 'The baseline must be in QA_TMP_ROOT')
+  assert.match(environment.QA_PRIME_BASELINE_SHA256, /^[a-f0-9]{64}$/)
+  assert.equal(await hashFile(baseline), environment.QA_PRIME_BASELINE_SHA256)
+  assert.notEqual(environment.QA_PRIME_BASELINE_SHA256, environment.QA_PRIME_SHA256)
+  return environment
+}
 
 async function validateTemporaryRoot() {
   await mkdir(assertOutsideRealHome(QA_TMP_ROOT), { recursive: true })
@@ -118,7 +154,15 @@ async function identifyChild(pid, processToken) {
   }
 }
 
-async function runSuite(suite, index, outputDirectory, temporaryBase, executable, timeout) {
+async function runSuite(
+  suite,
+  index,
+  outputDirectory,
+  temporaryBase,
+  executable,
+  timeout,
+  baselineEnvironment
+) {
   const name = suite
     .replace(/\.qa\.mjs$/, '')
     .split('/')
@@ -153,6 +197,7 @@ async function runSuite(suite, index, outputDirectory, temporaryBase, executable
   ]) {
     delete environment[name]
   }
+  Object.assign(environment, baselineEnvironment)
   const stdout = createWriteStream(join(reportDirectory, 'stdout.log'))
   const stderr = createWriteStream(join(reportDirectory, 'stderr.log'))
   const result = { suite, reportDirectory, temporaryRoot, startedAt: new Date().toISOString() }
@@ -293,13 +338,16 @@ async function qualifyPlatform() {
   const reportPath = join(outputDirectory, 'qualification.json')
   const report = {
     platform: PLATFORM,
+    suiteGroup: SUITE_GROUP,
     startedAt: new Date().toISOString(),
     executable,
     timeoutMs: timeout,
     selectedSuites: SUITES,
     results: [],
     limits: [
-      'No baseline executable transition or mixed-version resident-upgrade qualification.',
+      ...(SUITE_GROUP === 'core'
+        ? ['No baseline executable transition or mixed-version resident-upgrade qualification.']
+        : ['Upgrade coverage is limited to the explicitly identified baseline and candidate.']),
       'No paid-provider inference or completed external OAuth sign-in.',
       'No installer, desktop window-manager, Dock or AppImage-mount lifecycle qualification.'
     ]
@@ -311,6 +359,8 @@ async function qualifyPlatform() {
     report.manifest = await verifyEngines({
       directory: join(resourcesDirOf(executable), 'engines')
     })
+    const baselineEnvironment = await upgradeEnvironment(executable, report.manifest)
+    if (SUITE_GROUP === 'upgrade') report.baselineEnvironment = baselineEnvironment
     for (const [index, suite] of SUITES.entries()) {
       console.log(`\n▶ ${index + 1}/${SUITES.length}: ${suite}`)
       const result = await runSuite(
@@ -319,7 +369,8 @@ async function qualifyPlatform() {
         outputDirectory,
         temporaryBase,
         executable,
-        timeout
+        timeout,
+        baselineEnvironment
       )
       report.results.push(result)
       await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
@@ -350,6 +401,9 @@ if (process.argv[1] && resolve(process.argv[1]) === SCRIPT_PATH) {
     )
     console.log(
       'Optional: QA_TMP_ROOT, QA_REPORT_DIR, QA_PLATFORM_TIMEOUT_MS (per suite; default 900000).'
+    )
+    console.log(
+      'QA_PLATFORM_GROUP=upgrade requires QA_RELEASE_BASELINE_ENV from release-baseline.mjs.'
     )
     console.log(`Suites: ${SUITES.join(', ')}`)
   } else {

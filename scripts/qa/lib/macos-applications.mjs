@@ -85,6 +85,14 @@ function sameIdentity(first, second) {
   )
 }
 
+function dockOverlapsDisplay(bounds, display) {
+  const overlapWidth =
+    Math.min(bounds.X + bounds.Width, display.x + display.width) - Math.max(bounds.X, display.x)
+  const overlapHeight =
+    Math.min(bounds.Y + bounds.Height, display.y + display.height) - Math.max(bounds.Y, display.y)
+  return overlapWidth > 0 && overlapHeight > 0
+}
+
 export async function identifyMacQaChild(child) {
   assert.ok(child.pid, 'The QA child must have started')
   const identity = (await processIdentities([child.pid]))[0]
@@ -186,7 +194,7 @@ export async function observeMacApplications({ directory, executable, reportDire
     if (!rootIdentity) return
     const table = await processTable()
     const children = descendants(table, rootIdentity.pid).filter(
-      (entry) => !preexistingPids.has(entry.pid) && !owned.has(entry.pid)
+      (entry) => !preexistingPids.has(entry.pid)
     )
     const identities = await processIdentities([
       rootIdentity.pid,
@@ -194,9 +202,24 @@ export async function observeMacApplications({ directory, executable, reportDire
     ])
     const currentRoot = identities.find((candidate) => candidate.pid === rootIdentity.pid)
     if (!currentRoot || !sameIdentity(rootIdentity, currentRoot)) return
+    const observedAt = Date.now()
     for (const entry of children) {
       const identity = identities.find((candidate) => candidate.pid === entry.pid)
-      if (identity) owned.set(entry.pid, { ...entry, identity, observedAt: Date.now() })
+      if (!identity) continue
+      const prior = owned.get(entry.pid)
+      const firstObservedAt =
+        prior &&
+        sameIdentity(prior.identity, identity) &&
+        sameIdentity(prior.ownerIdentity, rootIdentity)
+          ? prior.observedAt
+          : observedAt
+      owned.set(entry.pid, {
+        ...entry,
+        identity,
+        ownerIdentity: rootIdentity,
+        observedAt: firstObservedAt,
+        lastObservedAt: observedAt
+      })
     }
   }
 
@@ -271,6 +294,14 @@ export async function observeMacApplications({ directory, executable, reportDire
         )
       }, `PID ${pid} to have activation policy ${policy}`)
     },
+    observedProcessesBetween(startedAt, endedAt) {
+      return [...owned.values()].filter(
+        (entry) =>
+          sameIdentity(entry.ownerIdentity, mainIdentity) &&
+          entry.observedAt <= endedAt &&
+          entry.lastObservedAt >= startedAt
+      )
+    },
     async checkpoint(label, requiredPids = []) {
       await pollProcesses()
       const after = Date.now()
@@ -307,20 +338,28 @@ export async function observeMacApplications({ directory, executable, reportDire
     },
     async desktopScreenshot(label) {
       const screenshot = join(reportDirectory, `${label}-desktop.png`)
+      const display = latest.mainDisplay
       const visibleDock = latest.dockWindows.some(
-        (window) => window.onScreen && window.layer === latest.dockWindowLayer
+        (window) =>
+          window.onScreen &&
+          window.layer === latest.dockWindowLayer &&
+          dockOverlapsDisplay(window.bounds, display)
       )
       assert.ok(
         visibleDock,
-        'Desktop evidence needs a visible macOS Dock; disable Dock auto-hide on the QA host'
+        'Desktop evidence needs a visible Dock on the main display; disable Dock auto-hide there'
       )
       assert.ok(
         latest.screenCaptureAllowed,
         'Screen Recording permission is required for complete desktop and Dock evidence'
       )
-      await executeFile('/usr/sbin/screencapture', ['-x', '-D', '1', screenshot], {
-        timeout: WAIT_TIMEOUT_MS
-      })
+      await executeFile(
+        '/usr/sbin/screencapture',
+        ['-x', '-D', String(display.captureIndex), screenshot],
+        {
+          timeout: WAIT_TIMEOUT_MS
+        }
+      )
       const bytes = await readFile(screenshot)
       assert.ok(
         bytes.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE),
@@ -333,6 +372,7 @@ export async function observeMacApplications({ directory, executable, reportDire
         path: screenshot,
         imageWidth,
         imageHeight,
+        display,
         dockWindows: latest.dockWindows,
         screenCaptureAllowed: latest.screenCaptureAllowed
       }

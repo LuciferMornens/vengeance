@@ -5,7 +5,8 @@ import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { makePng, pickModelInFooter, until } from '../chat/helpers.mjs'
 import { launchApp, reportShotsDir, ROOT } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
-import { executableName } from '../lib/platform.mjs'
+import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
+import { executableName, resourcesDirOf } from '../lib/platform.mjs'
 import { isAlive, processIdentity } from '../lib/processes.mjs'
 import {
   createEngineFixture,
@@ -266,6 +267,13 @@ async function assertUpgradeNotice(application, agentId, baseline, selected) {
 async function main() {
   const baselineExecutable = process.env.QA_PRIME_BASELINE_EXECUTABLE
   const baselineHash = process.env.QA_PRIME_BASELINE_SHA256?.toLowerCase()
+  if (process.env.QA_PACKAGED_EXE) {
+    assert.ok(
+      baselineExecutable && baselineHash,
+      'Packaged upgrade QA requires a reviewed baseline'
+    )
+    assert.equal(OBSERVE, false, 'Packaged upgrade qualification requires strict assertions')
+  }
   if (baselineExecutable === undefined && baselineHash === undefined) {
     console.log(`SKIP ${SUITE_NAME}: set reviewed QA_PRIME_BASELINE_EXECUTABLE and SHA256`)
     return
@@ -299,6 +307,18 @@ async function main() {
   }
 
   try {
+    if (process.env.QA_PACKAGED_EXE) {
+      const packagedCandidate = await realpath(
+        join(
+          resourcesDirOf(resolve(process.env.QA_PACKAGED_EXE)),
+          'engines',
+          'prime',
+          executableName('prime-agent')
+        )
+      )
+      assert.ok(fixture.candidate, 'Select and hash the packaged native candidate')
+      assert.ok(samePath(fixture.candidate.executablePath, packagedCandidate))
+    }
     const selected = await packageIdentity(
       fixture.candidate?.executablePath ??
         join(ROOT, '.engine-staging', 'bundled', 'prime', executableName('prime-agent'))
@@ -313,9 +333,8 @@ async function main() {
     const imagePath = join(workspace, 'resident-image.png')
     await writeFile(imagePath, TOOL_IMAGE)
     application = await launchApp({
-      exe: process.env.QA_PACKAGED_EXE,
+      ...packagedLaunchOptions(fixture.environment),
       agentDir: fixture.piDirectory.dir,
-      env: fixture.environment,
       outDir: OUTPUT_DIRECTORY
     })
     await selectExecutable(application, baseline.executablePath)
@@ -642,6 +661,10 @@ async function main() {
     )
     assert.equal(await executableHash(baseline.executablePath), baseline.sha256)
     assert.equal(await executableHash(selected.executablePath), selected.sha256)
+    if (process.env.QA_PACKAGED_EXE) {
+      await application.invoke('app:set-state', { engineOverridePaths: { prime: null } })
+      await recordPackagedTarget(application)
+    }
     application.assertNoErrors()
     const failed = report.checks.filter((entry) => !entry.passed)
     if (failed.length) throw new Error(`${failed.length} older resident upgrade checks failed`)

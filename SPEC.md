@@ -669,7 +669,19 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   applications. Retain actual desktop PNGs and a red/green witness proving the observer detects the
   previous main-executable child behavior. Inspect the captures; renderer-only screenshots do not
   establish Dock behavior.
-  After packaged qualification, run `scripts/perf/first-navigation.mjs --label <platform> --runs 3`
+  For the 0.3.3 candidate, both macOS and both Linux architectures also qualify the official
+  same-platform 0.3.2 package's Engine 2 `0.10.0+vengeance.10` to the packaged candidate's `.11`.
+  `scripts/qa/engines/release-baseline.mjs` verifies pinned public `SHA256SUMS` and asset hashes,
+  extracts the complete baseline package, verifies native inventories and macOS signatures, and
+  writes `release-baseline-env.json`. Run `platform-qualification.mjs` with `QA_PLATFORM_GROUP=upgrade`
+  and `QA_RELEASE_BASELINE_ENV` pointing at that JSON. The candidate-transition and resident-upgrade
+  suites run serially against the final packaged candidate and retain baseline/candidate receipts.
+  This follows the core nine suites and macOS visibility gate, before the navigation benchmark.
+  Windows's `.10` to `.11` transition evidence is retained in the prior PR qualification report;
+  this app-owned macOS fix changes no Windows native behavior. pi stays at `1.3.0+vengeance.2` in both
+  app releases; its historical 1.2 to 1.3 transition fixture is not a 0.3.3 release gate.
+  After packaged and applicable upgrade qualification, run
+  `scripts/perf/first-navigation.mjs --label <platform> --runs 3`
   against the completed built app on every platform. Retain `.shots/perf/first-navigation` JSON,
   CPU profiles and PNGs with source-bundle and native-payload hashes. This runner does not select
   `QA_PACKAGED_EXE`; its built-app measurements are separate from packaged QA. A current-platform
@@ -679,7 +691,8 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   match `package.json`. Each of the five platforms builds on its own clean runner without caches (Linux
   inside the pinned Ubuntu 22.04 container): engines, helper, app and packages, then the baked update
   feed check, the GLIBC gate on Linux and signature, zip and dmg verification on macOS, then the
-  packaged qualification, macOS background-process gate and built-app navigation benchmark above. The deb is
+  packaged qualification, macOS background-process gate, applicable same-platform native upgrade
+  checks and built-app navigation benchmark above. The deb is
   install-tested on x64 and arm64 and the pacman package on Arch. One publish job then
   drafts the GitHub release with every package, the update files (the two `latest-mac.yml` merged),
   `SHA256SUMS` and a build provenance attestation; a maintainer reviews and publishes it. Build jobs only

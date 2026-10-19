@@ -211,6 +211,7 @@ export default function (engine) {
 }
 
 async function checkSettingsHosts(application, observer, workspace) {
+  const startedAt = Date.now()
   const [catalog, keybindings, flags] = await Promise.all([
     engineSettings(application, 'pi', 'settings:extension-providers'),
     engineSettings(application, 'pi', 'settings:keybindings'),
@@ -221,18 +222,18 @@ async function checkSettingsHosts(application, observer, workspace) {
   assert.ok(keybindings)
   assert.ok(flags.builtinTools.length > 0)
   const checkpoint = await observer.checkpoint('concurrent-sdk-provider-and-cli')
-  const hosts = checkpoint.processes.filter((entry) =>
-    entry.commandLine.includes('provider-host.js')
-  )
+  const hosts = observer
+    .observedProcessesBetween(startedAt, checkpoint.time)
+    .filter((entry) => entry.commandLine.includes('provider-host.js'))
   assert.ok(
     hosts.some((entry) => entry.commandLine.includes('"role":"sdk"')),
-    'The real SDK host must run'
+    'The real SDK host must have been observed during the settings operations'
   )
   assert.ok(
     hosts.some((entry) => entry.commandLine.includes('"role":"extensions"')),
-    'The real provider host must run and load the AppKit extension'
+    'The real provider host must have been observed while loading the AppKit extension'
   )
-  return { hosts, flags }
+  return { hosts, flags, observationInterval: { startedAt, endedAt: checkpoint.time } }
 }
 
 async function holdNativeHelper(application) {

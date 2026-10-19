@@ -17,10 +17,20 @@ struct DockWindow: Codable {
     let bounds: [String: Double]
 }
 
+struct DisplayRecord: Codable {
+    let identifier: UInt32
+    let captureIndex: Int
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
+}
+
 struct Snapshot: Codable {
     let time: Double
     let applications: [ApplicationRecord]
     let dockWindows: [DockWindow]
+    let mainDisplay: DisplayRecord
     let dockWindowLayer: Int
     let screenCaptureAllowed: Bool
 }
@@ -48,11 +58,22 @@ func snapshot() -> Snapshot {
             bounds: window[kCGWindowBounds as String] as? [String: Double] ?? [:]
         )
     }
+    let displayIdentifier = CGMainDisplayID()
+    let displayBounds = CGDisplayBounds(displayIdentifier)
+    let mainDisplay = DisplayRecord(
+        identifier: displayIdentifier,
+        captureIndex: 1,
+        x: displayBounds.minX,
+        y: displayBounds.minY,
+        width: displayBounds.width,
+        height: displayBounds.height
+    )
     let millisecondsPerSecond = 1_000.0
     return Snapshot(
         time: Date().timeIntervalSince1970 * millisecondsPerSecond,
         applications: applications,
         dockWindows: dockWindows,
+        mainDisplay: mainDisplay,
         dockWindowLayer: Int(CGWindowLevelForKey(.dockWindow)),
         screenCaptureAllowed: CGPreflightScreenCaptureAccess()
     )
