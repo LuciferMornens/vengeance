@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { lstat, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { inventory, sha256 } from '../../engines/common.mjs'
 import { ROOT } from './app.mjs'
 import { inspectRequest, turn } from './fake-llm.mjs'
@@ -133,11 +134,52 @@ export async function verifyIntelKernel(text, fixture, outputDirectory, label = 
   })
 }
 
+function verifyArchiveHashes(archiveInfo, wheelBytes) {
+  assert.ok(
+    archiveInfo && typeof archiveInfo === 'object' && !Array.isArray(archiveInfo),
+    'The installed wheel records archive_info metadata'
+  )
+  const suppliedHashes = []
+  if (archiveInfo.hashes !== undefined) {
+    assert.ok(
+      archiveInfo.hashes &&
+        typeof archiveInfo.hashes === 'object' &&
+        !Array.isArray(archiveInfo.hashes),
+      'Archive hashes must be a digest dictionary'
+    )
+    suppliedHashes.push(...Object.entries(archiveInfo.hashes))
+  }
+  if (archiveInfo.hash !== undefined) {
+    assert.equal(typeof archiveInfo.hash, 'string')
+    assert.match(archiveInfo.hash, /^[a-z0-9_-]+=[a-f0-9]+$/i)
+    const separator = archiveInfo.hash.indexOf('=')
+    suppliedHashes.push([
+      archiveInfo.hash.slice(0, separator),
+      archiveInfo.hash.slice(separator + 1)
+    ])
+  }
+  for (const [algorithm, digest] of suppliedHashes) {
+    assert.match(algorithm, /^[a-z0-9_-]+$/i)
+    assert.equal(typeof digest, 'string')
+    assert.match(digest, /^[a-f0-9]+$/i)
+    assert.equal(
+      createHash(algorithm).update(wheelBytes).digest('hex'),
+      digest.toLowerCase(),
+      `The installed wheel's ${algorithm} metadata matches its archive`
+    )
+  }
+}
+
 export async function verifyKernelEvidence(text, options) {
   const { executable, kernelDirectory, outputDirectory, label = 'intel-kernel' } = options
   const line = text.split('\n').find((entry) => entry.startsWith(KERNEL_EVIDENCE_PREFIX))
   assert.ok(line, 'The native Python tool reports its loaded cryptography implementation')
   const actual = JSON.parse(line.slice(KERNEL_EVIDENCE_PREFIX.length))
+  await mkdir(outputDirectory, { recursive: true })
+  await writeFile(
+    join(outputDirectory, `${label}-observed.json`),
+    `${JSON.stringify({ verified: false, actual }, null, 2)}\n`
+  )
   const expected = await wheelIdentity(executable)
   assert.equal(actual.version, expected.wheel.version)
   assert.equal(actual.opensslVersion, expected.build.opensslVersion)
@@ -162,11 +204,29 @@ export async function verifyKernelEvidence(text, options) {
     native.sha256,
     'The installed extension matches its receipt'
   )
-  assert.equal(new URL(actual.directUrl.url).protocol, 'file:')
-  assert.equal(basename(new URL(actual.directUrl.url).pathname), expected.wheel.file)
-  assert.equal(actual.directUrl.archive_info.hashes.sha256, expected.wheel.sha256)
-  const evidence = { actual, wheel: expected.wheel, build: expected.build }
-  await mkdir(outputDirectory, { recursive: true })
+  const sourceUrl = new URL(actual.directUrl.url)
+  assert.equal(sourceUrl.protocol, 'file:')
+  assert.ok(
+    sourceUrl.hostname === '' || sourceUrl.hostname === 'localhost',
+    'The installed wheel records a local archive'
+  )
+  const sourceWheelPath = await realpath(fileURLToPath(sourceUrl))
+  assert.equal(basename(sourceWheelPath), expected.wheel.file)
+  const wheelBytes = await readFile(sourceWheelPath)
+  const sourceWheelSha256 = sha256(wheelBytes)
+  assert.equal(
+    sourceWheelSha256,
+    expected.wheel.sha256,
+    'The direct URL archive matches the verified packaged wheel'
+  )
+  // PEP 610 makes archive digests optional, including uv's direct local wheel records.
+  verifyArchiveHashes(actual.directUrl.archive_info, wheelBytes)
+  const evidence = {
+    actual,
+    sourceWheel: { path: sourceWheelPath, sha256: sourceWheelSha256 },
+    wheel: expected.wheel,
+    build: expected.build
+  }
   await writeFile(join(outputDirectory, `${label}.json`), `${JSON.stringify(evidence, null, 2)}\n`)
   return evidence
 }

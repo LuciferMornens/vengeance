@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { cp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -80,7 +81,8 @@ try {
     nativeSha256: nativeHash,
     directUrl: {
       url: pathToFileURL(join(wheelDirectory, WHEEL_NAME)).href,
-      archive_info: { hashes: { sha256: wheelHash } }
+      // uv omits optional archive hashes when installing a direct local wheel.
+      archive_info: {}
     },
     overrides: {
       PRIME_AGENT_KERNEL_PYTHON: null,
@@ -89,16 +91,59 @@ try {
       UV_OVERRIDE: null
     }
   }
-  const verify = (value) =>
+  const verify = (value, label = 'intel-kernel') =>
     verifyKernelEvidence(KERNEL_PREFIX + JSON.stringify(value), {
       executable,
       kernelDirectory,
-      outputDirectory
+      outputDirectory,
+      label
     })
   await verify(actual)
   const receipt = JSON.parse(await readFile(join(outputDirectory, 'intel-kernel.json'), 'utf8'))
   assert.equal(receipt.actual.nativeSha256, nativeHash)
-  await assert.rejects(verify({ ...actual, version: '48.0.0' }))
+  assert.equal(receipt.sourceWheel.path, await realpath(join(wheelDirectory, WHEEL_NAME)))
+  assert.equal(receipt.sourceWheel.sha256, wheelHash)
+  const cachedWheel = join(directory, 'cached-runtime', 'prime-agent-runtime', 'wheels', WHEEL_NAME)
+  await mkdir(join(directory, 'cached-runtime', 'prime-agent-runtime', 'wheels'), {
+    recursive: true
+  })
+  await cp(join(wheelDirectory, WHEEL_NAME), cachedWheel)
+  const cachedReceipt = await verify({
+    ...actual,
+    directUrl: { ...actual.directUrl, url: pathToFileURL(cachedWheel).href }
+  })
+  assert.equal(cachedReceipt.sourceWheel.path, await realpath(cachedWheel))
+  await writeFile(cachedWheel, 'different archive containing an unchanged native module')
+  await assert.rejects(
+    verify({ ...actual, directUrl: { ...actual.directUrl, url: pathToFileURL(cachedWheel).href } }),
+    /direct URL archive matches the verified packaged wheel/
+  )
+  const wheelSha512 = createHash('sha512')
+    .update(await readFile(join(wheelDirectory, WHEEL_NAME)))
+    .digest('hex')
+  await verify({
+    ...actual,
+    directUrl: {
+      ...actual.directUrl,
+      archive_info: {
+        hashes: { sha256: wheelHash, sha512: wheelSha512 },
+        hash: `sha256=${wheelHash}`
+      }
+    }
+  })
+  await verify({
+    ...actual,
+    directUrl: { ...actual.directUrl, archive_info: { hash: `sha256=${wheelHash}` } }
+  })
+  await assert.rejects(verify({ ...actual, version: '48.0.0' }, 'unverified-version'))
+  const observed = JSON.parse(
+    await readFile(join(outputDirectory, 'unverified-version-observed.json'), 'utf8')
+  )
+  assert.equal(observed.verified, false)
+  assert.equal(observed.actual.version, '48.0.0')
+  await assert.rejects(readFile(join(outputDirectory, 'unverified-version.json')), {
+    code: 'ENOENT'
+  })
   await assert.rejects(verify({ ...actual, opensslVersion: 'OpenSSL unrelated' }))
   await assert.rejects(verify({ ...actual, nativeSha256: '0'.repeat(nativeHash.length) }))
   await assert.rejects(verify({ ...actual, pythonPrefix: directory }))
@@ -116,6 +161,25 @@ try {
       }
     })
   )
+  for (const archiveInfo of [
+    undefined,
+    null,
+    [],
+    { hashes: null },
+    { hashes: [] },
+    { hashes: 'not a dictionary' },
+    { hashes: { sha256: 1 } },
+    { hashes: { sha256: 'not a digest' } },
+    { hashes: { sha256: wheelHash, sha512: '0'.repeat(wheelSha512.length) } },
+    { hashes: { sha256: wheelHash }, hash: `sha256=${'0'.repeat(wheelHash.length)}` },
+    { hash: `sha256=${'0'.repeat(wheelHash.length)}` },
+    { hash: 'missing digest separator' },
+    { hash: 1 }
+  ]) {
+    await assert.rejects(
+      verify({ ...actual, directUrl: { ...actual.directUrl, archive_info: archiveInfo } })
+    )
+  }
   await assert.rejects(
     verify({ ...actual, directUrl: { ...actual.directUrl, url: 'https://invalid/wheel' } })
   )
