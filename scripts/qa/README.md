@@ -63,6 +63,12 @@ node scripts/qa/settings/thinking.qa.mjs   # one suite directly
   model replies use local providers. Release runners install uv 0.13.1 with the pinned setup-uv
   action and caching disabled. A Python tool or child failure after missing uv is failed setup,
   not evidence that the intended native assertion ran.
+- **Intel macOS verifies the loaded Python wheel.** The integration suite starts without a kernel
+  cache or kernel-Python override. Its first real Python tool call reports cryptography, its OpenSSL
+  backend, the loaded native extension hash, and the installed wheel's `direct_url.json`. These must
+  match the packaged wheel manifest and build receipt, and the interpreter and extension must be in
+  the fixture's automatic kernel venv. No constraint, wheel-search or dependency override may reach
+  that kernel. The receipt is `engines-shots/intel-kernel.json`.
 - Prime workspace formatting on Windows runs per-package native checks across the workspace and its
   recursive path dependencies. This keeps full `cargo fmt --all --check` coverage within Windows'
   command-line length limit; other hosts use the single native workspace command.
@@ -480,7 +486,7 @@ This needs a macOS desktop. CI uses
 ### Official release upgrades
 
 For 0.3.3, both macOS and both Linux architectures qualify official 0.3.2 Engine 2 `.10` to the final
-packaged `.11`. With the same absolute `QA_PACKAGED_EXE` and outside-home/repository `QA_TMP_ROOT`
+packaged `.12`. With the same absolute `QA_PACKAGED_EXE` and outside-home/repository `QA_TMP_ROOT`
 exported, run after core qualification and the macOS visibility check:
 
 ```sh
@@ -497,10 +503,23 @@ signatures, retaining the extracted official package under `QA_TMP_ROOT`. It nev
 production app. `release-baseline.json` records both packages; `release-baseline-env.json` supplies
 the verified `QA_PRIME_BASELINE_EXECUTABLE`, `QA_PRIME_BASELINE_SHA256`,
 `QA_PRIME_BASELINE_VISION_SWITCH=working`, `QA_PRIME_EXECUTABLE` and `QA_PRIME_SHA256`.
+
+On Intel macOS, each upgrade fixture first invokes the actual `.10` installer's
+`--prime-agent-bootstrap` entry point under temporary HOME, account, cache and kernel directories.
+Only that bounded child gets a `UV_CONSTRAINT` file selecting the verified candidate's current
+cryptography wheel. The old executable writes its own readiness record. The app qualification then
+uses that venv with the constraint and kernel-Python overrides absent; the candidate's wheel-aware
+runtime identity must invalidate old readiness and its Python tool must load the packaged extension
+and OpenSSL. `baseline-prewarm.json` records bounded command output, and `intel-upgraded-kernel.json`
+records the candidate's loaded implementation and readiness. `baseline-inventory.json` records the
+complete official engine payload before and after qualification and rejects any mutation. Core
+integration always tests fresh candidate bootstrap, without baseline provisioning.
+
 The upgrade group runs candidate-transition and resident-upgrade serially against the packaged QA
 candidate and uses the same receipts, deadlines and report layout as core. CI uses
 `$RUNNER_TEMP/release-baseline` and `$RUNNER_TEMP/engine-upgrade`. Windows's native `.10` to `.11`
-transition has retained PR evidence; pi's `.2` build is unchanged between these app releases, so the
+transition has retained PR evidence that predates `.12`; this candidate needs fresh qualification.
+Pi's `.2` build is unchanged between these app releases, so the
 historical pi 1.2 to 1.3 transition fixture is not this release's gate.
 
 ### Built-app navigation benchmark

@@ -670,15 +670,21 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   previous main-executable child behavior. Inspect the captures; renderer-only screenshots do not
   establish Dock behavior.
   For the 0.3.3 candidate, both macOS and both Linux architectures also qualify the official
-  same-platform 0.3.2 package's Engine 2 `0.10.0+vengeance.10` to the packaged candidate's `.11`.
+  same-platform 0.3.2 package's Engine 2 `0.10.0+vengeance.10` to the packaged candidate's `.12`.
   `scripts/qa/engines/release-baseline.mjs` verifies pinned public `SHA256SUMS` and asset hashes,
   extracts the complete baseline package, verifies native inventories and macOS signatures, and
   writes `release-baseline-env.json`. Run `platform-qualification.mjs` with `QA_PLATFORM_GROUP=upgrade`
   and `QA_RELEASE_BASELINE_ENV` pointing at that JSON. The candidate-transition and resident-upgrade
   suites run serially against the final packaged candidate and retain baseline/candidate receipts.
   This follows the core nine suites and macOS visibility gate, before the navigation benchmark.
+  Intel macOS packages include a source-built cryptography wheel with static OpenSSL. The lock pins
+  source and build inputs; native setup verifies the bundled wheel before accepting cached Python
+  readiness and includes it in runtime identity. Users need uv and network access, without a compiler
+  toolchain. The Intel upgrade fixture provisions the immutable `.10` package through its public
+  bootstrap command with a temporary constraint to that verified wheel. Candidate setup must run
+  without that constraint or a Python override and load the bundled wheel in its refreshed environment.
   Windows's `.10` to `.11` transition evidence is retained in the prior PR qualification report;
-  this app-owned macOS fix changes no Windows native behavior. pi stays at `1.3.0+vengeance.2` in both
+  the Intel wheel path does not change Windows dependency resolution. pi stays at `1.3.0+vengeance.2` in both
   app releases; its historical 1.2 to 1.3 transition fixture is not a 0.3.3 release gate.
   After packaged and applicable upgrade qualification, run
   `scripts/perf/first-navigation.mjs --label <platform> --runs 3`

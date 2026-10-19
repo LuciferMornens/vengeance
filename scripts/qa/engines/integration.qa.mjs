@@ -6,6 +6,12 @@ import { FAKE_MODELS, FAKE_PROVIDER } from '../lib/agent-dir.mjs'
 import { launchApp, reportShotsDir } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
 import { captureFailedNativeDiagnostics } from '../lib/native-diagnostics.mjs'
+import {
+  assertFreshIntelKernel,
+  nativeKernelCode,
+  runNativePythonProbe,
+  verifyIntelKernel
+} from '../lib/native-kernel.mjs'
 import { isAlive } from '../lib/processes.mjs'
 import { softSteps } from '../lib/steps.mjs'
 import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
@@ -115,6 +121,7 @@ let failure
 const checks = softSteps(step, { app: () => application, name: SUITE_NAME })
 
 try {
+  await assertFreshIntelKernel(fixture)
   const workspace = await fixture.root.folder('workspace', {
     'README.md': '# Engine integration workspace\nOnly isolated QA files live here.\n'
   })
@@ -234,35 +241,25 @@ try {
     'Engine2 native Python tool output reaches its public transcript',
     async () => {
       const toolId = 'engine2-python-output'
-      const from = fixture.primeServer.requests.length
       const toolName = inspectRequest(fixture.primeServer.requests[0]).tools.find(
         (name) => name === 'ipython' || name === 'python'
       )
       assert.ok(toolName, 'the native model exposes its Python runtime tool')
-      fixture.primeServer.queue(
-        turn.toolCalls([
-          {
-            id: toolId,
-            name: toolName,
-            args: {
-              code: 'print("Engine2 tool output")'
-            }
-          }
-        ]),
-        turn.text('The native tool finished.')
-      )
-      await application.send('Run the short native tool probe')
-      await application.waitForSettle({ timeoutMs: KERNEL_BOOTSTRAP_TIMEOUT_MS })
-      const nextRequest = await fixture.primeServer.waitForRequest(
-        (request) =>
-          inspectRequest(request).toolResults.some((result) => result.toolCallId === toolId),
-        { from }
-      )
-      const result = inspectRequest(nextRequest).toolResults.find(
-        (item) => item.toolCallId === toolId
+      const { result } = await runNativePythonProbe(
+        application,
+        fixture.primeServer,
+        primeAgentId,
+        {
+          toolCallId: toolId,
+          toolName,
+          code: nativeKernelCode('print("Engine2 tool output")'),
+          prompt: 'Run the short native tool probe',
+          timeoutMs: KERNEL_BOOTSTRAP_TIMEOUT_MS
+        }
       )
       assert.notEqual(result.isError, true, result.text)
       assert.ok(result.text.includes('Engine2 tool output'), result.text)
+      await verifyIntelKernel(result.text, fixture, reportShotsDir('engines'))
       const tool = (await application.agentState()).tools[toolId]
       assert.equal(tool.status, 'done')
       await application.screenshot('engine2-native-tool')

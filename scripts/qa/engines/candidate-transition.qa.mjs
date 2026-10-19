@@ -3,6 +3,11 @@ import { mkdir, realpath, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { launchApp, ROOT } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
+import {
+  prepareNativeBaseline,
+  verifyIntelKernelUpgrade,
+  verifyNativeBaseline
+} from '../lib/native-kernel.mjs'
 import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
 import { executableName, resourcesDirOf } from '../lib/platform.mjs'
 import { isAlive, processIdentity } from '../lib/processes.mjs'
@@ -31,6 +36,7 @@ const fixture = await createEngineFixture()
 const report = { startedAt: new Date().toISOString(), checks: [] }
 let application
 let failure
+let baselineKernel
 
 function samePath(actual, expected) {
   return typeof actual === 'string' && resolve(actual).toLowerCase() === expected.toLowerCase()
@@ -86,6 +92,7 @@ try {
   assert.ok(!samePath(officialExecutable, fixture.candidate.executablePath))
   assert.notEqual(officialHash, fixture.candidate.sha256)
   await mkdir(OUTPUT_DIRECTORY, { recursive: true })
+  baselineKernel = await prepareNativeBaseline(fixture, officialExecutable, OUTPUT_DIRECTORY)
   application = await launchApp({
     ...packagedLaunchOptions(fixture.environment),
     agentDir: fixture.piDirectory.dir,
@@ -191,6 +198,17 @@ try {
     report.finalIdentity = await fixture.verifyPrimeExecutable(application, agentId)
     assert.equal(await executableHash(officialExecutable), officialHash)
   })
+  if (baselineKernel?.prewarm) {
+    await check('Intel candidate refreshes the older kernel with its packaged wheel', async () => {
+      report.kernelUpgrade = await verifyIntelKernelUpgrade(
+        application,
+        fixture,
+        agentId,
+        baselineKernel,
+        OUTPUT_DIRECTORY
+      )
+    })
+  }
   if (process.env.QA_PACKAGED_EXE) {
     await application.invoke('app:set-state', { engineOverridePaths: { prime: null } })
     await recordPackagedTarget(application)
@@ -201,6 +219,9 @@ try {
   await application?.screenshot('FAILED').catch(() => undefined)
 } finally {
   await application?.close({ beforeCleanup: fixture.stopNativeDaemon }).catch((error) => {
+    failure ??= error
+  })
+  await verifyNativeBaseline(baselineKernel, OUTPUT_DIRECTORY).catch((error) => {
     failure ??= error
   })
   await fixture.cleanup().catch((error) => {

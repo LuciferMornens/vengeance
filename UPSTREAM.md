@@ -141,8 +141,8 @@ Rebuild Engine 2 and its helper after changing these inputs. Requalify wheel met
 architecture, minimum OS, dynamic dependencies and notices, then the actual loaded cryptography and
 OpenSSL versions in an isolated packaged kernel. Repeat the official `.10`-to-`.12` upgrade with
 genuine old kernel state, no candidate bootstrap overrides, and unchanged baseline package inventory.
-Native Intel build, kernel and upgrade qualification for `.12` remains pending; source checks alone
-do not establish those results. Record actual output hashes in the build and release receipts.
+Qualify the native Intel build, kernel and upgrade on Intel hardware; source checks alone do not
+establish those results. Record actual output hashes in the build and release receipts.
 
 On every upstream or dependency update, review current cryptography/OpenSSL security releases and
 official Intel wheel availability, refresh the source/checksum locks, and rerun these gates. Retire
