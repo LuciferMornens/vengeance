@@ -98,6 +98,7 @@ await check(
       crypto: { randomUUID },
       setTimeout,
       clearTimeout,
+      document: { activeElement: null },
       recordNotice: (notice: unknown) => notices.push(notice),
       window: {
         vengeance: {

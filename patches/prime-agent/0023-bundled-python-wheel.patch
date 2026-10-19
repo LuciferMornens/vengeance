@@ -1,0 +1,306 @@
+diff --git a/crates/pa-core/src/kernel/bootstrap/mod.rs b/crates/pa-core/src/kernel/bootstrap/mod.rs
+index f3b598b..1c37d3b 100644
+--- a/crates/pa-core/src/kernel/bootstrap/mod.rs
++++ b/crates/pa-core/src/kernel/bootstrap/mod.rs
+@@ -219,6 +219,8 @@ async fn ensure_kernel_python_uncached(
+         }
+     }
+ 
++    // Validate packaged dependencies even when an earlier kernel environment is already ready.
++    venv::runtime_wheel_requirement().map_err(|error| format_bootstrap_failure(&error))?;
+     let venv = resolve_writable_kernel_venv_dir()?;
+     let python = kernel_venv_python(&venv);
+     let python_str = python.to_string_lossy().to_string();
+diff --git a/crates/pa-core/src/kernel/bootstrap/venv.rs b/crates/pa-core/src/kernel/bootstrap/venv.rs
+index 9ff8e29..1ae1a61 100644
+--- a/crates/pa-core/src/kernel/bootstrap/venv.rs
++++ b/crates/pa-core/src/kernel/bootstrap/venv.rs
+@@ -17,6 +17,7 @@ use super::{
+ 
+ // The concern children (the flows + the shared record stay in the
+ // composition root).
++mod bundled_wheels;
+ mod layout;
+ mod probe;
+ mod runtime_source;
+@@ -24,6 +25,7 @@ mod skills;
+ mod uv;
+ mod version;
+ 
++pub(super) use bundled_wheels::runtime_wheel_requirement;
+ use layout::home_dir;
+ pub(crate) use layout::{expand_home, resolve_writable_kernel_venv_dir};
+ pub use layout::{kernel_venv_dir, kernel_venv_python};
+@@ -107,10 +109,11 @@ pub(crate) async fn bootstrap_venv(
+     python_skills: &[BootstrapPythonSkill],
+     options: &EnsureKernelPythonOptions,
+ ) -> anyhow::Result<()> {
++    let source_dir = resolve_runtime_source_dir();
++    let bundled_wheel = runtime_wheel_requirement()?;
+     std::fs::create_dir_all(venv.parent().unwrap_or(Path::new("/")))?;
+     let uv = ensure_uv()?;
+     let python = kernel_venv_python(venv);
+-    let source_dir = resolve_runtime_source_dir();
+     let runtime_requirement = source_dir.as_ref().map_or_else(
+         || RUNTIME_REQUIREMENT.to_string(),
+         |p| p.to_string_lossy().to_string(),
+@@ -126,6 +129,10 @@ pub(crate) async fn bootstrap_venv(
+         python_str,
+         runtime_requirement,
+     ];
++    if let Some(wheel) = bundled_wheel {
++        // A direct requirement prevents the resolver choosing an index source distribution.
++        install_args.push(wheel.to_string_lossy().to_string());
++    }
+     install_args.push(STATE_SNAPSHOT_REQUIREMENT.to_string());
+     for uv_arg in default_rlm_extra_uv_args() {
+         install_args.push(uv_arg.to_string());
+diff --git a/crates/pa-core/src/kernel/bootstrap/venv/bundled_wheels.rs b/crates/pa-core/src/kernel/bootstrap/venv/bundled_wheels.rs
+new file mode 100644
+index 0000000..de219c6
+--- /dev/null
++++ b/crates/pa-core/src/kernel/bootstrap/venv/bundled_wheels.rs
+@@ -0,0 +1,189 @@
++use std::path::{Path, PathBuf};
++
++use anyhow::{bail, Context};
++use serde::Deserialize;
++use sha2::Digest;
++
++use super::runtime_source::{packaged_runtime_dir, resolve_runtime_source_dir};
++
++const WHEEL_MANIFEST_SCHEMA: u32 = 1;
++const WHEEL_PLATFORM: &str = "darwin-x64";
++const WHEEL_DISTRIBUTION: &str = "cryptography";
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct WheelManifest {
++    schema_version: u32,
++    platform: String,
++    wheels: Vec<BundledWheel>,
++}
++
++#[derive(Deserialize)]
++struct BundledWheel {
++    distribution: String,
++    version: String,
++    file: String,
++    sha256: String,
++}
++
++pub(in crate::kernel::bootstrap) fn runtime_wheel_requirement() -> anyhow::Result<Option<PathBuf>> {
++    if !cfg!(all(target_os = "macos", target_arch = "x86_64"))
++        || option_env!("VENGEANCE_ENGINE_BUILD").is_none()
++    {
++        return Ok(None);
++    }
++    let source_dir = resolve_runtime_source_dir()
++        .context("cannot find the bundled Python runtime; reinstall Vengeance")?;
++    // Native source-checkout bootstraps use upstream's developer dependency resolution.
++    if crate::packages::source_checkout_root()
++        .is_some_and(|root| source_dir == root.join("prime-agent-runtime"))
++        || packaged_runtime_dir().as_deref() != Some(source_dir.as_path())
++    {
++        return Ok(None);
++    }
++    packaged_wheel_requirement(&source_dir).map(Some)
++}
++
++fn packaged_wheel_requirement(runtime_dir: &Path) -> anyhow::Result<PathBuf> {
++    let wheels_dir = runtime_dir.join("wheels");
++    let manifest_path = wheels_dir.join("manifest.json");
++    let manifest_bytes = std::fs::read(&manifest_path).with_context(|| {
++        format!(
++            "cannot read bundled Python wheel manifest at {}; reinstall Vengeance",
++            manifest_path.display()
++        )
++    })?;
++    let manifest: WheelManifest = serde_json::from_slice(&manifest_bytes).with_context(|| {
++        format!(
++            "invalid Python wheel manifest at {}",
++            manifest_path.display()
++        )
++    })?;
++    if manifest.schema_version != WHEEL_MANIFEST_SCHEMA || manifest.platform != WHEEL_PLATFORM {
++        bail!(
++            "unsupported bundled Python wheel manifest at {}",
++            manifest_path.display()
++        );
++    }
++    let [wheel] = manifest.wheels.as_slice() else {
++        bail!("bundled Python wheel manifest must contain one cryptography wheel");
++    };
++    let filename_prefix = format!("{WHEEL_DISTRIBUTION}-{}-", wheel.version);
++    if wheel.distribution != WHEEL_DISTRIBUTION
++        || wheel.version.is_empty()
++        || !wheel.file.starts_with(&filename_prefix)
++        || !Path::new(&wheel.file)
++            .extension()
++            .is_some_and(|extension| extension.eq_ignore_ascii_case("whl"))
++        || !wheel
++            .file
++            .bytes()
++            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
++    {
++        bail!(
++            "invalid bundled cryptography wheel filename or version: {}",
++            wheel.file
++        );
++    }
++    let wheel_path = wheels_dir.join(&wheel.file);
++    let wheel_bytes = std::fs::read(&wheel_path).with_context(|| {
++        format!(
++            "cannot read bundled Python wheel at {}",
++            wheel_path.display()
++        )
++    })?;
++    let actual_sha256 = format!("{:x}", sha2::Sha256::digest(&wheel_bytes));
++    if actual_sha256 != wheel.sha256 {
++        bail!(
++            "bundled Python wheel checksum mismatch at {}; reinstall Vengeance",
++            wheel_path.display()
++        );
++    }
++    Ok(wheel_path)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const WHEEL_VERSION: &str = "50.0.2";
++    const WHEEL_FILE: &str = "cryptography-50.0.2-cp39-abi3-macosx_13_0_x86_64.whl";
++    const WHEEL_BYTES: &[u8] = b"bundled cryptography wheel fixture";
++
++    fn write_manifest(runtime_dir: &Path, filename: &str, platform: &str) -> anyhow::Result<()> {
++        let manifest = serde_json::json!({
++            "schemaVersion": WHEEL_MANIFEST_SCHEMA,
++            "platform": platform,
++            "wheels": [{
++                "distribution": WHEEL_DISTRIBUTION,
++                "version": WHEEL_VERSION,
++                "file": filename,
++                "sha256": format!("{:x}", sha2::Sha256::digest(WHEEL_BYTES)),
++            }],
++        });
++        std::fs::create_dir_all(runtime_dir.join("wheels"))?;
++        std::fs::write(
++            runtime_dir.join("wheels").join("manifest.json"),
++            serde_json::to_vec(&manifest)?,
++        )?;
++        Ok(())
++    }
++
++    #[test]
++    fn packaged_wheel_resolves_to_its_verified_local_file() -> anyhow::Result<()> {
++        let temp = tempfile::tempdir()?;
++        write_manifest(temp.path(), WHEEL_FILE, WHEEL_PLATFORM)?;
++        let wheel = temp.path().join("wheels").join(WHEEL_FILE);
++        std::fs::write(&wheel, WHEEL_BYTES)?;
++        assert_eq!(packaged_wheel_requirement(temp.path())?, wheel);
++        Ok(())
++    }
++
++    #[test]
++    fn missing_manifest_or_wheel_fails_closed() -> anyhow::Result<()> {
++        let temp = tempfile::tempdir()?;
++        let missing_manifest = packaged_wheel_requirement(temp.path()).unwrap_err();
++        assert!(missing_manifest.to_string().contains("wheel manifest"));
++
++        write_manifest(temp.path(), WHEEL_FILE, WHEEL_PLATFORM)?;
++        let missing_wheel = packaged_wheel_requirement(temp.path()).unwrap_err();
++        assert!(missing_wheel
++            .to_string()
++            .contains("cannot read bundled Python wheel at"));
++        Ok(())
++    }
++
++    #[test]
++    fn corrupt_wheel_fails_before_installation() -> anyhow::Result<()> {
++        let temp = tempfile::tempdir()?;
++        write_manifest(temp.path(), WHEEL_FILE, WHEEL_PLATFORM)?;
++        std::fs::write(
++            temp.path().join("wheels").join(WHEEL_FILE),
++            b"corrupt wheel",
++        )?;
++        let error = packaged_wheel_requirement(temp.path()).unwrap_err();
++        assert!(error.to_string().contains("checksum mismatch"));
++        Ok(())
++    }
++
++    #[test]
++    fn manifest_rejects_foreign_platform_and_unsafe_or_mismatched_filenames() -> anyhow::Result<()>
++    {
++        let temp = tempfile::tempdir()?;
++        write_manifest(temp.path(), WHEEL_FILE, "darwin-arm64")?;
++        let platform_error = packaged_wheel_requirement(temp.path()).unwrap_err();
++        assert!(platform_error.to_string().contains("unsupported"));
++
++        for filename in [
++            "../cryptography-50.0.2-cp39-abi3-macosx_13_0_x86_64.whl",
++            "cryptography-50.0.2-../../outside.whl",
++            "cryptography-50.0.2-..\\outside.whl",
++            "cryptography-49.0.0-cp39-abi3-macosx_13_0_x86_64.whl",
++        ] {
++            write_manifest(temp.path(), filename, WHEEL_PLATFORM)?;
++            let error = packaged_wheel_requirement(temp.path()).unwrap_err();
++            assert!(error.to_string().contains("filename or version"));
++        }
++        Ok(())
++    }
++}
+diff --git a/crates/pa-core/src/kernel/bootstrap/venv/runtime_source.rs b/crates/pa-core/src/kernel/bootstrap/venv/runtime_source.rs
+index 7e92a92..0c6f128 100644
+--- a/crates/pa-core/src/kernel/bootstrap/venv/runtime_source.rs
++++ b/crates/pa-core/src/kernel/bootstrap/venv/runtime_source.rs
+@@ -49,7 +49,9 @@ pub(super) fn resolve_runtime_source_dir() -> Option<PathBuf> {
+ /// Content identity of the runtime: a hash of every `rlm/*.py` file, the
+ /// packaged machine library under `src/rlm/machines` (wheel package data:
+ /// machine changes are runtime changes), and `pyproject.toml`, so any
+-/// runtime change invalidates an existing venv. Falls back to the bare
++/// runtime change invalidates an existing venv. Bundled wheel files and their
++/// manifest also participate so dependency updates refresh the environment.
++/// Falls back to the bare
+ /// package name when the runtime resolves to a registry install (no local
+ /// source).
+ ///
+@@ -74,6 +76,7 @@ fn hash_runtime_source(source_dir: &Path) -> anyhow::Result<String> {
+     let mut files = vec![source_dir.join("pyproject.toml")];
+     collect_python_files(&rlm_dir, &mut files)?;
+     collect_package_data_files(&rlm_dir.join("machines"), &mut files)?;
++    collect_package_data_files(&source_dir.join("wheels"), &mut files)?;
+     files.sort();
+     let mut hasher = sha2::Sha256::new();
+     for file in &files {
+@@ -167,4 +170,30 @@ version: 2
+         assert_ne!(bare, after);
+         Ok(())
+     }
++
++    #[test]
++    fn bundled_wheel_changes_invalidate_the_runtime_identity() -> anyhow::Result<()> {
++        let temp = tempfile::tempdir()?;
++        runtime_fixture(temp.path(), "machine")?;
++        let without_wheels = hash_runtime_source(temp.path())?;
++        let wheels = temp.path().join("wheels");
++        std::fs::create_dir(&wheels)?;
++        let manifest = wheels.join("manifest.json");
++        std::fs::write(&manifest, "first wheel identity")?;
++        let with_manifest = hash_runtime_source(temp.path())?;
++        assert_ne!(without_wheels, with_manifest);
++
++        let wheel = wheels.join("cryptography.whl");
++        std::fs::write(&wheel, "first wheel bytes")?;
++        let with_wheel = hash_runtime_source(temp.path())?;
++        assert_ne!(with_manifest, with_wheel);
++
++        std::fs::write(&wheel, "updated wheel bytes")?;
++        let updated_wheel = hash_runtime_source(temp.path())?;
++        assert_ne!(with_wheel, updated_wheel);
++
++        std::fs::write(&manifest, "updated wheel identity")?;
++        assert_ne!(updated_wheel, hash_runtime_source(temp.path())?);
++        Ok(())
++    }
+ }

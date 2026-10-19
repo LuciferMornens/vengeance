@@ -11,6 +11,7 @@
  *   /vengeance-label  {"reqId","entryId","label"?}
  *   /vengeance-subagents {"reqId","method","params"?}
  *   /vengeance-speed  {"reqId","mode"?}   (mode: "standard" | "fast" | "ultrafast")
+ *   /vengeance-system-prompt {"reqId"}
  *
  * `vengeance-subagents` proxies pi-subagents' in-process event-bus RPC (`subagents:rpc:v1:request` →
  * `subagents:rpc:v1:reply:<requestId>`), which an RPC host cannot reach directly. It posts nothing to the
@@ -19,6 +20,7 @@
  *
  * `vengeance-speed` reads the session's response speed (`speed-mode.ts`), or requests `mode` first, and answers with
  * its `SpeedState`.
+ * `vengeance-system-prompt` reads `ctx.getSystemPrompt()` without making a model request.
  *
  * Each handler replies with `ctx.ui.setStatus('__vengeance:<reqId>', JSON)` carrying `{ ok, data | error }`.
  * pi awaits the handler before it answers the `prompt` command, so the reply always precedes that response
@@ -227,6 +229,10 @@ export default function vengeanceBridge(pi: ExtensionAPI): void {
     await ctx.reload()
     return null
   })
+
+  command('vengeance-system-prompt', async (_payload, ctx) => ({
+    text: ctx.getSystemPrompt()
+  }))
 
   command('vengeance-tools', async (payload) => {
     if (payload.op === 'set') {

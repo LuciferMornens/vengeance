@@ -209,7 +209,8 @@ export const BRIDGE_COMMANDS = [
   'vengeance-tools',
   'vengeance-label',
   'vengeance-subagents',
-  'vengeance-speed'
+  'vengeance-speed',
+  'vengeance-system-prompt'
 ] as const
 export type BridgeCommandName = (typeof BRIDGE_COMMANDS)[number]
 
@@ -260,6 +261,7 @@ export type BridgeRequest =
   | { op: 'subagents'; method: SubagentsRpcMethod; params?: Record<string, unknown> }
   /** Read the session's response speed, or request `mode` (Engine 2 maps this onto its native service tier). */
   | { op: 'speed'; mode?: SpeedMode }
+  | { op: 'system-prompt' }
 
 export type BridgeOp = BridgeRequest['op']
 
@@ -312,6 +314,7 @@ export interface BridgeResultMap {
   label: null
   subagents: SubagentsRpcReply
   speed: SpeedState
+  'system-prompt': { text: string }
 }
 
 export type BridgeResult = BridgeResultMap[BridgeOp]

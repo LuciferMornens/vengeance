@@ -4,6 +4,7 @@ mod prime_inference;
 mod resources;
 mod restart;
 mod sessions;
+mod system_prompt;
 mod traces;
 
 use std::collections::HashMap;
@@ -396,6 +397,16 @@ async fn handle_input(mut input: mpsc::Receiver<Input>, bridge: BridgeUi) {
 async fn main() {
     // Provider failures may carry response bodies; neither panics nor errors expose those bodies.
     std::panic::set_hook(Box::new(|_| {}));
+    if std::env::args().any(|value| value == "--system-prompt-default") {
+        let result = json!({
+            "ok": true,
+            "protocol": PROTOCOL_VERSION,
+            "revision": UPSTREAM_REVISION,
+            "result": system_prompt::defaults()
+        });
+        let _ = write_event(&result);
+        return;
+    }
     if std::env::args().any(|value| value == "--session-delete") {
         let result = match tokio::task::spawn_blocking(lineage::run_delete).await {
             Ok(Ok(result)) => json!({ "ok": true, "result": result }),
@@ -469,10 +480,12 @@ async fn main() {
         "resources": true,
         "restartConfig": true,
         "restartCapture": true,
+        "restartSelections": true,
         "sessions": true,
         "sessionLineage": true,
         "sessionDelete": true,
-        "traces": true
+        "traces": true,
+        "systemPromptDefault": true
     });
     if write_event(&metadata).is_err() || std::env::args().any(|value| value == "--version") {
         return;

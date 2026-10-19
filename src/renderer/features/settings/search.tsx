@@ -149,6 +149,14 @@ const JUMPS: JumpEntry[] = [
     keywords: ['security']
   },
   {
+    key: 'instructions.builtIn',
+    section: 'sessions',
+    label: 'System prompt & instructions',
+    description:
+      'Read the native prompt, customize its foundation, or edit global and project guidance.',
+    keywords: ['SYSTEM.md', 'APPEND_SYSTEM.md', 'AGENTS.md', 'CLAUDE.md', 'default', 'restore']
+  },
+  {
     key: 'engine.override',
     section: 'engine',
     label: 'Engine location',

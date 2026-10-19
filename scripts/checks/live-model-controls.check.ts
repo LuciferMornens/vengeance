@@ -31,10 +31,12 @@ interface StoreModule {
       ): Promise<void>
       setThinkingLevel(agentId: string, level: ThinkingLevel): Promise<void>
       refreshCapabilities(agentId: string): Promise<void>
+      refresh(agentId: string): Promise<void>
       applyEvents(events: Map<string, EngineEvent[]>): void
     }
   }
   startAgentEventPump(): void
+  bridge: { reload(agentId: string): Promise<void> }
 }
 
 function model(modelId: string): Model {
@@ -64,11 +66,40 @@ async function settle(): Promise<void> {
   await new Promise<void>((done) => setImmediate(done))
 }
 
+function waitForAgent(
+  store: StoreModule['useAgents'],
+  agentId: string,
+  predicate: (agent: AgentState) => boolean,
+  message: string
+): Promise<void> {
+  const READINESS_TIMEOUT_MS = 2000
+  return new Promise((complete, reject) => {
+    const timeout = setTimeout(() => {
+      unsubscribe()
+      reject(new Error(message))
+    }, READINESS_TIMEOUT_MS)
+    const unsubscribe = store.subscribe((state) => {
+      const agent = state.agents[agentId]
+      if (!agent || !predicate(agent)) return
+      clearTimeout(timeout)
+      unsubscribe()
+      complete()
+    })
+  })
+}
+
 async function fixture() {
   const root = process.cwd()
   const esbuild: typeof import('esbuild') = createRequire(join(root, 'package.json'))('esbuild')
   const bundle = await esbuild.build({
-    entryPoints: [join(root, 'src', 'renderer', 'store', 'agents.ts')],
+    stdin: {
+      contents: `
+        export * from './src/renderer/store/agents';
+        export { bridge } from './src/renderer/lib/bridge';
+      `,
+      resolveDir: root,
+      loader: 'ts'
+    },
     bundle: true,
     format: 'cjs',
     platform: 'node',
@@ -81,10 +112,15 @@ async function fixture() {
   const states = new Map<string, RpcSessionState>()
   const mutations: string[] = []
   const prompts: string[] = []
+  const nativeCommands = new Map<string, string[]>()
   let blockMutation: ReturnType<typeof deferred> | undefined
   let blockState: ReturnType<typeof deferred> | undefined
   let refuseRestart = false
   let failMutation = false
+  let refusedRead: RpcCommand['type'] | undefined
+  let refuseReload = false
+  let blockCommands: ReturnType<typeof deferred> | undefined
+  let blockReload: ReturnType<typeof deferred> | undefined
   const levels = (state: RpcSessionState): ThinkingLevel[] =>
     state.model?.reasoning ? ['off', 'low', 'high'] : ['off']
   const emit = (agentId: string, event: EngineEvent) =>
@@ -129,6 +165,7 @@ async function fixture() {
               bridge: false
             }
             infos.set(agentId, info)
+            nativeCommands.set(agentId, [])
             states.set(agentId, {
               model: model('reasoning'),
               thinkingLevel: 'low',
@@ -150,6 +187,17 @@ async function fixture() {
             states.delete(agentId)
             return
           }
+          if (channel === 'engine:bridge') {
+            const gate = blockReload
+            blockReload = undefined
+            await gate?.promise
+            if (refuseReload) {
+              refuseReload = false
+              throw new Error('Reload refused')
+            }
+            nativeCommands.set(agentId, ['new'])
+            return
+          }
           if (channel === 'engine:restart') {
             if (refuseRestart) throw new Error('Another resident is still busy')
             const info = infos.get(agentId)!
@@ -166,6 +214,15 @@ async function fixture() {
             command: command.type,
             data
           })
+          if (command.type === refusedRead) {
+            refusedRead = undefined
+            return {
+              type: 'response',
+              command: command.type,
+              success: false,
+              error: 'Read refused'
+            }
+          }
           if (command.type === 'get_state') {
             const snapshot = { ...state }
             const gate = blockState
@@ -175,7 +232,13 @@ async function fixture() {
           }
           if (command.type === 'get_available_thinking_levels')
             return response({ levels: levels(state) })
-          if (command.type === 'get_commands') return response({ commands: [] })
+          if (command.type === 'get_commands') {
+            const commands = nativeCommands.get(agentId)!.map((name) => ({ name }))
+            const gate = blockCommands
+            blockCommands = undefined
+            await gate?.promise
+            return response({ commands })
+          }
           if (command.type === 'get_messages') return response({ messages: [] })
           if (command.type === 'get_session_stats') return response({ sessionId: agentId })
           if (command.type === 'prompt') {
@@ -216,6 +279,11 @@ async function fixture() {
     mutations,
     prompts,
     emit,
+    reload: api.bridge.reload,
+    reportStatus(agentId: string, status: AgentInfo['status']) {
+      const info = infos.get(agentId)!
+      listeners.get('engine:status')?.({ agentId, info: { ...info, status } })
+    },
     delayMutation() {
       blockMutation = deferred()
       return blockMutation
@@ -224,11 +292,25 @@ async function fixture() {
       blockState = deferred()
       return blockState
     },
+    delayCommands() {
+      blockCommands = deferred()
+      return blockCommands
+    },
+    delayReload() {
+      blockReload = deferred()
+      return blockReload
+    },
     refuseRestart() {
       refuseRestart = true
     },
     failMutation() {
       failMutation = true
+    },
+    failRead(command: 'get_state' | 'get_commands') {
+      refusedRead = command
+    },
+    refuseReload() {
+      refuseReload = true
     },
     async close() {
       for (const agentId of [...infos.keys()]) await api.useAgents.getState().disposeAgent(agentId)
@@ -328,6 +410,135 @@ await check('a prompt waits for the selected model without blocking other sessio
     await test.close()
   }
 })
+
+await check(
+  'settled model refreshes cannot cancel a restarted native command catalog',
+  async () => {
+    const test = await fixture()
+    try {
+      const agentId = await test.store.getState().createAgent({ cwd: 'project', engine: 'prime' })
+      test.reportStatus(agentId, 'starting')
+      test.reportStatus(agentId, 'ready')
+      const snapshot = waitForAgent(
+        test.store,
+        agentId,
+        (agent) => agent.snapshotRevision > 0,
+        'The native attachment snapshot did not reach the renderer'
+      )
+      test.emit(agentId, {
+        type: 'engine_native_event',
+        engine: 'prime',
+        name: 'session_snapshot',
+        data: { state: test.states.get(agentId), messages: [], steering: [], followUp: [] }
+      })
+      await snapshot
+      const catalog = waitForAgent(
+        test.store,
+        agentId,
+        (agent) => agent.commandsStatus === 'ready',
+        'The settled-model refresh canceled the restarted native command catalog'
+      )
+      test.emit(agentId, { type: 'agent_settled', aborted: false })
+      await catalog
+      assert.equal(test.store.getState().agents[agentId]!.historyLoaded, true)
+    } finally {
+      await test.close()
+    }
+  }
+)
+
+await check(
+  'refresh failures keep only the current generation’s authoritative command catalog',
+  async () => {
+    const test = await fixture()
+    try {
+      const agentId = await test.store.getState().createAgent({ cwd: 'project', engine: 'prime' })
+      const catalog = test.store.getState().agents[agentId]!.commands
+      for (const refresh of ['refreshCapabilities', 'refresh'] as const) {
+        for (const command of ['get_state', 'get_commands'] as const) {
+          test.failRead(command)
+          await assert.rejects(test.store.getState()[refresh](agentId), /Read refused/)
+          const agent = test.store.getState().agents[agentId]!
+          assert.equal(agent.commandsStatus, 'ready')
+          assert.equal(agent.commands, catalog)
+        }
+      }
+      test.reportStatus(agentId, 'starting')
+      test.reportStatus(agentId, 'ready')
+      test.failRead('get_commands')
+      await assert.rejects(test.store.getState().refreshCapabilities(agentId), /Read refused/)
+      assert.equal(test.store.getState().agents[agentId]!.commandsStatus, 'error')
+    } finally {
+      await test.close()
+    }
+  }
+)
+
+await check(
+  'public reload fences stale catalogs and keeps failed new catalogs unknown',
+  async () => {
+    const test = await fixture()
+    const nativeReload = test.delayReload()
+    let staleGate: ReturnType<typeof deferred> | undefined
+    const pending: Promise<unknown>[] = []
+    try {
+      const agentId = await test.store.getState().createAgent({ cwd: 'project', engine: 'pi' })
+      staleGate = test.delayCommands()
+      const stale = test.store.getState().refreshCapabilities(agentId)
+      pending.push(stale.catch(() => undefined))
+      await settle()
+      const reloading = test.reload(agentId)
+      const joined = test.reload(agentId)
+      const rejected = Promise.all([
+        assert.rejects(reloading, /Read refused/),
+        assert.rejects(joined, /Read refused/)
+      ])
+      pending.push(rejected.catch(() => undefined))
+      await settle()
+      assert.equal(test.store.getState().agents[agentId]!.commandsStatus, 'loading')
+      await test.store.getState().refreshCapabilities(agentId)
+      assert.equal(test.store.getState().agents[agentId]!.commandsStatus, 'loading')
+      test.failRead('get_commands')
+      nativeReload.release()
+      await rejected
+      assert.equal(test.store.getState().agents[agentId]!.commandsStatus, 'error')
+      staleGate.release()
+      await stale
+      assert.equal(test.store.getState().agents[agentId]!.commandsStatus, 'error')
+      await test.store.getState().refreshCapabilities(agentId)
+      const agent = test.store.getState().agents[agentId]!
+      assert.equal(agent.commandsStatus, 'ready')
+      assert.equal(agent.commands[0]?.name, 'new')
+    } finally {
+      staleGate?.release()
+      nativeReload.release()
+      await Promise.allSettled(pending)
+      await test.close()
+    }
+  }
+)
+
+await check(
+  'failed reload keeps its native error and releases catalog mutation resources',
+  async () => {
+    const test = await fixture()
+    try {
+      const agentId = await test.store.getState().createAgent({ cwd: 'project', engine: 'pi' })
+      test.refuseReload()
+      test.failRead('get_commands')
+      await assert.rejects(test.reload(agentId), /Reload refused/)
+      assert.equal(test.store.getState().agents[agentId]!.commandsStatus, 'error')
+      await test.reload(agentId)
+      const agent = test.store.getState().agents[agentId]!
+      assert.equal(agent.commandsStatus, 'ready')
+      assert.equal(agent.commands[0]?.name, 'new')
+      await test.store.getState().disposeAgent(agentId)
+      await assert.rejects(test.reload(agentId), /This session is closed/)
+    } finally {
+      await test.close()
+    }
+  }
+)
 
 await check('refused restart preserves the running session and rejects to its caller', async () => {
   const test = await fixture()

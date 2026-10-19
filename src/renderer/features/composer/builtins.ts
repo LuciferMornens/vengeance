@@ -26,7 +26,7 @@ import {
   Zap,
   type LucideIcon
 } from 'lucide-react'
-import type { EngineCapabilities, EngineId } from '@shared/api/engine'
+import { ENGINE_LABELS, type EngineCapabilities, type EngineId } from '@shared/api/engine'
 import type { RpcCommandType, ThinkingLevel } from '@shared/engine-types'
 import type { SettingsSectionId } from '@shared/api/settings-schema'
 import { hasAction, runAction } from '../../lib/actions'
@@ -337,6 +337,33 @@ export function isBuiltinAvailable(command: BuiltinCommand, engine: EngineId): b
   if (required && !supportsEngineCommand(engine, required)) return false
   const capabilities = engineDescriptor(engine)?.capabilities
   return capabilities ? supportsBuiltinCapability(canonical, capabilities) : engine === 'pi'
+}
+
+export function resolveBuiltinDispatch(
+  agentId: string,
+  command: BuiltinCommand
+): 'app' | 'native' | 'blocked' {
+  const agent = useAgents.getState().agents[agentId]
+  if (agent?.commandsStatus !== 'ready') {
+    toast({
+      level: 'info',
+      title:
+        agent?.commandsStatus === 'error'
+          ? 'Commands could not be loaded'
+          : 'Commands are still loading',
+      description: 'Your draft has been kept.'
+    })
+    return 'blocked'
+  }
+  if (agent.commands.some((native) => native.name === command.name)) return 'native'
+  if (!isBuiltinAvailable(command, agent.info.engine)) {
+    toast({
+      level: 'info',
+      title: `/${command.name} is unavailable in ${ENGINE_LABELS[agent.info.engine]}`
+    })
+    return 'blocked'
+  }
+  return 'app'
 }
 
 /** The built-ins offered to a session of `engine`; `bridge`: the session has the Vengeance bridge. */

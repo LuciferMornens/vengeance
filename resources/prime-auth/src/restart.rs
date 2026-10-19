@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -6,6 +7,7 @@ use anyhow::{bail, Context, Result};
 use pa_daemon::descriptor::{
     descriptor_dir, validate_descriptor, write_file_atomic, WorkerDescriptor,
 };
+use pa_daemon::lease::{get_process_start_id, is_process_alive};
 use pa_types::daemon::{DurableDaemonCreateCommand, UpdateRoster, UPDATE_ROSTER_FORMAT_VERSION};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -47,6 +49,17 @@ struct Request {
     backup_dir: PathBuf,
     #[serde(default)]
     config_patch: Map<String, Value>,
+    #[serde(default)]
+    resident_selections: BTreeMap<String, ResidentSelection>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ResidentSelection {
+    session_path: PathBuf,
+    provider: String,
+    model: String,
+    thinking: String,
 }
 
 #[derive(Deserialize)]
@@ -162,7 +175,7 @@ pub fn run() -> Result<Value> {
         return rollback(&request);
     }
     if matches!(request.operation, Operation::Workers) {
-        return Ok(json!({ "workerPids": worker_pids(&read_workers(&request)?) }));
+        return Ok(json!({ "workerPids": worker_pids(&read_workers(&request)?)? }));
     }
     validate_patch(&request.config_patch)?;
     if matches!(request.operation, Operation::Patch)
@@ -171,16 +184,8 @@ pub fn run() -> Result<Value> {
         rollback(&request)?;
     }
     let files = load_files(&request)?;
-    let mut descriptor_create = files.descriptor.create_command.clone();
-    patch_create(&mut descriptor_create, &request.config_patch)?;
-    let mut roster_create: DurableDaemonCreateCommand = serde_json::from_value(
-        files.roster.sessions[files.session_index]
-            .runtime_config
-            .get("create")
-            .cloned()
-            .context("Missing native create configuration")?,
-    )?;
-    patch_create(&mut roster_create, &request.config_patch)?;
+    validate_resident_selections(&request, &files)?;
+    prepare_resident_updates(&request, &files)?;
     let result = json!({
         "descriptorPath": files.descriptor_path,
         "rosterPath": request.roster_path,
@@ -252,6 +257,7 @@ fn validate_roster(request: &Request, roster: &UpdateRoster) -> Result<usize> {
 fn read_workers(request: &Request) -> Result<Vec<WorkerFile>> {
     let directory = descriptor_dir(&request.agent_dir, &request.socket_path);
     let mut descriptors = Vec::new();
+    let mut worker_ids = std::collections::BTreeSet::new();
     let entries = match fs::read_dir(&directory) {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(descriptors),
@@ -267,6 +273,11 @@ fn read_workers(request: &Request) -> Result<Vec<WorkerFile>> {
         let descriptor: WorkerDescriptor = serde_json::from_str(&text)
             .context("A worker descriptor could not be inspected safely")?;
         validate_descriptor(&descriptor, &request.socket_path)?;
+        if path.file_stem().and_then(|name| name.to_str()) != Some(&descriptor.worker_id)
+            || !worker_ids.insert(descriptor.worker_id.clone())
+        {
+            bail!("The durable worker path or identity is not unique");
+        }
         descriptors.push(WorkerFile {
             path,
             descriptor,
@@ -276,11 +287,41 @@ fn read_workers(request: &Request) -> Result<Vec<WorkerFile>> {
     Ok(descriptors)
 }
 
-fn worker_pids(workers: &[WorkerFile]) -> Vec<u64> {
-    let mut pids: Vec<_> = workers.iter().map(|worker| worker.descriptor.pid).collect();
+fn worker_owner_alive(descriptor: &WorkerDescriptor) -> Result<bool> {
+    let pid = u32::try_from(descriptor.pid).context("The worker process identity is invalid")?;
+    if !is_process_alive(pid)? {
+        return Ok(false);
+    }
+    let expected = descriptor
+        .process_start_id
+        .as_deref()
+        .context("The worker process start identity is unavailable")?;
+    let current = get_process_start_id(pid)
+        .context("The worker process start identity could not be verified")?;
+    let (kind, recorded) = expected
+        .split_once(':')
+        .context("The worker process start identity is invalid")?;
+    if !current.starts_with(&format!("{kind}:"))
+        || recorded.is_empty()
+        || !matches!(kind, "win" | "proc" | "ps")
+        || (matches!(kind, "win" | "proc")
+            && !recorded.bytes().all(|character| character.is_ascii_digit()))
+    {
+        bail!("The worker process start identity cannot be compared safely");
+    }
+    Ok(expected == current)
+}
+
+fn worker_pids(workers: &[WorkerFile]) -> Result<Vec<u64>> {
+    let mut pids = Vec::new();
+    for worker in workers {
+        if worker_owner_alive(&worker.descriptor)? {
+            pids.push(worker.descriptor.pid);
+        }
+    }
     pids.sort_unstable();
     pids.dedup();
-    pids
+    Ok(pids)
 }
 
 fn load_files(request: &Request) -> Result<RestartFiles> {
@@ -315,7 +356,7 @@ fn load_files(request: &Request) -> Result<RestartFiles> {
         roster,
         roster_text,
         session_index,
-        worker_pids: worker_pids(&workers),
+        worker_pids: worker_pids(&workers)?,
         workers,
     })
 }
@@ -378,42 +419,123 @@ fn supervisor_config(create: &DurableDaemonCreateCommand) -> Map<String, Value> 
     config
 }
 
-fn patch(request: &Request, mut files: RestartFiles) -> Result<()> {
-    patch_create(&mut files.descriptor.create_command, &request.config_patch)?;
-    let session = &mut files.roster.sessions[files.session_index];
-    let runtime = session
-        .runtime_config
-        .as_object_mut()
-        .context("Missing runtime configuration")?;
-    let mut create: DurableDaemonCreateCommand = serde_json::from_value(
-        runtime
-            .get("create")
-            .cloned()
-            .context("Missing native create configuration")?,
-    )?;
-    patch_create(&mut create, &request.config_patch)?;
-
-    // Workers replay flat durable fields; supervisor fallback creation consumes nested config.
-    let fallback_config = supervisor_config(&create);
-    // Typed create edits are overlaid on the raw envelope so future queue and journal fields survive.
-    let mut descriptor_value: Value = serde_json::from_str(&files.descriptor_text)?;
-    let descriptor_create = descriptor_value["createCommand"]
-        .as_object_mut()
-        .context("Missing create command")?;
-    apply_fields(descriptor_create, &request.config_patch);
-    if let Some(config) = files.descriptor.create_command.rest.get("config") {
-        descriptor_create.insert("config".to_string(), config.clone());
+fn validate_resident_selections(request: &Request, files: &RestartFiles) -> Result<()> {
+    if request.resident_selections.len() != files.roster.sessions.len() {
+        bail!("The live selections do not identify every restart resident");
     }
-    let mut roster_value: Value = serde_json::from_str(&files.roster_text)?;
-    let roster_create = roster_value["sessions"][files.session_index]["runtime_config"]["create"]
+    let mut identities = std::collections::BTreeSet::new();
+    for session in &files.roster.sessions {
+        if !identities.insert(&session.active_session_id) {
+            bail!("The restart snapshot contains duplicate resident identities");
+        }
+        let selection = request
+            .resident_selections
+            .get(&session.active_session_id)
+            .context("A restart resident has no captured live selection")?;
+        let workers: Vec<_> = files
+            .workers
+            .iter()
+            .filter(|worker| worker.descriptor.root_active_session_id == session.active_session_id)
+            .collect();
+        if workers.len() != 1
+            || !workers[0]
+                .descriptor
+                .session_file
+                .as_deref()
+                .is_some_and(|path| same_path(Path::new(path), Path::new(&session.session_file)))
+            || !selection.session_path.is_absolute()
+            || !same_path(&selection.session_path, Path::new(&session.session_file))
+            || selection.provider.trim().is_empty()
+            || selection.model.trim().is_empty()
+            || !matches!(
+                selection.thinking.as_str(),
+                "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+            )
+            || !files.roster.workers.iter().any(|worker| {
+                worker.worker_id == workers[0].descriptor.worker_id
+                    && worker.sessions.contains(&session.session_id)
+            })
+        {
+            bail!("A captured live selection does not match its restart resident");
+        }
+    }
+    for worker in &files.workers {
+        if !identities.contains(&worker.descriptor.root_active_session_id)
+            && (worker
+                .descriptor
+                .stop_requested_at
+                .as_deref()
+                .is_none_or(|timestamp| timestamp.trim().is_empty())
+                || worker_owner_alive(&worker.descriptor)?)
+        {
+            bail!("A worker outside the restart snapshot has not completed its stop");
+        }
+    }
+    Ok(())
+}
+
+fn patch_create_value(create: &mut Value, patch: &Map<String, Value>) -> Result<()> {
+    let mut typed: DurableDaemonCreateCommand = serde_json::from_value(create.clone())?;
+    patch_create(&mut typed, patch)?;
+    let raw = create
         .as_object_mut()
-        .context("Missing roster create command")?;
-    apply_fields(roster_create, &request.config_patch);
-    roster_create.insert("config".to_string(), Value::Object(fallback_config));
-    let descriptor_next = serde_json::to_string_pretty(&descriptor_value)?;
-    let roster_next = serde_json::to_string_pretty(&roster_value)?;
-    let updated = write_file_atomic(&files.descriptor_path, &descriptor_next)
-        .and_then(|()| write_file_atomic(&request.roster_path, &roster_next));
+        .context("Missing native create configuration")?;
+    apply_fields(raw, patch);
+    // Workers replay flat fields; supervisor fallback creation consumes nested config.
+    raw.insert(
+        "config".to_string(),
+        Value::Object(supervisor_config(&typed)),
+    );
+    Ok(())
+}
+
+fn prepare_resident_updates(
+    request: &Request,
+    files: &RestartFiles,
+) -> Result<(Vec<(PathBuf, String)>, String)> {
+    let mut roster_value: Value = serde_json::from_str(&files.roster_text)?;
+    let mut updates = Vec::new();
+    for (index, session) in files.roster.sessions.iter().enumerate() {
+        let selection = request
+            .resident_selections
+            .get(&session.active_session_id)
+            .context("A restart resident has no captured live selection")?;
+        let mut patch = Map::from_iter([
+            ("provider".to_string(), json!(selection.provider)),
+            ("model".to_string(), json!(selection.model)),
+            ("thinking".to_string(), json!(selection.thinking)),
+        ]);
+        if index == files.session_index {
+            patch.extend(request.config_patch.clone());
+        }
+        let worker = files
+            .workers
+            .iter()
+            .find(|worker| worker.descriptor.root_active_session_id == session.active_session_id)
+            .context("Missing resident worker descriptor")?;
+        let mut descriptor_value: Value = serde_json::from_str(&worker.text)?;
+        // Edit raw envelopes so future queue, journal, and configuration fields survive.
+        patch_create_value(&mut descriptor_value["createCommand"], &patch)?;
+        patch_create_value(
+            &mut roster_value["sessions"][index]["runtime_config"]["create"],
+            &patch,
+        )?;
+        updates.push((
+            worker.path.clone(),
+            serde_json::to_string_pretty(&descriptor_value)?,
+        ));
+    }
+    Ok((updates, serde_json::to_string_pretty(&roster_value)?))
+}
+
+fn patch(request: &Request, files: RestartFiles) -> Result<()> {
+    let (updates, roster_next) = prepare_resident_updates(request, &files)?;
+    let updated = (|| {
+        for (path, text) in &updates {
+            write_file_atomic(path, text)?;
+        }
+        write_file_atomic(&request.roster_path, &roster_next)
+    })();
     if let Err(error) = updated {
         rollback(request).context("Restart patch failed and its backup could not be restored")?;
         return Err(error);

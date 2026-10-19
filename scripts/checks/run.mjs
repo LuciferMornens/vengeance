@@ -94,6 +94,14 @@ if (pi) {
 }
 
 console.log('▶ checks')
+for (const script of ['native-kernel.mjs', 'native-macho.mjs', 'prime-runtime-wheels.mjs']) {
+  try {
+    await import(pathToFileURL(join(here, script)).href)
+  } catch (error) {
+    failed++
+    console.error(`  ✗ ${script}\n${error.stack ?? error}`)
+  }
+}
 const files = (await readdir(here)).filter((f) => f.endsWith('.check.ts')).sort()
 const entry = `${files.map((f) => `console.log('• ${f}')\nawait import('./${f}')`).join('\n')}
 import { failures } from './harness.ts'

@@ -22,14 +22,20 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 `engines.lock.json` is the source of truth. Current stable bases are pi `v1.3.0` at
 `71023aec1546d6d677a65669c5665c0927ce0dd0` and Prime `v0.10.0` at
 `763094e1b6a7c17450ee8399b06cda1853847ca5`. The builds identify as `1.3.0+vengeance.2` and
-`0.10.0+vengeance.10`. Never reuse a Vengeance build version for different shipped behavior.
+`0.10.0+vengeance.12`. Never reuse a Vengeance build version for different shipped behavior.
 
-The current Prime source comparison and patch decisions are recorded in
-[PRIME-STABLE-AUDIT-2026-10-16.md](docs/PRIME-STABLE-AUDIT-2026-10-16.md).
+The current stable-release verification and Prime patch decisions are recorded in
+[ENGINE-STABLE-AUDIT-2026-10-18.md](docs/ENGINE-STABLE-AUDIT-2026-10-18.md), with the preceding
+source comparison in [PRIME-STABLE-AUDIT-2026-10-16.md](docs/PRIME-STABLE-AUDIT-2026-10-16.md).
 The [pi patch guide](patches/pi/README.md) records the 1.3.0 reconciliation and retired catalog
 fallback. The [14 October audit](docs/ENGINE-AUDIT-2026-10-14.md) records earlier integration
 evidence and gaps. Engine 2 settings preservation and rustls maintenance are identified upstream
 backports; its native base remains the latest stable release.
+
+The [prompt and restart qualification report](docs/ENGINE-PROMPTS-QUALIFICATION-2026-10-18.md) records
+the current reconstructed artifacts and completed or pending gates. The
+[navigation performance report](docs/PERFORMANCE-FIRST-NAVIGATION-2026-10-18.md) keeps measured renderer
+builds and native payloads explicit; its timings do not replace engine or packaged qualification.
 
 [OpenAI native compaction](docs/openai-native-compaction.md) records the protocol study, checkpoint
 compatibility policy and regressions for Prime patch `0015` and the Engine bridge. Requalify both
@@ -72,17 +78,19 @@ Rust/Cargo 1.98.1, which `rust-toolchain.toml` selects, with the host's Rust tar
   installing 1.98.1, so `rust-toolchain.toml` resolves to it), a MinGW-w64 `gcc` and GNU `objdump` on
   PATH (`OBJDUMP` can select it), and Git Bash as the development shell.
 - **macOS arm64 and x64:** the Xcode Command Line Tools for clang, `codesign` and `otool`. The builders
-  set `MACOSX_DEPLOYMENT_TARGET=13.0` and sign ad-hoc; no Apple Developer account is needed.
+  set `MACOSX_DEPLOYMENT_TARGET=13.0` and sign ad-hoc; no Apple Developer account is needed. Intel
+  builds also use system Perl and make for the runtime wheel described below.
 - **Linux x64 and arm64:** `build-essential`, binutils (`objdump`) and Python 3. Release builds run in
   an Ubuntu 22.04 container for the glibc 2.35 baseline. On a newer distribution the glibc check fails;
   build in that container, or set `VENGEANCE_GLIBC_BASELINE=host` for engines used only on that machine.
   Packaging also needs `rpmbuild` and `bsdtar` (`rpm` and `libarchive-tools` on Debian and Ubuntu).
 
 Users need none of these to load the engines: pi uses Electron's Node; Prime includes its Python kernel
-package, skills and catalogs. Native kernel provisioning and tools may still acquire their own language
-environments/dependencies when first used. Package installation and developer tools keep their native
-prerequisites, such as npm, Git or Bash; on macOS and Linux the app finds them through the login shell's
-environment (SPEC §2.4).
+package, skills and catalogs. Engine 2's first kernel setup needs uv and network access to acquire Python
+and dependencies. Intel macOS uses the bundled cryptography wheel, so users need no Rust, C or OpenSSL
+toolchain for kernel setup. Package installation and developer tools keep their native prerequisites,
+such as npm, Git or Bash; on macOS and Linux the app finds them through the login shell's environment
+(SPEC §2.4).
 `VENGEANCE_NATIVE_BUILD_JOBS=1` limits Engine 2 and helper build concurrency on smaller machines;
 the default is four. Run native qualification and package builds serially when memory is limited.
 
@@ -104,6 +112,43 @@ builders, helper source and notices are committed.
 Runtime cache folders are immutable per payload. Keep old Engine 2 caches while resident processes or
 recovery references use them. App installers can replace their own resources without deleting those
 residents' executable files. Validate transitions on isolated session copies before releasing an update.
+
+### Intel macOS Python runtime wheel
+
+Prime build `.12` adds temporary patch `0023` and a source-built cryptography `50.0.2` wheel for
+packaged Intel macOS runtimes. The current dependency otherwise falls back to a source build on that
+platform. Keep the current cryptography security fixes rather than downgrading to an older release
+with an Intel wheel. The native upstream base and account, session and helper protocol formats are
+unchanged; the lock now lists 23 ordered Prime patches.
+
+`prime.runtimeWheels.darwin-x64` in `engines.lock.json` pins source URLs and SHA-256 values for
+cryptography, static OpenSSL `4.0.3`, CPython `3.11.17` and every Python build dependency.
+`scripts/engines/build-prime-wheels.mjs` verifies those downloads and builds on native Intel macOS
+with the locked Rust toolchain, Xcode tools, Perl and make. It checks wheel paths and RECORD hashes,
+x86_64 Mach-O architecture, the macOS 13 deployment target and system-only dynamic dependencies;
+then it ad-hoc signs the extension, updates RECORD and smoke-tests cryptography, OpenSSL, AES-GCM,
+Ed25519 and hashing. The wheel, input/output receipt and source/Rust license notices ship under
+`prime-agent-runtime/wheels` before the complete payload inventory is generated.
+
+That directory's `manifest.json` records schema version 1, platform `darwin-x64`, and the wheel's
+distribution, version, safe filename and SHA-256. Packaged Vengeance Intel builds verify the manifest
+and wheel before accepting even a cached kernel environment, then give uv the verified local wheel
+as an explicit requirement. Missing or corrupt wheel data fails setup. All wheel-directory contents
+contribute to runtime identity so an old ready environment refreshes when the payload changes.
+Source checkouts, upstream developer builds and other platforms retain native dependency resolution.
+
+Rebuild Engine 2 and its helper after changing these inputs. Requalify wheel metadata, signatures,
+architecture, minimum OS, dynamic dependencies and notices, then the actual loaded cryptography and
+OpenSSL versions in an isolated packaged kernel. Repeat the official `.10`-to-`.12` upgrade with
+genuine old kernel state, no candidate bootstrap overrides, and unchanged baseline package inventory.
+Qualify the native Intel build, kernel and upgrade on Intel hardware; source checks alone do not
+establish those results. Record actual output hashes in the build and release receipts.
+
+On every upstream or dependency update, review current cryptography/OpenSSL security releases and
+official Intel wheel availability, refresh the source/checksum locks, and rerun these gates. Retire
+`0023` when a supported upstream stable release provides equivalent verified bundled-wheel support,
+or current official Intel wheels make it unnecessary, and packaged bootstrap plus cached-kernel
+upgrade regressions pass without the patch. See the [native patch guide](patches/prime-agent/README.md).
 
 ## Platforms
 
@@ -160,17 +205,70 @@ a key of their inputs. Its `test` job restores exactly that key on the plain run
 screenshots. `.github/workflows/release.yml` runs as a dry run on pull requests that touch engines,
 patches, the helper, packaging, toolchain pins or the workflow, and on manual dispatch. Each of the five
 platforms then builds from a clean runner, packages, passes the baked-feed check, the GLIBC gate (Linux)
-and signature, zip and dmg verification (macOS), and runs `scripts/qa/engines/packaged.qa.mjs` against the
-QA app that `node scripts/dist-qa.mjs --dir` prints. The deb is install-tested on both Linux
+and signature, zip and dmg verification (macOS), and runs
+`scripts/qa/engines/platform-qualification.mjs` against the QA app that
+`node scripts/dist-qa.mjs --dir` prints. This runner executes nine suites serially against the packaged
+application: packaged, integration, model isolation, system prompts, restart safety, Stop/compaction,
+bash queues, saved-session recovery and resident closure. Each suite uses isolated accounts and local
+providers; a smoke or version probe alone does not replace this matrix. The deb is install-tested on both Linux
 architectures and the pacman package in an Arch container.
 
+On macOS arm64 and x64, `scripts/qa/engines/background-apps.qa.mjs` additionally observes native
+application activation policies while the packaged app exercises Engine RPC, SDK/provider hosts,
+CLI commands, both engines and its normal-mode login-shell probe. It uses temporary accounts and
+retains actual desktop PNGs, observed process identities and a red/green witness. The witness must
+detect the previous main-executable child behavior before the corrected helper path can pass.
+Inspect the desktop captures as well as the OS observations; page screenshots cannot prove that
+background activity stays out of the Dock. The main Vengeance app must remain a regular application.
+
+For 0.3.3, the macOS arm64/x64 and Linux arm64/x64 release runners then qualify the official
+same-platform 0.3.2 Engine 2 package (`0.10.0+vengeance.10`) against the final packaged `.12` candidate.
+`scripts/qa/engines/release-baseline.mjs` pins both the public release's `SHA256SUMS` and each archive's
+SHA-256, verifies the complete extracted native inventories and macOS app signature, and emits
+`release-baseline.json` plus `release-baseline-env.json`. It never launches the production app.
+The complete extracted package remains in temporary storage for the upgrade suites and diagnosis.
+Pass the absolute environment JSON path as `QA_RELEASE_BASELINE_ENV` with `QA_PLATFORM_GROUP=upgrade`
+to `platform-qualification.mjs`. This group runs `candidate-transition.qa.mjs` and
+`resident-upgrade.qa.mjs` serially against `QA_PACKAGED_EXE`, with receipts identifying the baseline,
+candidate and actually loaded packaged resources. Retain both the loader and suite reports.
+
+This upgrade group follows the nine core suites and macOS visibility gate, before navigation
+benchmarking. Windows's `.10` to `.11` native transition is covered by the retained PR qualification
+report; that historical evidence does not qualify `.12`. The Intel wheel patch changes no Windows
+dependency resolution. pi is `1.3.0+vengeance.2` in both 0.3.2 and 0.3.3. Its historical 1.2 to 1.3
+transition fixture is not used as this release's upgrade gate.
+
+Each of the five release runners then runs
+`node scripts/perf/first-navigation.mjs --label release-<platform> --runs 3` against the completed
+built app. Upload the JSON, CPU profiles and PNGs from `.shots/perf/first-navigation`, including
+source-bundle and native-payload hashes. This harness does not support `QA_PACKAGED_EXE`; its evidence
+is separate from the packaged matrix. A passing current-candidate run does not establish an improvement
+over an unmeasured platform baseline, and Windows before/after timings do not transfer to other hosts.
+
 Treat those runs, their logs and uploaded screenshots as each platform's evidence and record them with
-the platform's payload and package hashes. A Windows run never qualifies another platform. The native
-workspace suites below and the transition and resident-upgrade suites are not part of CI; run them on a
-host of the affected platform when a change touches platform-specific native behavior. Vengeance had no
-macOS or Linux package before 0.3.0, so those platforms have no retained baseline: their
-executable-transition and resident-upgrade qualification starts with the release after it, using the
-retained 0.3.0 packages as the baseline.
+the platform's payload and package hashes. A Windows run never qualifies another platform. The release
+workflow runs the two upgrade suites above on macOS and Linux; ordinary `ci.yml` does not. Native
+workspace suites and other transition matrices remain separate gates on a host of the affected
+platform when native behavior changes. Vengeance had no
+macOS or Linux package before 0.3.0. Their executable-transition and resident-upgrade suites require
+a retained package of the same platform; 0.3.0 is the earliest possible release baseline. Record the
+actual baseline identity rather than substituting a Windows package or an unbuilt source revision.
+
+### Electron's macOS background runtime
+
+`src/main/electron-node.ts` centralizes Electron-as-Node executable selection. Windows and Linux use
+`process.execPath`. On macOS, the pinned Electron 44.7.0 exposes an internal `process.helperExecPath`
+property outside its public TypeScript declarations. The app validates that typed boundary and uses
+the executable helper from the Electron bundle, whose signed `LSUIElement` identity keeps background
+Node work out of the Dock. Missing, invalid or unavailable helper paths fail closed. Do not fall back
+to the main app executable on macOS or hide the main app's Dock icon to compensate. Explicit custom
+system Node locations keep their existing selection behavior.
+
+This is an app runtime compatibility boundary, not a native engine patch. Requalify it whenever Electron
+changes: verify the internal property and executable's availability, helper bundle identity and signature,
+`LSUIElement` behavior, Engine RPC/SDK/provider/CLI operation, and the login-shell environment probe.
+Repeat the packaged activation-policy and desktop-capture gate on both macOS architectures. Keep the
+engine patch series unchanged for fixes that belong to this app-owned launch boundary.
 
 ## Adopting an upstream release
 
@@ -201,6 +299,17 @@ retained 0.3.0 packages as the baseline.
    and restart capture/configuration. Follow `resources/prime-auth/README.md` when updating the helper's
    dependencies; both auth and restart revision consumers must agree. A helper handshake is not an
    engine/helper compatibility check. Test the supported engine/helper combinations explicitly.
+   Restart requires helper capabilities `restartConfig`, `restartCapture` and `restartSelections`
+   before native preparation. Once the daemon reaches `Prepared`, its mutation fence protects
+   `get_connection_state` capture of every resident's provider, model and actual thinking level.
+   The helper validates complete, unique roster/worker identities, paths and all descriptor/roster
+   create envelopes before commit. It writes each captured selection to flat and nested create fields,
+   then overlays explicit target configuration. Failed-successor recovery restores the raw backups,
+   reapplies the checkpointed selections with an empty target patch and launches the prior engine.
+   Keep those backups intact. Qualify changed target and idle-peer selections across providers, queued
+   explicit overrides, malformed peer creates and failed-successor rollback through
+   `scripts/checks/prime-restart-native.mjs`, `scripts/checks/prime-restart-isolation.mjs` and
+   `scripts/checks/prime-adapter-real.mjs`.
    Prime can report `session_already_active` while a revived worker holds the file lease but its
    supervisor has not registered that identity. The app retries only the corresponding unknown-session
    attach, within a 30-second retry window, without creating another worker or changing the saved file. Qualify
@@ -254,9 +363,9 @@ retained 0.3.0 packages as the baseline.
      ChatGPT can echo `default` for a faster request: native billing follows the requested tier.
      An explicit provider tier refusal resets the preference to Standard and displays a notice;
      rate limits and unrelated provider errors do not change it.
-   - Engine 2 restart configuration carries the live model and thinking level unless launch options
-     explicitly change them. Qualify model changes followed by restart, not only unchanged launch
-     selections or tier serialization.
+   - Engine 2 restart configuration carries every resident's live provider, model and thinking level;
+     explicit launch changes override only the target. Qualify model changes followed by restart,
+     including idle peers and rollback, not only unchanged launch selections or tier serialization.
    - pi's own compaction summary request bypasses `before_provider_request`, so it runs at standard speed
      (a documented limitation); the bridge's native compaction checkpoint applies the speed itself.
    - ChatGPT model catalog (`resources/bridge/speed-mode-core.ts`): `GET <baseUrl>/codex/models?client_version=`
@@ -289,6 +398,8 @@ sign-in testing only with explicit user authorization; report coverage gaps rath
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Both engines, configuration and account isolation                   | `scripts/qa/engines/integration.qa.mjs`, `scripts/qa/engines/updates.qa.mjs`, `scripts/qa/settings/engine-selection.qa.mjs`                                        |
 | Model/reasoning changes and restart notices                         | `scripts/qa/engines/restart-notices.qa.mjs`, `scripts/qa/engines/candidate-controls.qa.mjs`                                                                        |
+| Active-work restart refusal and deferred restart admission          | `scripts/checks/engine-restart.check.ts`, `scripts/qa/engines/restart-safety.qa.mjs`                                                                               |
+| Native prompt inspection, scoped edits and explicit application     | `scripts/qa/settings/system-prompts.qa.mjs`, `scripts/shots/system-prompts.mjs`; helper `system_prompt` tests                                                      |
 | Parent/child model isolation and concurrent settings preservation   | `scripts/qa/engines/model-isolation.qa.mjs`; native `model_isolation`, settings persistence and `settings_mcp_save` regressions                                    |
 | Image capabilities, live model switches and tool/image delivery     | `scripts/qa/engines/image-capabilities.qa.mjs`; native model-switch and prompt regressions                                                                         |
 | Response speed, subscription entitlement and native tier transport  | `scripts/qa/engines/speed-mode-engine2.qa.mjs`, `speed-mode.qa.mjs`, `speed-mode-subscriptions.qa.mjs`; native `service_tiers` and `service_tiers_transport` tests |
@@ -296,7 +407,11 @@ sign-in testing only with explicit user authorization; report coverage gaps rath
 | Old history, cross-workspace recovery and executable transition     | `scripts/qa/engines/session-recovery.qa.mjs`, `scripts/qa/engines/candidate-transition.qa.mjs`                                                                     |
 | Mixed-version resident attachment and Close tab versus Stop session | `scripts/qa/engines/resident-upgrade.qa.mjs`, `scripts/qa/engines/resident-close.qa.mjs`; selected-state and transport regressions                                 |
 | Packaged app, external bridge and native helper                     | `scripts/qa/engines/packaged.qa.mjs`, `scripts/checks/prime-auth-native.mjs`, `scripts/checks/prime-auth-oauth.mjs`                                                |
+| Packaged native-engine matrix on all five platforms                 | `scripts/qa/engines/platform-qualification.mjs`; nine serial suites against the final packaged QA app                                                              |
+| Official same-platform Engine 2 release upgrade on macOS and Linux  | `scripts/qa/engines/release-baseline.mjs`, then `platform-qualification.mjs` with `QA_PLATFORM_GROUP=upgrade` and its verified `QA_RELEASE_BASELINE_ENV`           |
+| macOS background application identity and Dock behavior             | `scripts/qa/engines/background-apps.qa.mjs`; OS activation policies, normal-mode shell probe, desktop PNGs and red/green witness on arm64 and x64                  |
 | Scale and lifecycle retention when those contracts change           | `scripts/qa/performance/session-listing.qa.mjs`, `scripts/qa/performance/session-churn.qa.mjs`, `scripts/qa/performance/long-tools.qa.mjs`                         |
+| Process-cold launch and first conversation navigation               | `scripts/perf/first-navigation.mjs`; both native engines, rich saved histories, frame gaps, CPU profiles and rendered syntax verification                          |
 | Engine 2 native long-history activation and retention               | `scripts/qa/performance/prime-long-history.qa.mjs`; public native writer, cold/resident opening, cached workspace switching and frame/heap bounds                  |
 | Mixed-engine workspace scale and hidden-workspace navigation        | `scripts/qa/performance/workspace-scale.qa.mjs`; full 8,300-history, 65-workspace corpus                                                                           |
 | Engine stable upgrade and recovery on an isolated copy              | `scripts/qa/engines/pi-transition.qa.mjs`; retain a complete baseline package with `QA_PI_BASELINE_PACKAGE`                                                        |
@@ -348,6 +463,21 @@ Git Bash utilities and a Python interpreter are native test prerequisites on Win
 Linux the pi runner uses the system `bash`.
 `QA_PI_SOURCE` and `QA_PRIME_SOURCE` select an authoring checkout while
 developing a patch; release qualification must also reconstruct and build the exported patch series.
+
+On Windows, cargo-fmt's single invocation can exceed the command-line limit after canonicalizing all
+workspace targets. The Prime runner checks each metadata-discovered package and recursively declared
+path dependency separately, with the same formatter and checks; it reports package and target counts.
+For native qualification on a memory-limited host, omit debug symbols and bound test concurrency:
+
+```sh
+CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 RUST_TEST_THREADS=4 \
+  node scripts/checks/prime-workspace.mjs --with-kernel
+```
+
+These settings change symbol output and scheduling, not assertions or runtime lock budgets. Record
+them with the run. Debug executables can be large enough to make the packaging fixture's archive and
+checksum work costly. A run requiring external process cleanup is diagnostic evidence; repeat it
+without intervention before reporting a clean native pass.
 
 Retain the Windows regressions for session cache invalidation, file leases, named-pipe cancellation,
 fragmented daemon commands interrupted by events, npm launching and edit errors. A fragmented command
@@ -419,3 +549,37 @@ built by the release workflow; record their hashes from that run.
 If a fix belongs upstream, retain a minimal reproducer and a reviewable patch suitable for contribution.
 Publishing issues or pull requests remains a separate authorized action. Once a supported upstream
 release incorporates the behavior, prefer it and remove the local patch after qualification.
+
+Engine 2 `0.10.0+vengeance.11` backports native append-file assembly from upstream commit
+`b1d71636710b0ea1b86380dfe3923b3c03fe2948` in patch `0020`. The stable base discovers
+`APPEND_SYSTEM.md` but omits it from resident prompts. The patch passes discovered or explicit append
+sources through the native prompt builder, preserving raw Markdown, independent SYSTEM/APPEND scope
+precedence, and explicit-source overrides. The native `prompt` diagnostic now includes the same append
+text. The stable builder's direct guideline API remains available. Retire the backport once a stable
+base contains the upstream fix and the provider-payload and diagnostic regressions pass on that base.
+No session format, account schema, or helper protocol revision changes. Rebuild the helper against the
+new engine fingerprint, and qualify an idle resident transition from the complete `.10` package.
+
+The `.11` qualification used 22 ordered Prime patches. Patches `0021` and `0022` are test-only
+qualification changes after runtime backport `0020`; the upstream base and protocol revisions remain
+pinned. The first native attempt exposed both a Windows ACP cleanup hang and refinement-fixture lock
+starvation. Its ACP EOF assertion had passed before a stderr-reader join stalled; stopping that
+identified temporary daemon released the reader, so the intervened run is not a clean qualification.
+Patch `0021` uses anonymous-file diagnostics and bounded, acknowledged native shutdown. Keep its
+session creation/EOF assertions and verify the fixture leaves no native processes. Retire it after the
+equivalent upstream fixture passes repeated Windows runs and the full native suite without cleanup
+intervention.
+
+Patch `0022` takes only the refinement fixture from upstream
+[`f0d9c09676a1e6bb2782ad73eb3025ffdf2061d4`](https://github.com/PrimeIntellect-ai/prime-agent/commit/f0d9c09676a1e6bb2782ad73eb3025ffdf2061d4).
+Five isolated stable-fixture failures confirmed repeated reacquisition can exhaust the intentional
+bounded lock wait. The correction races two fresh writers per round, retaining the 80-update check;
+it changes no runtime lock or timeout and excludes the unrelated abort-test change. Retire it when
+the stable candidate includes that hunk and passes repeated isolated and full-workspace checks.
+The reconstructed 22-patch series completed 4,477 passing tests and 14 ignored tests across 216
+suites, with all nine packages and 211 formatting targets checked. The subsequent Clippy finding
+required only an equivalent branch inversion in `0020`'s append fixture. After re-export and fresh
+reconstruction, all eight append cases and full-workspace, all-target Clippy with `-D warnings` pass;
+both real-account guards pass. The complete test log precedes that assertion-preserving style edit.
+Final engine/helper rebuilds, app integration and packaged qualification remain separate gates.
+Record those results and per-platform artifact identities with the release evidence.

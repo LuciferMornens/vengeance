@@ -11,7 +11,7 @@ import {
   INSTRUCTION_FILE,
   watchedConfigFolder
 } from './config-areas'
-import { lastWrittenText } from './json-file'
+import { lastWrittenText, rememberWrittenText } from './json-file'
 import { hadRecentRun, hasActiveRuns } from './pi-cli'
 
 /**
@@ -217,7 +217,12 @@ export class ConfigWatcher {
   private queue(area: SettingsChangeArea, cwd: string | null, path: string): void {
     if (this.stopped) return
     const written = lastWrittenText(path)
-    const outsideEdit = written !== undefined && readText(path) !== written
+    const differsFromWrite = written !== undefined && readText(path) !== written
+    if (area === 'instructions' && written !== undefined) {
+      if (!differsFromWrite) return
+      rememberWrittenText(path, undefined)
+    }
+    const outsideEdit = area === 'instructions' || differsFromWrite
     if (!outsideEdit && this.isMuted(area)) return
     if ((area === 'packages' || area === 'resources') && hasActiveRuns()) return
     if (area === 'packages' && this.enginesStarting()) return

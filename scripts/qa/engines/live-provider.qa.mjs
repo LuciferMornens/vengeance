@@ -115,7 +115,7 @@ async function createFixture(models, executable, apiKey) {
       'README.md': '# Isolated live engine QA\n',
       'AGENTS.md': `Workspace marker: ${CONTEXT_MARKER}. Keep replies brief.\n`
     })
-    const foreignPids = (await processTable()).map((entry) => entry.pid)
+    const foreignProcesses = await processTable()
     const environment = {}
     for (const name of Object.keys(process.env)) {
       if (SECRET_VARIABLE.test(name) || PRIME_VARIABLE.test(name)) {
@@ -140,7 +140,7 @@ async function createFixture(models, executable, apiKey) {
       primeDirectory,
       sessionDirectory,
       workspace,
-      foreignPids,
+      foreignProcesses,
       launchOptions: {
         agentDir: piDirectory,
         env: environment,
@@ -331,7 +331,7 @@ async function runLiveSmoke(models, executable, apiKey) {
     await application.close()
     application = undefined
     // A fresh daemon must read JSONL; reattaching a resident could hide failed disk persistence.
-    await shutdownOwnedPrimeDaemons(fixture.primeDirectory, fixture.foreignPids)
+    await shutdownOwnedPrimeDaemons(fixture.primeDirectory, fixture.foreignProcesses)
     application = await launchApp(fixture.launchOptions)
     await resumeFirstTurn(application, fixture, saved, report)
     for (const modelId of MODEL_IDS.slice(1)) {
@@ -376,7 +376,7 @@ async function runLiveSmoke(models, executable, apiKey) {
       failure ??= error
     }
     try {
-      await shutdownOwnedPrimeDaemons(fixture.primeDirectory, fixture.foreignPids)
+      await shutdownOwnedPrimeDaemons(fixture.primeDirectory, fixture.foreignProcesses)
     } catch (error) {
       failure ??= error
     } finally {

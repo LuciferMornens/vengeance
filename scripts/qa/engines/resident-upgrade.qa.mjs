@@ -1,11 +1,19 @@
 // Historical resident attachment and explicit upgrade through public app/native operations.
 import assert from 'node:assert/strict'
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 import { makePng, pickModelInFooter, until } from '../chat/helpers.mjs'
 import { launchApp, reportShotsDir, ROOT } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
-import { executableName } from '../lib/platform.mjs'
+import {
+  nativePackageIdentity,
+  prepareNativeBaseline,
+  runNativePythonProbe,
+  verifyIntelKernelUpgrade,
+  verifyNativeBaseline
+} from '../lib/native-kernel.mjs'
+import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
+import { executableName, resourcesDirOf } from '../lib/platform.mjs'
 import { isAlive, processIdentity } from '../lib/processes.mjs'
 import {
   createEngineFixture,
@@ -60,12 +68,6 @@ function readModelInfo(result) {
   return JSON.parse(line.slice(MODEL_INFO_PREFIX.length))
 }
 
-async function packageIdentity(executable) {
-  const path = await realpath(executable)
-  const metadata = JSON.parse(await readFile(join(dirname(path), 'package.json'), 'utf8'))
-  return { executablePath: path, version: metadata.version, sha256: await executableHash(path) }
-}
-
 async function configureModels(fixture) {
   const modelsPath = join(fixture.primeDirectory, 'models.json')
   const configured = JSON.parse(await readFile(modelsPath, 'utf8'))
@@ -100,36 +102,21 @@ async function captureImageProbe(application, server, agentId, toolCallId, image
     `print(${JSON.stringify(MODEL_INFO_PREFIX)} + json.dumps(await host_request("model.info")))`,
     `print(await attach_image(${JSON.stringify(imagePath)}))`
   ].join('\n')
-  const from = server.requests.length
-  server.queue(
-    turn.toolCalls([{ id: toolCallId, name: 'ipython', args: { code } }]),
-    turn.text(`The ${toolCallId} image probe settled.`)
-  )
-  await application.send(`Run the ${toolCallId} image probe.`)
-  const resultRequest = await server.waitForRequest(
-    (request) =>
-      inspectRequest(request).toolResults.some((result) => result.toolCallId === toolCallId),
-    { from, timeoutMs: KERNEL_TIMEOUT_MS }
-  )
-  await application.waitForSettle({ timeoutMs: KERNEL_TIMEOUT_MS })
-  const firstRequest = server.requests
-    .slice(from)
-    .find((request) => request.api && request.method === 'POST')
-  const inspected = inspectRequest(resultRequest)
-  const result = inspected.toolResults.find((item) => item.toolCallId === toolCallId)
-  const { messages } = await application.rpc({ type: 'get_messages' }, agentId)
-  const nativeResult = messages.findLast(
-    (message) => message.role === 'toolResult' && message.toolCallId.split('|')[0] === toolCallId
-  )
-  assert.ok(nativeResult, 'The public transcript contains the native ipython result')
+  const probe = await runNativePythonProbe(application, server, agentId, {
+    toolCallId,
+    code,
+    prompt: `Run the ${toolCallId} image probe.`,
+    timeoutMs: KERNEL_TIMEOUT_MS
+  })
+  const inspected = inspectRequest(probe.request)
   return {
-    modelInfo: readModelInfo(result),
-    firstPrompt: capabilityLine(inspectRequest(firstRequest).system),
+    modelInfo: readModelInfo(probe.result),
+    firstPrompt: capabilityLine(inspectRequest(probe.firstRequest).system),
     resultPrompt: capabilityLine(inspected.system),
-    images: result.images,
-    nativeResult,
-    resultText: result.text,
-    providerInput: resultRequest.body.input
+    images: probe.result.images,
+    nativeResult: probe.nativeResult,
+    resultText: probe.result.text,
+    providerInput: probe.request.body.input
   }
 }
 
@@ -263,16 +250,89 @@ async function assertUpgradeNotice(application, agentId, baseline, selected) {
   )
 }
 
+async function observeUpgradeAction(application) {
+  await application.page.evaluate(() => {
+    const maximumEvents = 16
+    const maximumTextLength = 2000
+    const events = []
+    const record = (entry) => {
+      events.push({ time: Date.now(), ...entry })
+      if (events.length > maximumEvents) events.shift()
+    }
+    const pointerEvents = new AbortController()
+    for (const type of ['pointerdown', 'pointerup', 'click']) {
+      document.addEventListener(
+        type,
+        (event) => {
+          const button = document.querySelector('[data-engine-upgrade] button')
+          record({
+            type,
+            point: { x: event.clientX, y: event.clientY },
+            target: event.target.tagName,
+            text: event.target.textContent?.slice(0, maximumTextLength),
+            button: button?.getBoundingClientRect().toJSON(),
+            disabled: button?.disabled,
+            viewport: { width: innerWidth, height: innerHeight }
+          })
+        },
+        { capture: true, signal: pointerEvents.signal }
+      )
+    }
+    const unsubscribe = window.vengeance.on('engine:status', ({ agentId, status, info }) =>
+      record({ type: 'engine:status', agentId, status, pid: info.pid, error: info.error })
+    )
+    let previousToast = ''
+    const toasts = new MutationObserver(() => {
+      const text = document.querySelector('[data-toaster]')?.textContent ?? ''
+      if (text === previousToast) return
+      previousToast = text
+      record({ type: 'toast', text: text.slice(0, maximumTextLength) })
+    })
+    toasts.observe(document.body, { subtree: true, childList: true, characterData: true })
+    window.__residentUpgradeAction = {
+      events,
+      stop() {
+        pointerEvents.abort()
+        unsubscribe()
+        toasts.disconnect()
+      }
+    }
+  })
+}
+
+async function upgradeActionEvidence(application) {
+  return application.page.evaluate(() => {
+    const maximumTextLength = 2000
+    const observation = window.__residentUpgradeAction
+    observation?.stop()
+    return {
+      events: observation?.events,
+      notice: document
+        .querySelector('[data-engine-upgrade]')
+        ?.textContent?.slice(0, maximumTextLength),
+      toast: document.querySelector('[data-toaster]')?.textContent?.slice(0, maximumTextLength),
+      viewport: { width: innerWidth, height: innerHeight }
+    }
+  })
+}
+
 async function main() {
   const baselineExecutable = process.env.QA_PRIME_BASELINE_EXECUTABLE
   const baselineHash = process.env.QA_PRIME_BASELINE_SHA256?.toLowerCase()
+  if (process.env.QA_PACKAGED_EXE) {
+    assert.ok(
+      baselineExecutable && baselineHash,
+      'Packaged upgrade QA requires a reviewed baseline'
+    )
+    assert.equal(OBSERVE, false, 'Packaged upgrade qualification requires strict assertions')
+  }
   if (baselineExecutable === undefined && baselineHash === undefined) {
     console.log(`SKIP ${SUITE_NAME}: set reviewed QA_PRIME_BASELINE_EXECUTABLE and SHA256`)
     return
   }
   assert.ok(baselineExecutable && isAbsolute(baselineExecutable))
   assert.match(baselineHash ?? '', /^[a-f0-9]{64}$/)
-  const baseline = await packageIdentity(baselineExecutable)
+  const baseline = await nativePackageIdentity(baselineExecutable)
   assert.equal(baseline.sha256, baselineHash, 'The reviewed older executable hash matches')
   const fixture = await createEngineFixture()
   const report = {
@@ -283,6 +343,8 @@ async function main() {
   }
   let application
   let failure
+  let upgradeAgentId
+  let baselineKernel
 
   async function check(label, action) {
     console.log(`  • ${label}`)
@@ -299,13 +361,26 @@ async function main() {
   }
 
   try {
-    const selected = await packageIdentity(
+    if (process.env.QA_PACKAGED_EXE) {
+      const packagedCandidate = await realpath(
+        join(
+          resourcesDirOf(resolve(process.env.QA_PACKAGED_EXE)),
+          'engines',
+          'prime',
+          executableName('prime-agent')
+        )
+      )
+      assert.ok(fixture.candidate, 'Select and hash the packaged native candidate')
+      assert.ok(samePath(fixture.candidate.executablePath, packagedCandidate))
+    }
+    const selected = await nativePackageIdentity(
       fixture.candidate?.executablePath ??
         join(ROOT, '.engine-staging', 'bundled', 'prime', executableName('prime-agent'))
     )
     assert.notEqual(selected.sha256, baseline.sha256)
     assert.notEqual(selected.version, baseline.version)
     report.packages = { baseline, selected }
+    baselineKernel = await prepareNativeBaseline(fixture, baseline.executablePath, OUTPUT_DIRECTORY)
     await configureModels(fixture)
     const workspace = await fixture.root.folder('resident-workspace', {
       'README.md': '# Isolated older resident image and upgrade QA\n'
@@ -313,9 +388,8 @@ async function main() {
     const imagePath = join(workspace, 'resident-image.png')
     await writeFile(imagePath, TOOL_IMAGE)
     application = await launchApp({
-      exe: process.env.QA_PACKAGED_EXE,
+      ...packagedLaunchOptions(fixture.environment),
       agentDir: fixture.piDirectory.dir,
-      env: fixture.environment,
       outDir: OUTPUT_DIRECTORY
     })
     await selectExecutable(application, baseline.executablePath)
@@ -577,6 +651,8 @@ async function main() {
       }
     })
 
+    upgradeAgentId = agentId
+    await observeUpgradeAction(application)
     const restartButton = application.page
       .locator('[data-engine-upgrade]')
       .getByRole('button', { name: 'Restart session', exact: true })
@@ -596,6 +672,7 @@ async function main() {
       },
       { label: 'selected resident worker restored', timeoutMs: KERNEL_TIMEOUT_MS }
     )
+    report.observations.upgradeAction = await upgradeActionEvidence(application)
     const after = await residentIdentity(application, agentId)
     const afterMessages = await application.rpc({ type: 'get_messages' }, agentId)
     report.after = { ...after, messages: afterMessages }
@@ -640,16 +717,68 @@ async function main() {
           .click()
       }
     )
+    report.observations.kernelUpgrade = await verifyIntelKernelUpgrade(
+      application,
+      fixture,
+      agentId,
+      baselineKernel,
+      OUTPUT_DIRECTORY
+    )
     assert.equal(await executableHash(baseline.executablePath), baseline.sha256)
     assert.equal(await executableHash(selected.executablePath), selected.sha256)
+    if (process.env.QA_PACKAGED_EXE) {
+      await application.invoke('app:set-state', { engineOverridePaths: { prime: null } })
+      await recordPackagedTarget(application)
+    }
     application.assertNoErrors()
     const failed = report.checks.filter((entry) => !entry.passed)
     if (failed.length) throw new Error(`${failed.length} older resident upgrade checks failed`)
   } catch (error) {
     failure = error
+    if (upgradeAgentId) {
+      const maximumAgents = 8
+      const maximumStderrLength = 4096
+      report.observations.upgradeFailure = {
+        action: await upgradeActionEvidence(application).catch(String),
+        linuxProcesses:
+          process.platform === 'linux'
+            ? await Promise.all(
+                [report.before.worker.pid, report.before.daemon.pid, 1].map(async (pid) => ({
+                  pid,
+                  stat: await readFile(join('/proc', String(pid), 'stat'), 'utf8').catch(String)
+                }))
+              )
+            : undefined,
+        engines: await application
+          .invoke('engine:list')
+          .then((agents) =>
+            agents
+              .slice(0, maximumAgents)
+              .map(({ agentId, status, pid, busy, error, runtime }) => ({
+                agentId,
+                status,
+                pid,
+                busy,
+                error,
+                runtime
+              }))
+          )
+          .catch(String),
+        stderr: await application
+          .invoke('engine:stderr', upgradeAgentId)
+          .then((stderr) => stderr.slice(-maximumStderrLength))
+          .catch(String)
+      }
+      console.error(
+        `Upgrade failure evidence: ${JSON.stringify(report.observations.upgradeFailure)}`
+      )
+    }
     await application?.screenshot('FAILED').catch(() => undefined)
   } finally {
     await application?.close({ beforeCleanup: fixture.stopNativeDaemon }).catch((error) => {
+      failure ??= error
+    })
+    await verifyNativeBaseline(baselineKernel, OUTPUT_DIRECTORY).catch((error) => {
       failure ??= error
     })
     await fixture.cleanup().catch((error) => {

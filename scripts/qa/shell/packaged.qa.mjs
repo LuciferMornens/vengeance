@@ -127,6 +127,7 @@ await runSuite(
         'vengeance-reload',
         'vengeance-speed',
         'vengeance-subagents',
+        'vengeance-system-prompt',
         'vengeance-tools',
         'vengeance-tree'
       ])

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { isDeepStrictEqual } from 'node:util'
 import type { CreateAgentArgs } from '@shared/api/engine'
+import { samePath } from '../../paths'
 import {
   beginPrimeDaemonRestart,
   connectPrimeResident,
@@ -16,10 +17,12 @@ import { assertPrimeSideQuestionsIdle } from './daemon-activity'
 import { validatePrimeDaemonEnvironment } from './daemon-environment'
 import { locatePrimeEngine } from './locate'
 import { thinkingLevel } from './normalize'
+import { nativeProcessIsAlive } from './process-liveness'
 import {
   checkPrimeRestartHelper,
   nativePrimeRestartCommand,
-  type PrimeRestartCheckpoint
+  type PrimeRestartCheckpoint,
+  type PrimeResidentSelection
 } from './restart-native'
 import {
   asRecord,
@@ -76,16 +79,21 @@ const pendingRestarts = new Map<string, PendingRestart>()
 export function primeRestartSelection(
   previous: CreateAgentArgs,
   next: CreateAgentArgs,
-  state: PrimeRecord
+  state: PrimeRecord,
+  patch?: Partial<CreateAgentArgs>
 ): CreateAgentArgs {
   const model = asRecord(state.model)
-  const keepModel = previous.provider === next.provider && previous.model === next.model
+  const sameModel = previous.provider === next.provider && previous.model === next.model
+  const keepProvider = patch ? !Object.hasOwn(patch, 'provider') : sameModel
+  const keepModel = patch ? !Object.hasOwn(patch, 'model') : sameModel
+  const keepThinking = patch
+    ? !Object.hasOwn(patch, 'thinking')
+    : previous.thinking === next.thinking
   return {
     ...next,
-    provider: keepModel ? (stringValue(model.provider) ?? next.provider) : next.provider,
+    provider: keepProvider ? (stringValue(model.provider) ?? next.provider) : next.provider,
     model: keepModel ? (stringValue(model.id) ?? next.model) : next.model,
-    thinking:
-      previous.thinking === next.thinking ? thinkingLevel(state.thinkingLevel) : next.thinking
+    thinking: keepThinking ? thinkingLevel(state.thinkingLevel) : next.thinking
   }
 }
 
@@ -94,11 +102,12 @@ export function restartPrimeSession(
   nativeAgentId: string,
   previousArgs: CreateAgentArgs,
   nextArgs: CreateAgentArgs,
-  executablePath?: string | null
+  executablePath?: string | null,
+  selectionPatch?: Partial<CreateAgentArgs>
 ): Promise<void> {
   const pending = pendingRestarts.get(source.socketPath)
   const environment = restartEnvironment(source, previousArgs, nextArgs)
-  const configPatch = changedConfiguration(previousArgs, nextArgs)
+  const configPatch = changedConfiguration(previousArgs, nextArgs, selectionPatch)
   if (pending) {
     const sameRuntime =
       pending.executablePath === (executablePath ?? null) &&
@@ -121,7 +130,8 @@ export function restartPrimeSession(
           resident.nativeAgentId,
           previousArgs,
           nextArgs,
-          executablePath
+          executablePath,
+          selectionPatch
         )
       } finally {
         resident.client.close()
@@ -133,6 +143,7 @@ export function restartPrimeSession(
     nativeAgentId,
     previousArgs,
     nextArgs,
+    configPatch,
     executablePath
   ).finally(() => {
     if (pendingRestarts.get(source.socketPath)?.task === task) {
@@ -154,6 +165,7 @@ async function performPrimeRestart(
   nativeAgentId: string,
   previousArgs: CreateAgentArgs,
   nextArgs: CreateAgentArgs,
+  configPatch: PrimeRecord,
   executablePath?: string | null
 ): Promise<void> {
   const releaseBarrier = beginPrimeDaemonRestart(source.socketPath)
@@ -212,6 +224,7 @@ async function performPrimeRestart(
     assertPrimeSideQuestionsIdle(source.socketPath)
     const roster = await readPreparedRoster(prepared)
     assertPreparedIdle(roster)
+    const selections = await captureResidentSelections(control, roster)
     const restartRoot = join(source.agentDir, 'vengeance-restarts')
     await mkdir(restartRoot, { recursive: true, mode: 0o700 })
     temporaryDirectory = await mkdtemp(join(restartRoot, 'restart-'))
@@ -225,7 +238,8 @@ async function performPrimeRestart(
       sessionPath,
       rosterPath,
       backupDir: join(temporaryDirectory, 'backup'),
-      configPatch: changedConfiguration(previousArgs, nextArgs)
+      configPatch,
+      residentSelections: selections
     }
     const captured = await nativePrimeRestartCommand('capture', checkpoint)
     const capturedWorkers = captured.workerPids
@@ -239,6 +253,7 @@ async function performPrimeRestart(
     assertMarkerFresh(prepared.expiresAt)
     residents = await residentSessions(control)
     assertIdle(residents)
+    assertPrimeSideQuestionsIdle(source.socketPath)
     commitAttempted = true
     await commitRestart(control, prepared.updateId, [
       ...capturedWorkers,
@@ -279,6 +294,7 @@ async function performPrimeRestart(
         }
         if (patchAttempted && (await hasRestartBackup(checkpoint.backupDir))) {
           await nativePrimeRestartCommand('rollback', checkpoint)
+          await nativePrimeRestartCommand('patch', { ...checkpoint, configPatch: {} })
         }
         replacement = await launchPrimeDaemonReplacement(
           source,
@@ -314,7 +330,11 @@ async function performPrimeRestart(
   }
 }
 
-function changedConfiguration(previous: CreateAgentArgs, next: CreateAgentArgs): PrimeRecord {
+function changedConfiguration(
+  previous: CreateAgentArgs,
+  next: CreateAgentArgs,
+  selectionPatch?: Partial<CreateAgentArgs>
+): PrimeRecord {
   const before: PrimeRecord = {
     provider: previous.provider,
     model: previous.model,
@@ -329,7 +349,13 @@ function changedConfiguration(previous: CreateAgentArgs, next: CreateAgentArgs):
   }
   const patch: PrimeRecord = {}
   for (const key of CONFIG_KEYS) {
-    if (!isDeepStrictEqual(before[key], after[key])) patch[key] = after[key] ?? null
+    const explicitSelection =
+      selectionPatch &&
+      (key === 'provider' || key === 'model' || key === 'thinking') &&
+      Object.hasOwn(selectionPatch, key)
+    if (explicitSelection || !isDeepStrictEqual(before[key], after[key])) {
+      patch[key] = after[key] ?? null
+    }
   }
   return patch
 }
@@ -378,6 +404,17 @@ function sessionIdentity(session: PrimeRecord): string | undefined {
 }
 
 function assertIdle(residents: PrimeRecord[]): void {
+  if (
+    residents.some(
+      (session) =>
+        typeof session.hasRunningSubagents !== 'boolean' ||
+        typeof session.isRunningTools !== 'boolean'
+    )
+  ) {
+    throw new Error(
+      'Engine 2 cannot verify whether every resident’s child agents and tools are idle'
+    )
+  }
   const busy = residents.find(
     (session) =>
       session.isStreaming === true ||
@@ -464,6 +501,44 @@ async function readPreparedRoster(prepared: PreparedRestart): Promise<PrimeRecor
   return roster
 }
 
+async function captureResidentSelections(
+  client: PrimeTransport,
+  roster: PrimeRecord
+): Promise<Record<string, PrimeResidentSelection>> {
+  const identities = new Set<string>()
+  const entries = await Promise.all(
+    asRecords(roster.sessions).map(async (session) => {
+      const nativeAgentId = stringValue(session.active_session_id)
+      const sessionPath = stringValue(session.session_file)
+      if (!nativeAgentId || !sessionPath || identities.has(nativeAgentId)) {
+        throw new Error('Engine 2 could not uniquely identify every resident before restarting')
+      }
+      identities.add(nativeAgentId)
+      const state = await client.request('get_connection_state', { activeSessionId: nativeAgentId })
+      const model = asRecord(state.model)
+      const provider = stringValue(model.provider)
+      const modelId = stringValue(model.id)
+      const thinking = state.thinkingLevel
+      const currentPath = stringValue(state.sessionFile)
+      if (
+        state.activeSessionId !== nativeAgentId ||
+        !currentPath ||
+        !samePath(currentPath, sessionPath) ||
+        state.isStreaming !== false ||
+        state.isCompacting !== false ||
+        !provider ||
+        !modelId ||
+        typeof thinking !== 'string' ||
+        thinkingLevel(thinking) !== thinking
+      ) {
+        throw new Error('Engine 2 could not verify every resident’s live model and reasoning')
+      }
+      return [nativeAgentId, { sessionPath, provider, model: modelId, thinking }] as const
+    })
+  )
+  return Object.fromEntries(entries)
+}
+
 function assertPreparedIdle(roster: PrimeRecord): void {
   const busy = asRecords(roster.sessions).some((session) => {
     const activity = asRecord(session.in_flight)
@@ -512,23 +587,11 @@ async function waitForNativeExit(supervisorPid: unknown, workers: number[]): Pro
   }
   const deadline = Date.now() + EXIT_TIMEOUT_MS
   const processes = [...workers, supervisorPid]
-  while (processes.some(processIsAlive)) {
+  while ((await Promise.all(processes.map(nativeProcessIsAlive))).some(Boolean)) {
     if (Date.now() >= deadline) {
       throw new Error('Engine 2 did not stop every resident after preparing its restart')
     }
     await delay(POLL_INTERVAL_MS)
-  }
-}
-
-function processIsAlive(processId: number): boolean {
-  try {
-    process.kill(processId, 0)
-    return true
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    // On macOS and Linux, EPERM means another user's process has the ID now: this user's runtime is gone.
-    if (code === 'ESRCH' || (code === 'EPERM' && process.platform !== 'win32')) return false
-    throw error
   }
 }
 
@@ -595,13 +658,14 @@ async function replacementProcessesStopped(
   checkpoint: PrimeRestartCheckpoint
 ): Promise<boolean> {
   try {
-    if (processIsAlive(error.supervisorPid)) return false
+    if (await nativeProcessIsAlive(error.supervisorPid)) return false
     const inspected = await nativePrimeRestartCommand('workers', checkpoint)
     if (!Array.isArray(inspected.workerPids)) return false
-    return inspected.workerPids.every(
-      (processId: unknown) =>
-        typeof processId === 'number' && processId > 0 && !processIsAlive(processId)
+    const workers = inspected.workerPids.filter(
+      (processId: unknown): processId is number => typeof processId === 'number' && processId > 0
     )
+    if (workers.length !== inspected.workerPids.length) return false
+    return !(await Promise.all(workers.map(nativeProcessIsAlive))).some(Boolean)
   } catch {
     return false
   }

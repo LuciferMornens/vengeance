@@ -2,11 +2,12 @@ import assert from 'node:assert/strict'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { FAKE_MODELS, FAKE_PROVIDER } from '../lib/agent-dir.mjs'
-import { launchApp, ROOT } from '../lib/app.mjs'
+import { launchApp, reportShotsDir, ROOT } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
 import { dismissToasts, waitFor } from '../settings/settings-ui.mjs'
 import { runPalette } from '../shell/lib/kit.mjs'
 import { createEngineFixture, PRIME_MODELS, PRIME_PROVIDER } from './integration-fixture.mjs'
+import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
 
 const OUTPUT_DIRECTORY = process.env.QA_PRIME_EXECUTABLE
   ? join(
@@ -15,7 +16,9 @@ const OUTPUT_DIRECTORY = process.env.QA_PRIME_EXECUTABLE
         : join(ROOT, '.shots', 'qa', 'native-prime-candidate'),
       'stop-compaction'
     )
-  : join(ROOT, '.shots', 'qa', 'engine-ux', 'stop-compaction')
+  : process.env.QA_PACKAGED_EXE
+    ? reportShotsDir('stop-compaction')
+    : join(ROOT, '.shots', 'qa', 'engine-ux', 'stop-compaction')
 const QUEUE_OBSERVATION_MS = 1500
 const COMPACTION_READY_MS = 30_000
 const PROVIDER_SETTLE_MS = 30_000
@@ -246,10 +249,11 @@ try {
   await configureSmallCompactions(fixture.piDirectory.dir)
   await configureSmallCompactions(fixture.primeDirectory)
   application = await launchApp({
+    ...packagedLaunchOptions(fixture.environment),
     agentDir: fixture.piDirectory.dir,
-    env: fixture.environment,
     outDir: OUTPUT_DIRECTORY
   })
+  await recordPackagedTarget(application)
   const workspace = await fixture.root.folder('workspace', { 'README.md': '# Stop QA\n' })
   await runEngine('pi', workspace)
   await runEngine('prime', workspace)

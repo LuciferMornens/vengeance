@@ -434,12 +434,12 @@ export interface ContextOverview {
   defaultSessionDir: string
 }
 
-/** Instruction files Vengeance can create and edit (pi docs/configuration.md). */
+/** Native instruction files Vengeance can create and edit for either backend. */
 export type InstructionFileKind = 'AGENTS.md' | 'SYSTEM.md' | 'APPEND_SYSTEM.md'
 
 export interface InstructionFileRef {
   kind: InstructionFileKind
-  /** global = agent dir; project = `<project>/AGENTS.md` or `<project>/.pi/<kind>`. */
+  /** Global = engine account directory; project prompt files use that engine's config directory. */
   scope: SettingsScope
 }
 
@@ -447,6 +447,16 @@ export interface InstructionFileState extends InstructionFileRef {
   /** The file read and written (an existing CLAUDE.md / AGENTS.override.md stands in for AGENTS.md). */
   path: string
   exists: boolean
+  text: string
+}
+
+export interface InstructionFileWriteRef extends InstructionFileRef {
+  /** Refuse to replace a file that changed while its editor was open. */
+  expected?: Pick<InstructionFileState, 'exists' | 'text'>
+}
+
+export interface SystemPromptDefault {
+  /** Native built-in foundation, without user files or session-specific additions. */
   text: string
 }
 
@@ -561,6 +571,7 @@ export interface SettingsInvokeMap {
   ]
 
   'settings:context': [cwd: string | null, result: ContextOverview]
+  'settings:system-prompt-default': [result: SystemPromptDefault]
   'settings:instruction-file': [
     cwd: string | null,
     ref: InstructionFileRef,
@@ -569,7 +580,7 @@ export interface SettingsInvokeMap {
   /** Save an instruction file; `null` moves it to the recycle bin. */
   'settings:instruction-file-write': [
     cwd: string | null,
-    ref: InstructionFileRef,
+    ref: InstructionFileWriteRef,
     text: string | null,
     result: InstructionFileState
   ]
@@ -615,6 +626,8 @@ export interface SettingsEventMap {
     project?: { cwd: string; trusted: boolean }
     /** settings.json was rewritten by an install or update Vengeance ran, which announces its own change. */
     fromRun?: boolean
+    /** An explicit file save is for future sessions; applying to open work is a separate action. */
+    apply?: 'new-sessions'
   }
   /** The models a subscription account offers changed (main hides the rest); pickers re-read their lists. */
   'settings:account-models': { providerId: string; engine?: EngineId }

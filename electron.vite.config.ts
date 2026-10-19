@@ -20,7 +20,8 @@ function singleModuleCopies(): Plugin {
       const seen = new Map<string, string>()
       for (const id of this.getModuleIds()) {
         const other = seen.get(id.toLowerCase())
-        if (other !== undefined && other !== id) this.error(`Bundled twice under different letter case:\n  ${other}\n  ${id}`)
+        if (other !== undefined && other !== id)
+          this.error(`Bundled twice under different letter case:\n  ${other}\n  ${id}`)
         seen.set(id.toLowerCase(), id)
       }
     }
@@ -41,7 +42,13 @@ function contentSecurityPolicy(): Plugin {
         "font-src 'self' data:",
         dev ? "connect-src 'self' ws: http://localhost:*" : "connect-src 'self'"
       ].join('; ')
-      return [{ tag: 'meta', attrs: { 'http-equiv': 'Content-Security-Policy', content: policy }, injectTo: 'head-prepend' }]
+      return [
+        {
+          tag: 'meta',
+          attrs: { 'http-equiv': 'Content-Security-Policy', content: policy },
+          injectTo: 'head-prepend'
+        }
+      ]
     }
   }
 }
@@ -75,6 +82,7 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(root, 'src/renderer'),
+    worker: { format: 'es' },
     resolve: {
       alias: {
         '@shared': shared,

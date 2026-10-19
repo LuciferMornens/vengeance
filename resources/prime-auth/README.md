@@ -49,6 +49,16 @@ mode availability. Vengeance checks this frame before sending `start`.
 `--version` prints that metadata and exits without reading account files or
 accessing the network.
 
+`--system-prompt-default` prints the bundled native system prompt's static foundation as
+`{ "ok": true, "protocol": 1, "revision": "...", "result": { "text": "..." } }`.
+Metadata advertises `systemPromptDefault: true`. This read-only mode calls
+`pa_core::prompts::system_prompt_breakdown` and selects its native static segments. It reads no
+account or project files and starts no daemon, worker, provider request or kernel. User replacements,
+appended instructions, model-specific layers and the session tail are excluded. Vengeance labels
+this bundled foundation separately from a running session's exact native `get_system_prompt` view;
+the latter also works when a custom engine is selected. Main bounds output to 1 MiB and validates
+the protocol and revision before rendering it.
+
 `start` supplies `providerId`, `cwd`, `agentDir`, and optionally the native Prime
 CLI config path. `method` defaults to `oauth`; `api_key` starts the native key
 validation flow for Prime Inference or Agent Traces. Replies identify a prompt
@@ -75,6 +85,7 @@ new upstream base or native patch:
    `resources/prime-auth/Cargo.toml`, `UPSTREAM_REVISION` in `resources/prime-auth/src/main.rs`, and
    `HELPER_REVISION` in both
    `src/main/engine/prime/auth-oauth.ts` and `src/main/engine/prime/restart-native.ts`
+   and the built-in prompt consumer `src/main/engine/prime/system-prompt.ts`
    together. Search for the old revision to catch additional consumers. Export native patches
    before building. Run `node scripts/build-prime-auth.mjs --update-lockfile` to regenerate
    `Cargo.lock` with the same source overrides used by regular locked builds; review the diff.
@@ -157,23 +168,43 @@ session data and run only when requested through the application.
 
 `--restart-config` accepts one bounded JSON object identifying the native agent,
 session file, daemon socket, update roster, account directory, and backup
-directory. `inspect` validates the durable worker and proposed `configPatch`.
-`workers` validates every descriptor in the daemon's worker directory and returns
-the worker process IDs. `capture` saves the prepared roster, worker descriptors,
-and recovery journals before the application stops those workers. `patch`
-updates the selected session's typed native create commands. `rollback`
-validates the captured worker identities and restores the descriptors, journals,
-and roster. The application coordinates these operations with the native
-daemon's update preparation and owns cleanup after a successful restart or
-rollback.
+directory. `inspect`, `capture` and `patch` also require `residentSelections`,
+keyed by every prepared resident's native agent ID. Each entry contains its
+absolute `sessionPath`, `provider`, `model` and supported `thinking` value.
+The application captures these from `get_connection_state` after native preparation
+reaches `Prepared`, when the daemon's mutation fence prevents selection changes.
+It verifies exact identities and paths, idle state and actual selections; account
+defaults and unrecognized thinking values cannot substitute for live state.
 
-The `--version` metadata advertises `restartConfig: true` and
-`restartCapture: true`. Before preparing a native update or writing restart
-state, the application requires both flags, protocol version `1`, and the pinned
-upstream revision. A helper without capture support is rejected before the
-daemon is suspended. The capability field extends the metadata without changing
-the authentication protocol.
+`inspect` validates the target `configPatch`, complete unique roster/worker
+coverage and every descriptor and roster create envelope. `capture` performs the
+same validation before saving the raw roster, all worker descriptors and recovery
+journals; the application commits the native restart only after capture succeeds.
+`workers` validates the daemon's descriptor directory and returns worker process IDs.
+
+`patch` first applies each resident's captured provider, model and thinking to
+its typed native create commands, including flat worker fields and nested
+supervisor fallback configuration. The target's explicit `configPatch` applies
+last, including explicitly supplied selection values equal to its preflight
+selection. Peer selections stay independent. All create envelopes are prepared
+before any write, and unknown envelope fields survive.
+
+`rollback` validates captured worker identities and restores the raw descriptors,
+journals and roster. For a failed successor, the application then calls `patch`
+with the checkpointed `residentSelections` and an empty target `configPatch`
+before launching the prior engine. This restores the live selections that existed
+at the checkpoint while discarding the failed target launch changes. Raw backups
+remain intact. The application owns cleanup after a successful restart or rollback.
+
+The `--version` metadata advertises `restartConfig: true`, `restartCapture: true`
+and `restartSelections: true`. Before preparing a native update or writing restart
+state, the application requires all three flags, protocol version `1`, and the
+pinned upstream revision. A helper missing a capability is rejected before native
+preparation. These capability fields do not change the authentication protocol.
 
 Success returns `{ "ok": true, "result": {} }`; failure returns a safe error.
 Result metadata contains identity and file locations, never the create command
 or credentials. The source session file is not rewritten by this mode.
+
+Current restart qualification and artifact identities are recorded in the
+[engine qualification report](../../docs/ENGINE-PROMPTS-QUALIFICATION-2026-10-18.md).

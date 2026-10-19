@@ -264,6 +264,23 @@ export function EngineSection() {
 
       <Group title="Maintenance">
         <Row
+          settingKey="engine.systemPrompt"
+          label="System prompt & instructions"
+          description="Read the built-in foundation and an open session’s prompt. Edit or restore global and project instructions."
+        >
+          <Button
+            size="sm"
+            variant="secondary"
+            leading={<ScrollText />}
+            onClick={() => {
+              useApp.getState().openSettings('sessions', engine)
+              useSettings.getState().setHighlight('instructions.builtIn')
+            }}
+          >
+            Edit prompts
+          </Button>
+        </Row>
+        <Row
           label="Configuration folder"
           description={
             <span className="font-mono text-xs text-fg-3">{snapshot?.agentDir ?? '…'}</span>

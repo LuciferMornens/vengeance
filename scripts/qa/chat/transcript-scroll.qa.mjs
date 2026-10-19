@@ -36,6 +36,9 @@ const SLOW_DELAY_MS = 300
 const SHORT_WHEEL_PX = 40
 /** A scroll with no input event (a screen reader), well off the bottom. */
 const SILENT_SCROLL_PX = 300
+const SCROLL_TRACE_TIMEOUT_MS = 5000
+const SILENT_SCROLL_GROWTHS = 2
+const SILENT_SCROLL_CUE_TIMEOUT_MS = 2000
 
 function streamedAnswer() {
   return Array.from(
@@ -304,20 +307,139 @@ await runSuite('chat-transcript-scroll', async ({ server, agentDir, app: firstAp
       await assertFollowsBottom('expanded row')
     })
 
-    await step('a short scroll up while streaming shows Jump to latest as the answer grows', async () => {
+    await step(
+      'collapsing the last tool row keeps following after its shrink clamps the view',
+      async () => {
+        const before = await geometry()
+        // An expanded header can be offscreen. Button activation avoids scrolling to it first,
+        // so the shrink is observed while pinned.
+        await scroller()
+          .locator('button[aria-expanded="true"]')
+          .last()
+          .evaluate((button) => button.click())
+        await until(async () => (await geometry()).height < before.height, {
+          label: 'the tool row shrank'
+        })
+        await assertFollowsBottom('collapsed row')
+        assert.ok(
+          (await geometry()).top < before.top,
+          'the shrinking content clamped the scroll offset'
+        )
+      }
+    )
+
+    await step('collapsing a tool row while a large answer streams keeps following', async () => {
+      const toggle = scroller().locator('button[aria-expanded="false"]').last()
+      const before = await geometry()
+      await toggle.evaluate((button) => button.click())
+      await until(async () => (await geometry()).height > before.height, {
+        label: 'the tool row expanded before streaming'
+      })
+      await assertFollowsBottom('expanded before the collapse stream')
+      const paragraph = (index) =>
+        `Collapse paragraph ${String(index + 1).padStart(3, '0')} adds text below the tool.\n\n`
+      const paragraphsPerChunk = 10
+      const paragraphCount = 200
+      const chunkDelayMs = 100
       server.queue(
-        turn.text(slowAnswer(), { chunkSize: slowParagraph(0).length, delayMs: SLOW_DELAY_MS })
+        turn.text(Array.from({ length: paragraphCount }, (_, index) => paragraph(index)).join(''), {
+          chunkSize: paragraph(0).length * paragraphsPerChunk,
+          delayMs: chunkDelayMs
+        })
       )
-      await app.send('Write a slow answer')
-      await scroller().getByText('Slow paragraph 02').waitFor()
-      await assertFollowsBottom('slow answer')
-      await afterGrowth()
-      const box = await scroller().boundingBox()
-      await app.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-      await app.page.mouse.wheel(0, -SHORT_WHEEL_PX)
-      await jumpPill().waitFor({ timeout: 5 * SLOW_DELAY_MS + 1000 })
-      await jumpToLatest('jump after a short wheel')
+      await app.send('Write a large answer while the tool closes')
+      await scroller()
+        .getByText('Collapse paragraph 010 adds text below the tool.', { exact: true })
+        .waitFor()
+      await scroller().evaluate(
+        (element, timeoutMs) =>
+          new Promise((resolve, reject) => {
+            const button = element.querySelector('button[aria-expanded="true"]')
+            if (!button) return reject(new Error('No expanded tool row during streaming'))
+            const height = element.scrollHeight
+            const observer = new MutationObserver(() => {
+              if (element.scrollHeight <= height) return
+              observer.disconnect()
+              clearTimeout(timeout)
+              button.click()
+              resolve()
+            })
+            const timeout = setTimeout(() => {
+              observer.disconnect()
+              reject(new Error('The answer did not grow before collapsing its tool'))
+            }, timeoutMs)
+            observer.observe(element, { subtree: true, childList: true, characterData: true })
+          }),
+        SCROLL_TRACE_TIMEOUT_MS
+      )
+      const frames = await scroller().evaluate(
+        (element, { duration, timeoutMs }) =>
+          new Promise((resolve, reject) => {
+            const started = performance.now()
+            const samples = []
+            let frame = 0
+            const timeout = setTimeout(() => {
+              cancelAnimationFrame(frame)
+              reject(new Error('No frames while checking streamed growth following'))
+            }, timeoutMs)
+            const tick = () => {
+              const at = performance.now() - started
+              samples.push({
+                at,
+                top: element.scrollTop,
+                height: element.scrollHeight,
+                viewport: element.clientHeight
+              })
+              if (at >= duration) {
+                clearTimeout(timeout)
+                resolve(samples)
+              } else frame = requestAnimationFrame(tick)
+            }
+            frame = requestAnimationFrame(tick)
+          }),
+        { duration: HOLD_MS + FOLLOW_LAG_MS, timeoutMs: SCROLL_TRACE_TIMEOUT_MS }
+      )
+      let observedGrowths = 0
+      for (const [index, growth] of frames.entries()) {
+        if (index === 0 || growth.height <= frames[index - 1].height) continue
+        if (frames.at(-1).at - growth.at < FOLLOW_LAG_MS) continue
+        observedGrowths += 1
+        const target = growth.height - growth.viewport
+        const reached = frames
+          .slice(index)
+          .some(
+            (sample) =>
+              sample.at - growth.at <= FOLLOW_LAG_MS &&
+              sample.top >= Math.min(target, sample.height - sample.viewport) - AT_BOTTOM_PX
+          )
+        assert.ok(
+          reached,
+          `stream growth at ${Math.round(growth.at)} ms was not followed within ${FOLLOW_LAG_MS} ms`
+        )
+      }
+      assert.ok(observedGrowths > 0, 'the collapse follow window observed streamed growth')
+      assert.equal(await jumpPill().count(), 0, 'tool collapse did not detach the reader')
+      await app.waitForSettle()
+      await assertFollowsBottom('settled after the tool collapse stream')
     })
+
+    await step(
+      'a short scroll up while streaming shows Jump to latest as the answer grows',
+      async () => {
+        server.queue(
+          turn.text(slowAnswer(), { chunkSize: slowParagraph(0).length, delayMs: SLOW_DELAY_MS })
+        )
+        await app.send('Write a slow answer')
+        await scroller().getByText('Slow paragraph 02').waitFor()
+        await assertFollowsBottom('slow answer')
+        await afterGrowth()
+        const box = await scroller().boundingBox()
+        await app.page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+        await app.page.mouse.wheel(0, -SHORT_WHEEL_PX)
+        await jumpPill().waitFor({ timeout: 5 * SLOW_DELAY_MS + 1000 })
+        await jumpToLatest('jump after a short wheel')
+      }
+    )
 
     await step('a scroll with no input event (a screen reader) leaves the bottom', async () => {
       await afterGrowth()
@@ -329,8 +451,80 @@ await runSuite('chat-transcript-scroll', async ({ server, agentDir, app: firstAp
       await afterGrowth()
       const after = await geometry()
       assert.ok(Math.abs(after.top - top) <= 2, `moved ${after.top - top} px`)
-      await jumpPill().waitFor({ timeout: 2000 })
+      await jumpPill().waitFor({ timeout: SILENT_SCROLL_CUE_TIMEOUT_MS })
       await jumpToLatest('jump after a silent scroll')
+      await app.waitForSettle()
+      await assertFollowsBottom('settled after a silent scroll')
+    })
+
+    await step('a silent scroll coalesced with streamed growth leaves the bottom', async () => {
+      const paragraph = (index) =>
+        `Coalesced paragraph ${String(index + 1).padStart(2, '0')} arrives on its own.\n\n`
+      server.queue(
+        turn.text(
+          Array.from({ length: SLOW_PARAGRAPHS }, (_, index) => paragraph(index)).join(''),
+          { chunkSize: paragraph(0).length, delayMs: SLOW_DELAY_MS }
+        )
+      )
+      await app.send('Write another slow answer')
+      await scroller()
+        .getByText('Coalesced paragraph 02 arrives on its own.', { exact: true })
+        .waitFor()
+      await assertFollowsBottom('before the coalesced scroll')
+      const trace = await scroller().evaluate(
+        (element, { pixels, growthCount, timeoutMs }) =>
+          new Promise((resolve, reject) => {
+            const geometry = () => ({ top: element.scrollTop, height: element.scrollHeight })
+            let injected = null
+            let previousHeight = element.scrollHeight
+            let growths = 0
+            let frame = 0
+            let finishTimer = null
+            const cleanup = () => {
+              mutations.disconnect()
+              cancelAnimationFrame(frame)
+              clearTimeout(timeout)
+              if (finishTimer !== null) clearTimeout(finishTimer)
+            }
+            const mutations = new MutationObserver(() => {
+              const height = element.scrollHeight
+              if (height <= previousHeight) return
+              previousHeight = height
+              if (!injected) {
+                element.scrollTop -= pixels
+                injected = geometry()
+              } else if (++growths === growthCount) {
+                frame = requestAnimationFrame(() => {
+                  finishTimer = setTimeout(() => {
+                    const after = geometry()
+                    cleanup()
+                    resolve({ injected, after })
+                  }, 0)
+                })
+              }
+            })
+            const timeout = setTimeout(() => {
+              cleanup()
+              reject(new Error('No streamed growth after the coalesced silent scroll'))
+            }, timeoutMs)
+            mutations.observe(element, { subtree: true, childList: true, characterData: true })
+          }),
+        {
+          pixels: SILENT_SCROLL_PX,
+          growthCount: SILENT_SCROLL_GROWTHS,
+          timeoutMs: SCROLL_TRACE_TIMEOUT_MS
+        }
+      )
+      assert.ok(
+        trace.after.height > trace.injected.height,
+        'the answer grew after the silent scroll'
+      )
+      assert.ok(
+        Math.abs(trace.after.top - trace.injected.top) <= 2,
+        `coalesced silent scroll moved ${trace.after.top - trace.injected.top} px`
+      )
+      await jumpPill().waitFor({ timeout: SILENT_SCROLL_CUE_TIMEOUT_MS })
+      await jumpToLatest('jump after a coalesced silent scroll')
       await app.waitForSettle()
     })
 
@@ -365,6 +559,37 @@ await runSuite('chat-transcript-scroll', async ({ server, agentDir, app: firstAp
         )
       }
     )
+  } catch (error) {
+    const diagnostics = await app.page
+      .evaluate(() => {
+        const element = document.querySelector('[data-transcript-scroll]')
+        const marker = Array.from(element?.querySelectorAll('p') ?? []).findLast((paragraph) =>
+          /^(Slow|Coalesced|Collapse) paragraph/.test(paragraph.textContent ?? '')
+        )
+        return {
+          visibility: document.visibilityState,
+          focused: document.hasFocus(),
+          opening: !!document.querySelector('[data-session-opening]'),
+          transcript: element
+            ? {
+                top: element.scrollTop,
+                height: element.scrollHeight,
+                viewport: element.clientHeight,
+                distance: element.scrollHeight - element.scrollTop - element.clientHeight,
+                inert: !!element.closest('[inert]'),
+                virtualized: !!element.querySelector('[data-virtual-segments]')
+              }
+            : null,
+          latestMarker: marker?.textContent,
+          jump: !!document.querySelector('[data-jump-latest]')
+        }
+      })
+      .catch((captureError) => ({ captureError: captureError.message }))
+    console.error('  current transcript failure geometry:', JSON.stringify(diagnostics))
+    await app
+      .screenshot('chat-transcript-scroll-CURRENT-FAILED', { settleMs: 0 })
+      .catch(() => undefined)
+    throw error
   } finally {
     if (app !== firstApp) await app.close()
   }

@@ -5,8 +5,16 @@ import { performance } from 'node:perf_hooks'
 import { FAKE_MODELS, FAKE_PROVIDER } from '../lib/agent-dir.mjs'
 import { launchApp, reportShotsDir } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
+import { captureFailedNativeDiagnostics } from '../lib/native-diagnostics.mjs'
+import {
+  assertFreshIntelKernel,
+  nativeKernelCode,
+  runNativePythonProbe,
+  verifyIntelKernel
+} from '../lib/native-kernel.mjs'
 import { isAlive } from '../lib/processes.mjs'
 import { softSteps } from '../lib/steps.mjs'
+import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
 import { checkEngineConfiguration } from './integration-configuration.mjs'
 import { checkNativeControls } from './integration-native-controls.mjs'
 import {
@@ -23,6 +31,7 @@ import {
 
 const SUITE_NAME = 'engines-integration'
 const WAIT_TIMEOUT_MS = 60_000
+const KERNEL_BOOTSTRAP_TIMEOUT_MS = 180_000
 const POLL_INTERVAL_MS = 50
 const STREAM_DELAY_MS = 25
 const STREAM_CHUNK_SIZE = 1
@@ -89,6 +98,22 @@ async function nativeCommand(application, agentId, type, payload = {}) {
   return application.invoke('prime:command', agentId, type, payload)
 }
 
+async function restartAfterSessionOperations(application, agentId, patch) {
+  return until(async () => {
+    try {
+      return await application.invoke('engine:restart', agentId, patch)
+    } catch (error) {
+      // Settled events also start renderer state and statistics queries.
+      if (
+        error.message.endsWith('Wait for the current session operation to finish before restarting')
+      ) {
+        return undefined
+      }
+      throw error
+    }
+  }, 'session operations to finish before restart')
+}
+
 console.log(`▶ ${SUITE_NAME} (native Engine2 and local fake providers)`)
 const fixture = await createEngineFixture()
 let application
@@ -96,14 +121,16 @@ let failure
 const checks = softSteps(step, { app: () => application, name: SUITE_NAME })
 
 try {
+  await assertFreshIntelKernel(fixture)
   const workspace = await fixture.root.folder('workspace', {
     'README.md': '# Engine integration workspace\nOnly isolated QA files live here.\n'
   })
   application = await launchApp({
+    ...packagedLaunchOptions(fixture.environment),
     agentDir: fixture.piDirectory.dir,
-    env: fixture.environment,
     outDir: reportShotsDir('engines')
   })
+  await recordPackagedTarget(application)
   let piAgentId
   let primeAgentId
   let primeSessionFile
@@ -214,35 +241,25 @@ try {
     'Engine2 native Python tool output reaches its public transcript',
     async () => {
       const toolId = 'engine2-python-output'
-      const from = fixture.primeServer.requests.length
       const toolName = inspectRequest(fixture.primeServer.requests[0]).tools.find(
         (name) => name === 'ipython' || name === 'python'
       )
       assert.ok(toolName, 'the native model exposes its Python runtime tool')
-      fixture.primeServer.queue(
-        turn.toolCalls([
-          {
-            id: toolId,
-            name: toolName,
-            args: {
-              code: 'print("Engine2 tool output")'
-            }
-          }
-        ]),
-        turn.text('The native tool finished.')
-      )
-      await application.send('Run the short native tool probe')
-      await application.waitForSettle()
-      const nextRequest = await fixture.primeServer.waitForRequest(
-        (request) =>
-          inspectRequest(request).toolResults.some((result) => result.toolCallId === toolId),
-        { from }
-      )
-      const result = inspectRequest(nextRequest).toolResults.find(
-        (item) => item.toolCallId === toolId
+      const { result } = await runNativePythonProbe(
+        application,
+        fixture.primeServer,
+        primeAgentId,
+        {
+          toolCallId: toolId,
+          toolName,
+          code: nativeKernelCode('print("Engine2 tool output")'),
+          prompt: 'Run the short native tool probe',
+          timeoutMs: KERNEL_BOOTSTRAP_TIMEOUT_MS
+        }
       )
       assert.notEqual(result.isError, true, result.text)
       assert.ok(result.text.includes('Engine2 tool output'), result.text)
+      await verifyIntelKernel(result.text, fixture, reportShotsDir('engines'))
       const tool = (await application.agentState()).tools[toolId]
       assert.equal(tool.status, 'done')
       await application.screenshot('engine2-native-tool')
@@ -577,68 +594,80 @@ try {
   await checks.check(
     'temporary Engine2 restart is refused and repeated sessions release their workers',
     async () => {
-      for (let index = 0; index < EPHEMERAL_RUNS; index++) {
-        const name = `Engine2 ephemeral cleanup ${index + 1}`
-        const ephemeral = await application.openWorkspace({
-          cwd: workspace,
-          args: {
-            engine: 'prime',
-            noSession: true,
-            provider: PRIME_PROVIDER,
-            model: PRIME_MODELS.reasoning,
-            name
-          }
-        })
-        fixture.primeServer.queue(turn.text('Ephemeral Engine2 answer.'))
-        await application.send('Reply briefly for the ephemeral cleanup probe')
-        await application.waitForSettle()
-        const info = (await application.invoke('engine:list')).find(
-          (agent) => agent.agentId === ephemeral.agentId
-        )
-        assert.ok(info.pid, 'the public engine descriptor reports its worker')
-        if (index === 0) {
-          const messagesBefore = await application.rpc({ type: 'get_messages' }, ephemeral.agentId)
-          await assert.rejects(
-            application.invoke('engine:restart', ephemeral.agentId, {
-              launch: { prime: { systemPrompt: 'Temporary restart must be refused.' } }
-            }),
-            /Temporary sessions cannot be restarted/i
-          )
-          const unchanged = (await application.invoke('engine:list')).find(
-            (agent) => agent.agentId === ephemeral.agentId
-          )
-          assert.equal(unchanged.nativeAgentId, info.nativeAgentId)
-          assert.equal(unchanged.pid, info.pid)
-          assert.ok(isAlive(info.pid), 'rejected restart leaves its temporary worker alive')
-          assert.deepEqual(
-            await application.rpc({ type: 'get_messages' }, ephemeral.agentId),
-            messagesBefore
-          )
-          fixture.primeServer.queue(turn.text('Temporary worker remains usable.'))
-          await application.send('Reply after the refused temporary restart')
-          await application.waitForSettle()
-          assert.ok(assistantText(await application.agentState()).includes('remains usable'))
-        }
-        const row = application.page
-          .locator('section[aria-label="Open sessions"]')
-          .locator('[data-session-row]', { hasText: name })
-        await row.hover()
-        await row.locator('xpath=..').getByRole('button', { name: 'Close tab' }).click()
-        await until(
-          async () =>
-            !(await application.invoke('engine:list')).some(
+      try {
+        for (let index = 0; index < EPHEMERAL_RUNS; index++) {
+          const name = `Engine2 ephemeral cleanup ${index + 1}`
+          const ephemeral = await application.openWorkspace({
+            cwd: workspace,
+            args: {
+              engine: 'prime',
+              noSession: true,
+              provider: PRIME_PROVIDER,
+              model: PRIME_MODELS.reasoning,
+              name
+            }
+          })
+          const row = application.page
+            .locator('section[aria-label="Open sessions"]')
+            .locator('[data-session-row]', { hasText: name })
+          let info
+          try {
+            fixture.primeServer.queue(turn.text('Ephemeral Engine2 answer.'))
+            await application.send('Reply briefly for the ephemeral cleanup probe')
+            await application.waitForSettle()
+            info = (await application.invoke('engine:list')).find(
               (agent) => agent.agentId === ephemeral.agentId
-            ),
-          'ephemeral session disposed'
-        )
-        await until(() => !isAlive(info.pid), 'ephemeral native worker stopped')
-        assert.ok(
-          !(await application.invoke('engine:background-list', 'prime')).some(
-            (agent) => agent.id === info.nativeAgentId
+            )
+            assert.ok(info.pid, 'the public engine descriptor reports its worker')
+            if (index === 0) {
+              const messagesBefore = await application.rpc(
+                { type: 'get_messages' },
+                ephemeral.agentId
+              )
+              await assert.rejects(
+                restartAfterSessionOperations(application, ephemeral.agentId, {
+                  launch: { prime: { systemPrompt: 'Temporary restart must be refused.' } }
+                }),
+                /Temporary conversations with messages cannot be restarted safely/i
+              )
+              const unchanged = (await application.invoke('engine:list')).find(
+                (agent) => agent.agentId === ephemeral.agentId
+              )
+              assert.equal(unchanged.nativeAgentId, info.nativeAgentId)
+              assert.equal(unchanged.pid, info.pid)
+              assert.ok(isAlive(info.pid), 'rejected restart leaves its temporary worker alive')
+              assert.deepEqual(
+                await application.rpc({ type: 'get_messages' }, ephemeral.agentId),
+                messagesBefore
+              )
+              fixture.primeServer.queue(turn.text('Temporary worker remains usable.'))
+              await application.send('Reply after the refused temporary restart')
+              await application.waitForSettle()
+              assert.ok(assistantText(await application.agentState()).includes('remains usable'))
+            }
+          } finally {
+            await row.hover()
+            await row.locator('xpath=..').getByRole('button', { name: 'Close tab' }).click()
+            // The tab leaves only after native disposal finishes retiring its identity.
+            await row.waitFor({ state: 'detached' })
+          }
+          await until(
+            async () =>
+              !(await application.invoke('engine:list')).some(
+                (agent) => agent.agentId === ephemeral.agentId
+              ),
+            'ephemeral session disposed'
           )
-        )
+          await until(() => !isAlive(info.pid), 'ephemeral native worker stopped')
+          assert.ok(
+            !(await application.invoke('engine:background-list', 'prime')).some(
+              (agent) => agent.id === info.nativeAgentId
+            )
+          )
+        }
+      } finally {
+        await activateSession(application, PRIME_SESSION_NAME)
       }
-      await activateSession(application, PRIME_SESSION_NAME)
     }
   )
 
@@ -672,6 +701,7 @@ try {
   )
 
   await checks.check('no uncaught app errors across both engines', async () => {
+    await recordPackagedTarget(application)
     application.assertNoErrors()
   })
   checks.finish()
@@ -682,6 +712,12 @@ try {
   await application?.close({ beforeCleanup: fixture.stopNativeDaemon }).catch((error) => {
     failure ??= error
   })
+  if (failure) {
+    await captureFailedNativeDiagnostics({
+      fixtureDirectory: fixture.root.dir,
+      outputDirectory: reportShotsDir('engines')
+    }).catch((error) => console.error(`Native failure diagnostics unavailable (${error.name})`))
+  }
   await fixture.cleanup().catch((error) => {
     failure ??= error
   })

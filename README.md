@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/LuciferMornens/vengeance/releases/latest"><img alt="Version 0.3.2" src="https://img.shields.io/badge/version-0.3.2-FF4D3D?style=flat-square"></a>
+  <a href="https://github.com/LuciferMornens/vengeance/releases/latest"><img alt="Version 0.3.3" src="https://img.shields.io/badge/version-0.3.3-FF4D3D?style=flat-square"></a>
   <a href="https://github.com/LuciferMornens/vengeance/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/LuciferMornens/vengeance/actions/workflows/ci.yml/badge.svg"></a>
   <a href="#download"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-0078D4?style=flat-square"></a>
   <a href="#download"><img alt="macOS arm64 and x64" src="https://img.shields.io/badge/macOS-arm64%20%7C%20x64-000000?style=flat-square"></a>
@@ -157,6 +157,9 @@ either one separately.
 - **Structured settings.** Editors for models, providers and accounts, custom models, agent
   behavior, extensions, packages, resources, MCP servers, sessions and context, and keyboard
   shortcuts, with a Raw JSON editor when you want the file itself.
+- **System prompts.** Inspect the selected engine's default foundation or an open conversation's
+  assembled prompt. Edit global or project instructions with draft and conflict protection, then
+  explicitly apply them to an open conversation when ready.
 - **Extension gallery (Engine).** **Settings → Extensions** browses community packages from the
   public npm registry. Search or browse topics, read what a package adds, and install it for every
   project or only the open one. **Add your own** installs an extension file or package folder. The
@@ -204,7 +207,7 @@ command palette and inspector are shared.
 
 |            | Engine                                                                                      | Engine 2                                                                                                                                               |
 | ---------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Built from | [pi](https://github.com/earendil-works/pi) `v1.3.0`, build `1.3.0+vengeance.2`              | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) `v0.10.0`, build `0.10.0+vengeance.10`                                                 |
+| Built from | [pi](https://github.com/earendil-works/pi) `v1.3.0`, build `1.3.0+vengeance.2`              | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) `v0.10.0`, build `0.10.0+vengeance.12`                                                 |
 | Runs on    | Electron's Node, so no separate Node install                                                | A native executable that includes its Python kernel package, skills and catalogs                                                                       |
 | Sessions   | One process per open session                                                                | Saved resident sessions that survive closing a tab and are listed under **Background sessions**                                                        |
 | Highlights | Extension gallery, extension dialogs and widgets, project-trust dialog, Abliteration models | Native subagents, goals, schedules (heartbeat and cron), side questions, trace inspection and export, native Fast and Ultrafast OpenAI speed transport |
@@ -304,6 +307,10 @@ launcher entry, and uninstall through your package manager.
   GNOME and KDE Plasma get window buttons. Tiling compositors such as Hyprland (Omarchy), sway or
   niri manage windows themselves, so Vengeance shows none. Set `VENGEANCE_WINDOW_CONTROLS` to
   `native` or `none` to choose yourself.
+- **Trash on minimal desktops.** AppImage and tar.gz users need `gio` on `PATH` to move files to
+  Trash, including restoring instruction defaults. Debian and Ubuntu provide it in
+  `libglib2.0-bin`; Fedora and Arch provide it in `glib2`. The deb, rpm and pacman packages install
+  the provider automatically.
 - **Secrets.** Environment values Vengeance stores for the engines, such as API keys, are encrypted
   with your desktop's secret store when one is running: a Secret Service such as gnome-keyring or
   KeePassXC, or KWallet on KDE Plasma. Without one they are stored in plain text in
@@ -358,7 +365,8 @@ To run Vengeance:
 - [uv](https://docs.astral.sh/uv/) for Engine 2's Python kernel. Engine 2 sets the kernel up with uv
   the first time it needs it, and Vengeance does not install uv for you: put it on `PATH` or in
   `~/.local/bin`. That setup downloads Python and the kernel's packages, so it needs a network
-  connection.
+  connection. Intel macOS packages include a Vengeance-built cryptography wheel with static OpenSSL;
+  kernel setup does not require Rust, a C compiler or an OpenSSL installation.
 
 To build from source:
 
@@ -369,7 +377,9 @@ To build from source:
   `x86_64-unknown-linux-gnu` or `aarch64-unknown-linux-gnu`.
 - **Windows:** Git Bash, Rust's GNU host toolchain, a MinGW-w64 GCC, and GNU `objdump` on `PATH`
   (`OBJDUMP` can point at it).
-- **macOS:** the Xcode Command Line Tools (`xcode-select --install`).
+- **macOS:** the Xcode Command Line Tools (`xcode-select --install`). Intel builds also use the
+  system Perl and make to build the locked cryptography/OpenSSL wheel; the builder downloads and
+  verifies its pinned Python and build dependencies. See [UPSTREAM.md](UPSTREAM.md#intel-macos-python-runtime-wheel).
 - **Linux:** a compiler and binutils (`build-essential` and `binutils` on Debian and Ubuntu,
   `base-devel` on Arch). `npm run dist` also needs `rpmbuild` for the rpm and, on x64,
   `bsdtar` for the pacman package (the `rpm` and `libarchive-tools` packages on Debian and Ubuntu).
@@ -476,8 +486,14 @@ workflow artifacts. Pull requests also get a dependency review.
 
 The [release workflow](.github/workflows/release.yml) runs when a `v<version>` tag is pushed. It
 builds and packages all five platforms on their own runners, checks the baked update feed, the glibc
-baseline and the macOS signatures, smoke-tests a packaged build on each platform and install-tests
-the deb, rpm and pacman packages. Then it creates a draft GitHub release with every package, `SHA256SUMS` and a
+baseline and the macOS signatures, and runs nine native-engine suites serially against each packaged
+QA app. macOS also checks that background processes stay out of the Dock using OS application
+observations and desktop captures. Both macOS and Linux architectures also qualify Engine 2 upgrades
+from checksum-pinned official 0.3.2 packages to the final packaged candidate. A separate
+first-navigation benchmark runs against the built app
+on all five platforms and retains timings, native identities, profiles and captures. The workflow
+install-tests the deb, rpm and pacman packages.
+Then it creates a draft GitHub release with every package, `SHA256SUMS` and a
 provenance attestation, which the maintainer reviews and publishes. Pull requests that change
 packaging, the engines or the workflow run it as a dry run that never publishes. The maintainer
 steps are in [CONTRIBUTING.md](CONTRIBUTING.md#releases).
@@ -527,8 +543,9 @@ The app version is defined in [package.json](package.json).
 
 ### Release notes
 
-**Latest: [Vengeance 0.3.2](docs/RELEASE-0.3.2.md)** covers the changes and checks for the current
-version. The packages themselves are on the
+**Latest: [Vengeance 0.3.3](docs/RELEASE-0.3.3.md)** covers system prompt editing, safer restarts,
+conversation navigation and the macOS background-process fix, with qualification status for this
+version. Published packages are on the
 [GitHub release](https://github.com/LuciferMornens/vengeance/releases/latest).
 
 <details>
@@ -539,6 +556,7 @@ They are evidence, not current installation status or promises that local genera
 exist. Use the lockfile and current guides for maintenance instructions. Reports before 0.3.0 cover
 local Windows x64 builds only.
 
+- [Release 0.3.2](docs/RELEASE-0.3.2.md): lower memory use and lighter streaming, long sessions and tabs.
 - [Release 0.3.1](docs/RELEASE-0.3.1.md): app self-update works again; Vengeance License 1.0.
 - [Release 0.3.0](docs/RELEASE-0.3.0.md): first published release, and the first for macOS and
   Linux.

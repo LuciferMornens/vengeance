@@ -1,7 +1,8 @@
 // Process inspection for QA: liveness, the descendant tree of a process the harness started
 // (orphan checks on quit), and killing only trees the harness owns. Windows asks tasklist, taskkill
-// and CIM; Linux reads /proc; macOS asks ps.
+// and CIM; Linux reads /proc; macOS uses ps and the kernel's executable-path query.
 import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { readdir, readFile, readlink, realpath } from 'node:fs/promises'
 import { basename, isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
@@ -13,6 +14,8 @@ const TERM_GRACE_MS = 3_000
 const POLL_MS = 50
 const PROCESS_INSPECTION_TIMEOUT_MS = 10_000
 const PS_MAX_BUFFER = 64 * 1024 * 1024
+/** macOS ps reports elapsed process time in whole seconds. */
+const PROCESS_START_TOLERANCE_MS = process.platform === 'darwin' ? 1000 : 0
 /** /proc/<pid>/stat counts in USER_HZ: 100 on every architecture Vengeance ships (x64, arm64). */
 const LINUX_TICKS_PER_SECOND = 100
 
@@ -21,10 +24,37 @@ const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms)
 export function isAlive(pid) {
   try {
     process.kill(pid, 0)
-    return true
   } catch (error) {
     return error.code === 'EPERM'
   }
+  if (process.platform !== 'linux') return true
+  try {
+    const state = linuxStat(readFileSync(join('/proc', String(pid), 'stat'), 'utf8'))[1][0]
+    return state !== 'Z' && state !== 'X' && state !== 'x'
+  } catch (error) {
+    // Uninspectable processes remain alive for cleanup and exit assertions.
+    return error.code !== 'ENOENT' && error.code !== 'ESRCH'
+  }
+}
+
+export function sameProcess(first, second) {
+  return (
+    first.pid === second.pid &&
+    first.createdMs > 0 &&
+    second.createdMs > 0 &&
+    first.createdMs === second.createdMs
+  )
+}
+
+/** An unreadable creation time keeps a matching PID protected from QA cleanup. */
+export function processWasPresent(entry, snapshot) {
+  return snapshot.some(
+    (previous) =>
+      previous.pid === entry.pid &&
+      (!(previous.createdMs > 0) ||
+        !(entry.createdMs > 0) ||
+        Math.abs(entry.createdMs - previous.createdMs) <= PROCESS_START_TOLERANCE_MS)
+  )
 }
 
 function signal(pid, name) {
@@ -208,7 +238,41 @@ export function descendants(table, pid) {
   return out
 }
 
-/** { pid, parentPid, executablePath } of one running process. */
+async function macExecutable(pid) {
+  // ps comm and argv are mutable through process.title; only the kernel path identifies the binary.
+  const python = process.env.PYTHON ?? 'python3'
+  const maximumOutputBytes = 64 * 1024
+  const source = `import ctypes
+import json
+import os
+import sys
+
+# PROC_PIDPATHINFO_MAXSIZE from the macOS sys/proc_info.h protocol.
+PROC_PIDPATHINFO_MAXSIZE = 4096
+library = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+lookup = library.proc_pidpath
+lookup.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+lookup.restype = ctypes.c_int
+buffer = ctypes.create_string_buffer(PROC_PIDPATHINFO_MAXSIZE)
+length = lookup(int(sys.argv[1]), buffer, ctypes.sizeof(buffer))
+if length <= 0 or length >= ctypes.sizeof(buffer):
+    raise OSError(ctypes.get_errno(), "proc_pidpath did not return an executable path")
+print(json.dumps(os.fsdecode(buffer.value)))
+`
+  const { stdout } = await execFileAsync(python, ['-I', '-B', '-c', source, String(pid)], {
+    timeout: PROCESS_INSPECTION_TIMEOUT_MS,
+    maxBuffer: maximumOutputBytes
+  }).catch((error) => {
+    const reason =
+      error.code === 'ENOENT'
+        ? `Python 3 is required for macOS process identity (${python})`
+        : `The macOS kernel executable query failed for process ${pid}`
+    throw new Error(`${reason}: ${error.message}`, { cause: error })
+  })
+  return JSON.parse(stdout)
+}
+
+/** Full executable identity; createdMs is omitted when the platform exposes only a coarse estimate. */
 export async function processIdentity(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('The native worker has no valid PID')
   const unknown = () => new Error(`Native process ${pid} could not be inspected`)
@@ -216,22 +280,39 @@ export async function processIdentity(pid) {
     const stat = await readFile(join('/proc', String(pid), 'stat'), 'utf8').catch(() => null)
     const executablePath = await linuxExecutable(pid)
     if (!stat || !executablePath) throw unknown()
-    return { pid, parentPid: Number(linuxStat(stat)[1][1]), executablePath }
+    const fields = linuxStat(stat)[1]
+    const bootSeconds = /^btime (\d+)$/m.exec(await readFile('/proc/stat', 'utf8'))?.[1]
+    return {
+      pid,
+      parentPid: Number(fields[1]),
+      executablePath,
+      createdMs: bootSeconds
+        ? Number(bootSeconds) * 1000 + (Number(fields[19]) * 1000) / LINUX_TICKS_PER_SECOND
+        : undefined
+    }
   }
   if (process.platform === 'darwin') {
-    // macOS `comm` is the path the process started from; resolve it like Windows' ExecutablePath.
-    const [line] = await ps(['-ww', '-o', 'ppid=,comm=', '-p', String(pid)]).catch(() => [])
-    const match = /^\s*(\d+) +(.+)$/.exec(line ?? '')
-    if (!match || !isAbsolute(match[2].trim())) throw unknown()
+    const argumentsList = ['-ww', '-o', 'ppid=,lstart=', '-p', String(pid)]
+    const [before] = await ps(argumentsList).catch(() => [])
+    const match = /^\s*(\d+)\s+(.+)$/.exec(before ?? '')
+    if (!match) throw unknown()
+    const executablePath = await macExecutable(pid)
+    const [after] = await ps(argumentsList).catch(() => [])
+    if (
+      before.trim() !== after?.trim() ||
+      typeof executablePath !== 'string' ||
+      !isAbsolute(executablePath)
+    )
+      throw unknown()
     return {
       pid,
       parentPid: Number(match[1]),
-      executablePath: await realpath(match[2].trim()).catch(() => match[2].trim())
+      executablePath: await realpath(executablePath).catch(() => executablePath)
     }
   }
   const script = [
     `Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'`,
-    'Select-Object ProcessId,ParentProcessId,ExecutablePath',
+    'Select-Object ProcessId,ParentProcessId,ExecutablePath,@{n="Created";e={[DateTimeOffset]::new($_.CreationDate).ToUnixTimeMilliseconds()}}',
     'ConvertTo-Json -Compress'
   ].join(' | ')
   const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', script], {
@@ -243,6 +324,7 @@ export async function processIdentity(pid) {
   return {
     pid: record.ProcessId,
     parentPid: record.ParentProcessId,
-    executablePath: record.ExecutablePath
+    executablePath: record.ExecutablePath,
+    createdMs: Number(record.Created ?? 0)
   }
 }

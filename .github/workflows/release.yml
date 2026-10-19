@@ -28,12 +28,25 @@ on:
       - rust-toolchain.toml
       - scripts/build-prime-auth.mjs
       - scripts/ci/**
+      - scripts/checks/qa-native-temp.mjs
+      - scripts/checks/native-diagnostics.mjs
+      - scripts/checks/process-identity.mjs
+      - scripts/checks/prime-process-liveness.mjs
+      - scripts/checks/prime-runtime-wheels.mjs
+      - scripts/checks/native-kernel.mjs
+      - scripts/checks/native-macho.mjs
       - scripts/dist.mjs
       - scripts/dist-qa.mjs
       - scripts/engines/**
-      - scripts/qa/engines/integration-fixture.mjs
-      - scripts/qa/engines/packaged.qa.mjs
+      - scripts/qa/engines/**
       - scripts/qa/lib/**
+      - scripts/qa/settings/system-prompts.qa.mjs
+      - scripts/perf/first-navigation.mjs
+      - scripts/perf/lib/**
+      - scripts/qa/sessions/lib/session-files.mjs
+      - src/main/electron-node.ts
+      - src/main/engine/**
+      - src/main/shell-env.ts
 
 permissions: {}
 
@@ -141,7 +154,7 @@ jobs:
             rpm libarchive-tools fakeroot file procps \
             libgtk-3-0 libnss3 libxss1 libxtst6 libatk-bridge2.0-0 libatk1.0-0 libcups2 libdrm2 \
             libgbm1 libasound2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libxfixes3 \
-            libpango-1.0-0 libcairo2 libnotify4 libsecret-1-0 \
+            libpango-1.0-0 libcairo2 libnotify4 libsecret-1-0 libglib2.0-bin \
             xvfb xauth fonts-dejavu-core
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -157,6 +170,11 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
+      - name: Install the native Python kernel bootstrap prerequisite
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.13.1'
+          enable-cache: false
       # The GNU host toolchain, as on a developer machine (see ci.yml).
       - name: Use the GNU Rust host and MinGW (Windows)
         if: runner.os == 'Windows'
@@ -171,6 +189,20 @@ jobs:
           targets: ${{ matrix.rust-target }}
           components: clippy, rustfmt
       - run: npm ci
+      - name: Validate QA runtime paths and failure diagnostics
+        run: |
+          node scripts/checks/qa-native-temp.mjs
+          node scripts/checks/native-diagnostics.mjs
+          node scripts/checks/process-identity.mjs
+          node scripts/checks/prime-process-liveness.mjs
+          node scripts/checks/prime-runtime-wheels.mjs
+          node scripts/checks/native-kernel.mjs
+          node scripts/checks/native-macho.mjs
+      - name: Validate the macOS application observer
+        if: runner.os == 'macOS'
+        run: |
+          xcrun swift-format lint --strict scripts/qa/lib/macos-application-observer.swift
+          xcrun swiftc scripts/qa/lib/macos-application-observer.swift -o "$RUNNER_TEMP/application-observer-check"
       - name: Build the engines
         run: npm run build:engines
       - name: Build the Engine 2 helper
@@ -245,21 +277,94 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
-      # The smoke test runs the same app under the QA identity (scripts/dist-qa.mjs), with only the
-      # system PATH and local fake providers. Its temp root defaults outside HOME on every runner.
+      # Native engine qualification uses the packaged QA identity with isolated accounts and
+      # local providers. Its temporary root defaults outside HOME on every runner.
       - name: Build the QA app
         run: |
           node scripts/dist-qa.mjs --dir | tee "$RUNNER_TEMP/dist-qa.log"
           executable=$(sed -n 's/^QA executable: //p' "$RUNNER_TEMP/dist-qa.log")
           test -x "$executable"
           echo "QA_PACKAGED_EXE=$executable" >> "$GITHUB_ENV"
-      - name: Smoke test the packaged app
+      - name: Qualify both packaged engines
+        env:
+          QA_REPORT_DIR: .shots/qa/release/engine-qualification
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
-            xvfb-run -a -s '-screen 0 2560x1440x24' node scripts/qa/engines/packaged.qa.mjs
+            xvfb-run -a -s '-screen 0 2560x1440x24' node scripts/qa/engines/platform-qualification.mjs
           else
-            node scripts/qa/engines/packaged.qa.mjs
+            node scripts/qa/engines/platform-qualification.mjs
           fi
+      - name: Check background application visibility (macOS)
+        if: runner.os == 'macOS'
+        env:
+          QA_REPORT_DIR: .shots/qa/release/background-applications
+        run: |
+          dock_autohide=$(defaults read com.apple.dock autohide 2>/dev/null || true)
+          restore_dock() {
+            if [ -n "$dock_autohide" ]; then
+              defaults write com.apple.dock autohide -bool "$dock_autohide"
+            else
+              defaults delete com.apple.dock autohide || true
+            fi
+            killall Dock || true
+          }
+          trap restore_dock EXIT
+          defaults write com.apple.dock autohide -bool false
+          killall Dock || true
+          node scripts/qa/engines/background-apps.qa.mjs
+      - name: Stage the published Engine 2 upgrade baseline
+        if: runner.os != 'Windows'
+        env:
+          QA_REPORT_DIR: .shots/qa/release/release-baseline
+        run: node scripts/qa/engines/release-baseline.mjs
+      - name: Qualify native Engine 2 upgrades
+        if: runner.os != 'Windows'
+        env:
+          QA_PLATFORM_GROUP: upgrade
+          QA_RELEASE_BASELINE_ENV: >-
+            ${{ github.workspace }}/.shots/qa/release/release-baseline/release-baseline-env.json
+          QA_REPORT_DIR: .shots/qa/release/engine-upgrade
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a -s '-screen 0 2560x1440x24' node scripts/qa/engines/platform-qualification.mjs
+          else
+            node scripts/qa/engines/platform-qualification.mjs
+          fi
+      - name: Benchmark first conversation navigation
+        env:
+          BENCHMARK_LABEL: release-${{ matrix.id }}
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a -s '-screen 0 2560x1440x24' node scripts/perf/first-navigation.mjs --label "$BENCHMARK_LABEL" --runs 3
+          else
+            node scripts/perf/first-navigation.mjs --label "$BENCHMARK_LABEL" --runs 3
+          fi
+      - name: Upload native engine qualification
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: engine-qualification-${{ matrix.id }}
+          # Relative paths also resolve inside the Linux build container.
+          path: |
+            .shots/qa/release
+            .shots/perf/first-navigation
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+      - name: Record release provenance
+        run: |
+          node scripts/ci/release-receipt.mjs \
+            --app "$GITHUB_WORKSPACE/$UNPACKED" \
+            --artifacts "$GITHUB_WORKSPACE/release" \
+            --output "$RUNNER_TEMP/release-receipt.json" \
+            --revision "$GITHUB_SHA"
+      - name: Upload release provenance
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: provenance-${{ matrix.id }}
+          path: ${{ runner.temp }}/release-receipt.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Upload the smoke test screenshots
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -307,6 +412,7 @@ jobs:
           done
           test -f /usr/share/applications/vengeance.desktop
           command -v vengeance
+          command -v gio
 
   install-rpm:
     name: Install the rpm (${{ matrix.id }})
@@ -346,6 +452,7 @@ jobs:
           done
           test -f /usr/share/applications/vengeance.desktop
           command -v vengeance
+          command -v gio
 
   install-pacman:
     name: Install the pacman package (linux-x64)
@@ -378,6 +485,7 @@ jobs:
             fi
           done
           test -f /usr/share/applications/vengeance.desktop
+          command -v gio
 
   publish:
     name: Draft the GitHub release

@@ -1,4 +1,10 @@
-import type { AgentInfo, EngineStatus } from '@shared/api/engine'
+import {
+  hasBridgeCommands,
+  isBridgeCommand,
+  type AgentInfo,
+  type EngineStatus
+} from '@shared/api/engine'
+import { SUBAGENT_HOST_COMMANDS } from '@shared/subagents'
 import type { SpeedState } from '@shared/api/speed'
 import type {
   AgentMessage,
@@ -205,6 +211,8 @@ export interface AgentState {
   engineGeneration: number
   /** Invalidates reads begun before an authoritative native attachment snapshot. */
   snapshotRevision: number
+  /** Full history committed for the current engine generation and session. */
+  historyLoaded: boolean
   info: AgentInfo
   status: EngineStatus
   error?: string
@@ -230,6 +238,8 @@ export interface AgentState {
   /** Latest cumulative usage of the streaming assistant response. */
   liveUsage?: Usage
   commands: RpcSlashCommand[]
+  commandsStatus: 'loading' | 'ready' | 'error'
+  commandsRevision: number
   retry: RetryState | null
   /** Final auto-retry failure message, cleared by the next run. */
   retryError?: string
@@ -255,6 +265,7 @@ export function createAgentState(info: AgentInfo): AgentState {
     id: info.agentId,
     engineGeneration: 0,
     snapshotRevision: 0,
+    historyLoaded: false,
     info,
     status: info.status,
     error: info.error,
@@ -270,6 +281,8 @@ export function createAgentState(info: AgentInfo): AgentState {
     modelChangePending: false,
     sessionName: info.sessionName,
     commands: [],
+    commandsStatus: 'loading',
+    commandsRevision: 0,
     retry: null,
     compaction: null,
     summarizationRetry: null,
@@ -279,5 +292,77 @@ export function createAgentState(info: AgentInfo): AgentState {
     extensionErrors: [],
     appendedEntries: [],
     lastEventAt: Date.now()
+  }
+}
+
+export function hasReadyHistory(agent: AgentState | undefined): boolean {
+  return agent?.status === 'ready' && agent.historyLoaded
+}
+
+export function restartedRuntime(agent: AgentState): Partial<AgentState> {
+  const fresh = createAgentState({ ...agent.info, status: 'starting', busy: false })
+  return {
+    historyLoaded: false,
+    commandsStatus: 'loading',
+    modelChangePending: false,
+    // The new engine process reports its own speed once it is ready.
+    speed: undefined,
+    phase: 'idle',
+    turnActive: false,
+    streaming: null,
+    queue: fresh.queue,
+    retry: null,
+    retryError: undefined,
+    compaction: null,
+    summarizationRetry: null,
+    liveUsage: undefined,
+    // The editor nonce must remain monotonic across engine replacement.
+    ext: { ...fresh.ext, editorText: agent.ext.editorText },
+    extensionErrors: []
+  }
+}
+
+export function capabilityStatePatch(
+  agent: AgentState,
+  state: RpcSessionState,
+  levels: ThinkingLevel[],
+  commands: RpcSlashCommand[],
+  modelRevision: number | undefined
+): Partial<AgentState> {
+  return {
+    historyLoaded: agent.historyLoaded && agent.session?.sessionId === state.sessionId,
+    ...(agent.modelRevision === modelRevision && !agent.modelChangePending
+      ? {
+          session: state,
+          model: state.model,
+          thinkingLevel: state.thinkingLevel,
+          thinkingLevels: levels
+        }
+      : {}),
+    sessionName: state.sessionName,
+    commands: commands.filter(
+      (command) => !isBridgeCommand(command) && !SUBAGENT_HOST_COMMANDS.includes(command.name)
+    ),
+    commandsStatus: 'ready',
+    info: {
+      ...agent.info,
+      lineage: state.lineage,
+      bridge: agent.info.engine === 'pi' ? hasBridgeCommands(commands) : agent.info.bridge
+    }
+  }
+}
+
+export function sessionStatePatch(
+  agent: AgentState,
+  state: RpcSessionState,
+  modelRevision: number | undefined
+): Partial<AgentState> {
+  return {
+    historyLoaded: agent.historyLoaded && agent.session?.sessionId === state.sessionId,
+    ...(agent.modelRevision === modelRevision && !agent.modelChangePending
+      ? { session: state, model: state.model, thinkingLevel: state.thinkingLevel }
+      : {}),
+    sessionName: state.sessionName,
+    info: { ...agent.info, lineage: state.lineage }
   }
 }

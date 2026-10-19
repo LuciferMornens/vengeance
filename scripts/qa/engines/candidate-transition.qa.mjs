@@ -3,7 +3,13 @@ import { mkdir, realpath, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { launchApp, ROOT } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
-import { executableName } from '../lib/platform.mjs'
+import {
+  prepareNativeBaseline,
+  verifyIntelKernelUpgrade,
+  verifyNativeBaseline
+} from '../lib/native-kernel.mjs'
+import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
+import { executableName, resourcesDirOf } from '../lib/platform.mjs'
 import { isAlive, processIdentity } from '../lib/processes.mjs'
 import { waitFor } from '../settings/settings-ui.mjs'
 import {
@@ -30,6 +36,7 @@ const fixture = await createEngineFixture()
 const report = { startedAt: new Date().toISOString(), checks: [] }
 let application
 let failure
+let baselineKernel
 
 function samePath(actual, expected) {
   return typeof actual === 'string' && resolve(actual).toLowerCase() === expected.toLowerCase()
@@ -60,17 +67,35 @@ async function setExecutable(executable) {
 }
 
 try {
+  assert.ok(fixture.candidate, 'Select and hash the reviewed native candidate')
+  if (process.env.QA_PACKAGED_EXE) {
+    assert.ok(process.env.QA_PRIME_BASELINE_EXECUTABLE, 'Select the reviewed baseline package')
+    assert.match(process.env.QA_PRIME_BASELINE_SHA256 ?? '', /^[a-f0-9]{64}$/i)
+    const packagedCandidate = await realpath(
+      join(
+        resourcesDirOf(resolve(process.env.QA_PACKAGED_EXE)),
+        'engines',
+        'prime',
+        executableName('prime-agent')
+      )
+    )
+    assert.ok(samePath(fixture.candidate.executablePath, packagedCandidate))
+  }
   const officialExecutable = await realpath(
     process.env.QA_PRIME_BASELINE_EXECUTABLE ??
       join(ROOT, '.engine-staging', 'prime', 'release', executableName('prime-agent'))
   )
   const officialHash = await executableHash(officialExecutable)
+  if (process.env.QA_PRIME_BASELINE_SHA256) {
+    assert.equal(officialHash, process.env.QA_PRIME_BASELINE_SHA256.toLowerCase())
+  }
   assert.ok(!samePath(officialExecutable, fixture.candidate.executablePath))
   assert.notEqual(officialHash, fixture.candidate.sha256)
   await mkdir(OUTPUT_DIRECTORY, { recursive: true })
+  baselineKernel = await prepareNativeBaseline(fixture, officialExecutable, OUTPUT_DIRECTORY)
   application = await launchApp({
+    ...packagedLaunchOptions(fixture.environment),
     agentDir: fixture.piDirectory.dir,
-    env: fixture.environment,
     outDir: OUTPUT_DIRECTORY
   })
   const officialDescription = await setExecutable(officialExecutable)
@@ -173,12 +198,30 @@ try {
     report.finalIdentity = await fixture.verifyPrimeExecutable(application, agentId)
     assert.equal(await executableHash(officialExecutable), officialHash)
   })
+  if (baselineKernel?.prewarm) {
+    await check('Intel candidate refreshes the older kernel with its packaged wheel', async () => {
+      report.kernelUpgrade = await verifyIntelKernelUpgrade(
+        application,
+        fixture,
+        agentId,
+        baselineKernel,
+        OUTPUT_DIRECTORY
+      )
+    })
+  }
+  if (process.env.QA_PACKAGED_EXE) {
+    await application.invoke('app:set-state', { engineOverridePaths: { prime: null } })
+    await recordPackagedTarget(application)
+  }
   application.assertNoErrors()
 } catch (error) {
   failure = error
   await application?.screenshot('FAILED').catch(() => undefined)
 } finally {
   await application?.close({ beforeCleanup: fixture.stopNativeDaemon }).catch((error) => {
+    failure ??= error
+  })
+  await verifyNativeBaseline(baselineKernel, OUTPUT_DIRECTORY).catch((error) => {
     failure ??= error
   })
   await fixture.cleanup().catch((error) => {

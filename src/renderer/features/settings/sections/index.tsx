@@ -72,8 +72,7 @@ export const SECTIONS: SectionDef[] = [
     id: 'models',
     label: 'Models',
     icon: <BrainCircuit />,
-    description:
-      `Default model, thinking levels, response speed and which models ${shortcutText('mod+p')} cycles through.`,
+    description: `Default model, thinking levels, response speed and which models ${shortcutText('mod+p')} cycles through.`,
     scoped: true,
     groupLabel: 'Engine',
     render: () => <SchemaGroups section="models" extras={{ Defaults: <SpeedDefaultRow /> }} />
@@ -228,8 +227,8 @@ export function getSections(engine: EngineId, capabilities?: EngineCapabilities)
           description: 'Session storage, context and instruction files for Engine 2.',
           render: () => (
             <>
-              <PrimeSettingsGroups section="sessions" />
               <InstructionsGroup />
+              <PrimeSettingsGroups section="sessions" />
               <ContextGroup />
             </>
           )

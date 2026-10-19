@@ -1,5 +1,6 @@
 import { copyFile, cp, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { buildPrimeWheels } from './build-prime-wheels.mjs'
 import {
   download,
   executableName,
@@ -91,7 +92,9 @@ export async function buildPrime(source, output, engine, platform) {
     executableName('prime-agent', platform.key)
   )
   const catalogs = join(staging, 'catalogs', engine.catalogRevision)
-  const catalogBase = `https://raw.githubusercontent.com/PrimeIntellect-ai/prime-agent-catalog/${engine.catalogRevision}`
+  const catalogRepository =
+    'https://raw.githubusercontent.com/PrimeIntellect-ai/prime-agent-catalog'
+  const catalogBase = `${catalogRepository}/${engine.catalogRevision}`
   await download(`${catalogBase}/models/catalog.v1.json`, join(catalogs, 'models.bundled.json'))
   await download(
     `${catalogBase}/plugins/catalog.v2.json`,
@@ -134,4 +137,5 @@ export async function buildPrime(source, output, engine, platform) {
   })
   await copyFile(join(source, 'Cargo.lock'), join(output, 'Cargo.lock'))
   await readFile(join(output, 'prime-agent-runtime/src/rlm/repl.py'))
+  await buildPrimeWheels(output, engine, platform, toolchain, buildJobs)
 }

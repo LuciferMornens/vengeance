@@ -3,15 +3,16 @@ import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { runInNewContext } from 'node:vm'
+import { MockEngineProcess } from '../../src/main/engine/mock'
 import { DEFAULT_APP_STATE, type AppPersistedState } from '../../src/shared/api/app'
-import type { AgentInfo, EngineId } from '../../src/shared/api/engine'
+import type { AgentInfo, CreateAgentArgs, EngineId } from '../../src/shared/api/engine'
 import type { JsonObject, SettingsSnapshot } from '../../src/shared/api/settings'
-import type { EngineEvent } from '../../src/shared/engine-types'
+import type { EngineEvent, RpcCommand } from '../../src/shared/engine-types'
 import { check } from './harness'
 
 interface SettingsApi {
   startAgentEventPump(): void
-  restartAgentsWhenIdle(agentIds: string[]): void
+  restartAgentsWhenIdle(agentIds: string[], patch?: Partial<CreateAgentArgs>): void
   useSettings: { getState(): { load(): Promise<void> } }
   useApp: { getState(): { load(): Promise<void> } }
   useAgents: {
@@ -69,7 +70,14 @@ await check(
     const listeners = new Map<string, Array<(event: unknown) => void>>()
     const notices: Notice[] = []
     const agentInfos = new Map<string, AgentInfo>()
+    const protocolHandles = new Map<string, Promise<MockEngineProcess>>()
+    const restartPatches: Partial<CreateAgentArgs>[] = []
     let restartAttempts = 0
+    let transientRestartRefusals = 0
+    let holdNextRestart = false
+    let acceptRestarts = false
+    let releaseRestart: ((info: AgentInfo) => void) | undefined
+    let completedRefreshes = 0
     const reads: string[] = []
     const globals: Record<EngineId, JsonObject> = { pi: {}, prime: {} }
     const projects = new Map<string, JsonObject>()
@@ -134,7 +142,43 @@ await check(
             if (channel === 'engine:dispose') return
             if (channel === 'engine:restart') {
               restartAttempts += 1
+              // The IPC channel's third positional argument carries the launch patch.
+              const patch = (agentId ?? {}) as unknown as Partial<CreateAgentArgs>
+              if (holdNextRestart) {
+                holdNextRestart = false
+                restartPatches.push(patch)
+                return new Promise<AgentInfo>((resolveRestart) => {
+                  releaseRestart = resolveRestart
+                })
+              }
+              if (acceptRestarts) {
+                restartPatches.push(patch)
+                const current = agentInfos.get(String(args))!
+                const next = { ...current, args: { ...current.args, ...patch } }
+                agentInfos.set(next.agentId, next)
+                return next
+              }
+              if (transientRestartRefusals > 0) {
+                transientRestartRefusals--
+                throw new Error(
+                  'Wait for the current session operation to finish before restarting'
+                )
+              }
               throw new Error('A sibling session is busy')
+            }
+            if (channel === 'engine:command') {
+              const id = String(args)
+              let pending = protocolHandles.get(id)
+              if (!pending) {
+                const handle = new MockEngineProcess(agentInfos.get(id)!.args)
+                pending = handle.start().then(() => handle)
+                protocolHandles.set(id, pending)
+              }
+              // Native command payloads occupy the IPC channel's third positional argument.
+              const command = agentId as unknown as RpcCommand
+              const response = await (await pending).send(command)
+              if (command.type === 'get_session_stats') completedRefreshes++
+              return response
             }
             if (channel === 'engine:list') return [...agentInfos.values()]
             if (channel === 'engine:create') {
@@ -350,5 +394,56 @@ await check(
     await settle()
     assert.equal(restartAttempts, 1)
     assert.equal(notices.at(-1)?.title, 'Could not restart session', 'refusal surfaces an error')
+
+    transientRestartRefusals = 1
+    const noticesBeforeRetry = notices.length
+    api.restartAgentsWhenIdle([savedAgent.agentId])
+    await settle()
+    assert.equal(restartAttempts, 2)
+    assert.equal(notices.length, noticesBeforeRetry, 'a temporary refusal stays pending quietly')
+    const retryDeadlineMilliseconds = 2000
+    const retryPollMilliseconds = 25
+    const deadline = Date.now() + retryDeadlineMilliseconds
+    while (restartAttempts < 3 && Date.now() < deadline) {
+      await new Promise((resolveRetry) => setTimeout(resolveRetry, retryPollMilliseconds))
+    }
+    await settle()
+    assert.equal(restartAttempts, 3, 'the deferred request retries after command admission settles')
+    assert.equal(notices.length, noticesBeforeRetry + 1, 'a permanent failure still surfaces once')
+
+    const attemptsBeforePatchQueue = restartAttempts
+    const noticesBeforePatchQueue = notices.length
+    holdNextRestart = true
+    acceptRestarts = true
+    try {
+      api.restartAgentsWhenIdle([savedAgent.agentId], { approve: true })
+      await settle()
+      assert.ok(releaseRestart, 'the first restart reached its public IPC boundary')
+      api.restartAgentsWhenIdle([savedAgent.agentId], { approve: false })
+      await settle()
+      assert.equal(restartAttempts, attemptsBeforePatchQueue + 1)
+      releaseRestart({ ...readyInfo, args: { ...readyInfo.args, approve: true } })
+      const queueDeadline = Date.now() + retryDeadlineMilliseconds
+      const expectedRefreshes = 2
+      while (completedRefreshes < expectedRefreshes && Date.now() < queueDeadline) {
+        await new Promise((resolveQueue) => setTimeout(resolveQueue, retryPollMilliseconds))
+      }
+      await settle()
+      assert.equal(restartAttempts, attemptsBeforePatchQueue + 2, 'the newer patch drains in order')
+      assert.deepEqual(JSON.parse(JSON.stringify(restartPatches)), [
+        { approve: true },
+        { approve: false }
+      ])
+      assert.equal(
+        completedRefreshes,
+        expectedRefreshes,
+        'both successful restarts refresh their state'
+      )
+      assert.equal(notices.length, noticesBeforePatchQueue, 'successful queued restarts stay quiet')
+    } finally {
+      await Promise.all(
+        [...protocolHandles.values()].map(async (pending) => (await pending).stop())
+      )
+    }
   }
 )

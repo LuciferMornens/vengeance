@@ -259,10 +259,10 @@ function SavedTrustGroup() {
 export function SessionsSection() {
   return (
     <>
+      <InstructionsGroup />
       <TrustGroup />
       <SchemaGroups section="sessions" />
       <SavedTrustGroup />
-      <InstructionsGroup />
       <ContextGroup />
     </>
   )

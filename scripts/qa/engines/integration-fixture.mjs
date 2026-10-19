@@ -6,7 +6,7 @@ import { createAgentDir } from '../lib/agent-dir.mjs'
 import { ROOT, shutdownOwnedPrimeDaemons } from '../lib/app.mjs'
 import { API, startFakeLlm } from '../lib/fake-llm.mjs'
 import { executableName } from '../lib/platform.mjs'
-import { processIdentity, processTable } from '../lib/processes.mjs'
+import { processIdentity, processTable, processWasPresent } from '../lib/processes.mjs'
 import { tempRoot } from '../lib/tmp.mjs'
 
 export const PRIME_PROVIDER = 'qa-prime'
@@ -71,7 +71,7 @@ function sameExecutable(actual, expected) {
   return typeof actual === 'string' && resolve(actual).toLowerCase() === expected.toLowerCase()
 }
 
-async function verifyCandidate(application, agentId, candidate, agentDirectory, foreignPids) {
+async function verifyCandidate(application, agentId, candidate, agentDirectory, foreignProcesses) {
   if (!candidate) return null
   const description = await application.invoke('engine:describe', 'prime')
   if (
@@ -87,9 +87,10 @@ async function verifyCandidate(application, agentId, candidate, agentDirectory, 
   )
   const worker = await processIdentity(descriptor?.pid)
   const daemon = await processIdentity(worker.parentPid)
+  const current = await processTable()
+  const foreign = current.filter((entry) => processWasPresent(entry, foreignProcesses))
   if (
-    foreignPids.includes(worker.pid) ||
-    foreignPids.includes(daemon.pid) ||
+    foreign.some((entry) => entry.pid === worker.pid || entry.pid === daemon.pid) ||
     !sameExecutable(worker.executablePath, candidate.executablePath) ||
     !sameExecutable(daemon.executablePath, candidate.executablePath)
   ) {
@@ -138,7 +139,7 @@ function isolatedPrimeEnvironment(agentDirectory, kernelDirectory, executable) {
 
 export async function createEngineFixture() {
   const { executable, candidate } = await fixtureExecutable()
-  const foreignPids = (await processTable()).map((entry) => entry.pid)
+  const foreignProcesses = await processTable()
   const root = await tempRoot('vengeance-qa-engines-')
   let piServer
   let primeServer
@@ -186,7 +187,7 @@ export async function createEngineFixture() {
     let cleaned = false
     let nativeStop
     const stopNativeDaemon = () => {
-      nativeStop ??= shutdownOwnedPrimeDaemons(primeDirectory, foreignPids).finally(() => {
+      nativeStop ??= shutdownOwnedPrimeDaemons(primeDirectory, foreignProcesses).finally(() => {
         nativeStop = undefined
       })
       return nativeStop
@@ -202,7 +203,7 @@ export async function createEngineFixture() {
       environment,
       candidate,
       verifyPrimeExecutable(application, agentId) {
-        return verifyCandidate(application, agentId, candidate, primeDirectory, foreignPids)
+        return verifyCandidate(application, agentId, candidate, primeDirectory, foreignProcesses)
       },
       stopNativeDaemon,
       async cleanup() {

@@ -264,6 +264,7 @@ function applyNativeSnapshot(state: AgentState, data: Record<string, unknown>): 
   return {
     ...state,
     snapshotRevision: state.snapshotRevision + 1,
+    historyLoaded: true,
     entries,
     tools,
     session,

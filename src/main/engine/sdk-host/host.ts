@@ -174,6 +174,29 @@ export function serveSdkHost(config: SdkHostConfig): void {
   }
 
   const operations: { [K in SdkHostOp]: Operation<K> } = {
+    async 'system-prompt-default'() {
+      const native = await engineFile<'buildSystemPromptSections'>('core', 'system-prompt.js')
+      const tools = await engineFile<'createCodingToolDefinitions'>('core', 'tools', 'index.js')
+      const definitions = tools.createCodingToolDefinitions(process.cwd())
+      const sections = native.buildSystemPromptSections({
+        cwd: '',
+        selectedTools: definitions.map((tool) => tool.name),
+        toolSnippets: Object.fromEntries(
+          definitions.flatMap((tool) =>
+            tool.promptSnippet ? [[tool.name, tool.promptSnippet]] : []
+          )
+        ),
+        toolGuidelines: Object.fromEntries(
+          definitions.map((tool) => [tool.name, [...(tool.promptGuidelines ?? [])]])
+        )
+      })
+      return {
+        text: Object.entries(sections)
+          .filter(([name]) => name !== 'cwd')
+          .map(([, content]) => content)
+          .join('\n\n')
+      }
+    },
     async 'share-readiness'(args) {
       return (await savedSessionShare()).getSavedSessionShareReadiness(args)
     },

@@ -111,6 +111,7 @@ deb:
   # Ubuntu 24.04 and Debian 13 renamed several of these with a t64 suffix.
   depends:
     - 'libgtk-3-0 | libgtk-3-0t64'
+    - libglib2.0-bin
     - libnotify4
     - libnss3
     - libxss1
@@ -126,6 +127,7 @@ deb:
 rpm:
   depends:
     - gtk3
+    - /usr/bin/gio
     - libnotify
     - nss
     - libXScrnSaver
@@ -144,6 +146,7 @@ pacman:
   # library and codecs that Electron does not use or bundles itself.
   depends:
     - gtk3
+    - glib2
     - nss
     - alsa-lib
     - libxss

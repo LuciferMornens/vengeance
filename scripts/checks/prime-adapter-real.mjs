@@ -14,7 +14,7 @@ import { childRecoverEnvironment, runPrimeRestartIsolationQa } from './prime-res
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const repositoryRoot = path.resolve(scriptDirectory, '..', '..')
-const stagedRelease = path.join(repositoryRoot, '.engine-staging', 'prime', 'release')
+const stagedRelease = path.join(repositoryRoot, '.engine-staging', 'bundled', 'prime')
 const childMode = ['--reattach-child', '--env-child'].includes(process.argv[2])
 const restartMode = process.argv.includes('--restart-qa')
 const executablePath = path.resolve(
@@ -31,6 +31,7 @@ function isolateEnvironment(agentDirectory, temporaryRoot) {
   }
   process.env.PRIME_AGENT_CODING_AGENT_DIR = agentDirectory
   process.env.PRIME_AGENT_KERNEL_VENV = path.join(temporaryRoot, 'kernel-venv')
+  process.env.PYTHONPYCACHEPREFIX = path.join(temporaryRoot, 'pycache')
   delete process.env.PRIME_AGENT_KERNEL_PYTHON
   process.env.PI_PACKAGE_DIR = path.dirname(executablePath)
   process.env.PI_OFFLINE = '1'
@@ -526,6 +527,7 @@ if (childMode) {
         "export { probePrimeDaemon, listPrimeBackground } from './src/main/engine/prime/daemon'",
         "export { connectPrimeResident } from './src/main/engine/prime/daemon'",
         "export { withPrimeServiceSession } from './src/main/engine/prime/daemon'",
+        "export { restartPrimeSession } from './src/main/engine/prime/restart'",
         "export { listPrimeSessions } from './src/main/engine/prime/sessions'"
       ].join('\n'),
       resolveDir: repositoryRoot,

@@ -10,6 +10,7 @@ import type {
 } from '@shared/api/engine'
 import type { SpeedMode, SpeedState } from '@shared/api/speed'
 import { useAgents } from '../store/agents'
+import { withCommandCatalogReload } from '../store/agent-capabilities'
 import { invoke } from './ipc'
 
 /**
@@ -59,8 +60,7 @@ export const bridge = {
 
   /** Reload extensions, skills, prompts, themes and context files in the running engine, then refresh. */
   async reload(agentId: string, options?: BridgeCallOptions): Promise<void> {
-    await call(agentId, { op: 'reload' }, options)
-    await useAgents.getState().refreshCapabilities(agentId)
+    await withCommandCatalogReload(agentId, () => call(agentId, { op: 'reload' }, options))
   },
 
   /** Active tools (declared to the model) and every configured tool. */

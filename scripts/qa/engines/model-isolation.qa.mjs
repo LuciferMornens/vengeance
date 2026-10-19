@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { launchApp, reportShotsDir } from '../lib/app.mjs'
+import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
 import { pickModelInFooter, pickThinkingLevel, until } from '../chat/helpers.mjs'
 import { createEngineFixture, PRIME_MODELS, PRIME_PROVIDER } from './integration-fixture.mjs'
@@ -137,20 +138,11 @@ async function checkChild(agentId) {
 try {
   await configureAccount()
   application = await launchApp({
-    exe: process.env.QA_PACKAGED_EXE,
+    ...packagedLaunchOptions(fixture.environment),
     agentDir: fixture.piDirectory.dir,
-    env: {
-      ...fixture.environment,
-      ...(process.env.QA_PACKAGED_EXE
-        ? { VENGEANCE_PRIME_EXECUTABLE: undefined, VENGEANCE_BUNDLED_ENGINES: undefined }
-        : {})
-    },
     outDir: reportShotsDir('engine2-model-isolation')
   })
-  if (process.env.QA_PACKAGED_EXE) {
-    const location = await application.invoke('engine:describe', 'prime')
-    assert.equal(location.source, 'bundled')
-  }
+  await recordPackagedTarget(application)
   const workspace = await fixture.root.folder('workspace', { 'README.md': '# Model isolation\n' })
   const { agentId } = await application.openWorkspace({
     cwd: workspace,

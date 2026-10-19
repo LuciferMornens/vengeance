@@ -47,6 +47,7 @@ import { samePath } from '../../paths'
 import { locatePrimeEngine } from './locate'
 import { guardPrimeHandoff } from './daemon-activity'
 import { PrimeSessionLineage } from './session-lineage'
+import { callPrimeBridge } from './bridge'
 
 export interface PrimeEngineProcessOptions {
   args: CreateAgentArgs
@@ -260,15 +261,17 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
 
   prepareRestart(
     nextArgs: CreateAgentArgs,
-    executablePath?: string | null
+    executablePath?: string | null,
+    patch?: Partial<CreateAgentArgs>
   ): Promise<CreateAgentArgs | void> {
-    this.restartTask ??= this.restartSession(nextArgs, executablePath)
+    this.restartTask ??= this.restartSession(nextArgs, executablePath, patch)
     return this.restartTask
   }
 
   private async restartSession(
     nextArgs: CreateAgentArgs,
-    executablePath?: string | null
+    executablePath?: string | null,
+    patch?: Partial<CreateAgentArgs>
   ): Promise<CreateAgentArgs | void> {
     if (this.stopping) throw new Error('This Engine 2 session is closing')
     if (this.reconnecting)
@@ -313,8 +316,16 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
       }
       if (!this.activeSessionId) throw new Error('Engine 2 has no active session to restart')
       const state = await this.nativeCommand('get_state')
-      nextArgs = primeRestartSelection(this.args, nextArgs, state)
-      await restartPrimeSession(client, this.activeSessionId, this.args, nextArgs, executablePath)
+      const previousArgs = primeRestartSelection(this.args, this.args, state)
+      nextArgs = primeRestartSelection(this.args, nextArgs, state, patch)
+      await restartPrimeSession(
+        client,
+        this.activeSessionId,
+        previousArgs,
+        nextArgs,
+        executablePath,
+        patch
+      )
       this.retired = true
       this.unwire()
       client.close()
@@ -394,59 +405,12 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
   }
 
   async bridge(request: BridgeRequest): Promise<BridgeResult> {
-    switch (request.op) {
-      case 'tree': {
-        const result = await this.nativeCommand('navigate_tree', {
-          targetId: request.entryId,
-          summarize: request.summarize,
-          customInstructions: request.customInstructions,
-          replaceInstructions: request.replaceInstructions,
-          label: request.label
-        })
-        const state = await this.nativeCommand('get_state')
-        return {
-          cancelled: result.cancelled === true,
-          leafId: stringValue(result.leafId) ?? stringValue(state.leafId) ?? null,
-          editorText: stringValue(result.editorText) ?? stringValue(result.selectedText)
-        }
-      }
-      case 'label':
-        await this.nativeCommand('set_session_entry_label', {
-          entryId: request.entryId,
-          label: request.label ?? null
-        })
-        return null
-      case 'reload':
-        await this.nativeCommand('reload')
-        return null
-      case 'tools-get':
-        return this.toolState()
-      case 'tools-set': {
-        const state = await this.toolState()
-        if (
-          request.names.length !== state.active.length ||
-          request.names.some((name) => !state.active.includes(name))
-        ) {
-          throw new Error(
-            'Engine 2 manages its core tools. Configure skills and connections in settings.'
-          )
-        }
-        return state
-      }
-      case 'subagents':
-        if (request.method === 'status' || request.method === 'ping') {
-          return { success: true, data: await this.nativeCommand('get_rlm_children') }
-        }
-        return {
-          success: false,
-          error: {
-            code: 'unavailable',
-            message: 'Use the native agent controls for this operation.'
-          }
-        }
-      case 'speed':
-        return this.speedControl.read(request.mode)
-    }
+    return callPrimeBridge(
+      request,
+      this.nativeCommand.bind(this),
+      this.toolState.bind(this),
+      this.speedControl.read.bind(this.speedControl)
+    )
   }
 
   private async execute(

@@ -3,7 +3,7 @@
 Follow [UPSTREAM.md](../../UPSTREAM.md) for reconstruction and qualification.
 
 Vengeance ships a source build of stable `v0.10.0`, upstream commit
-`763094e1b6a7c17450ee8399b06cda1853847ca5`, identified as `0.10.0+vengeance.10`.
+`763094e1b6a7c17450ee8399b06cda1853847ca5`, identified as `0.10.0+vengeance.12`.
 The exact source, catalog revision, toolchain and patch order live in
 [engines.lock.json](../../engines.lock.json). The native helper links this same stable base.
 
@@ -28,6 +28,10 @@ The exact source, catalog revision, toolchain and patch order live in
 | 0017  | Backport the upstream rustls 0.23.46 lockfile maintenance without changing other dependency pins.         |
 | 0018  | Keep each OAuth refresh flight through credential persistence so waiting callers reuse its token.         |
 | 0019  | Coordinate native timing/lifecycle fixtures and expose a private receive seam for piped-input tests.      |
+| 0020  | Include native APPEND_SYSTEM sources in session prompts and prompt dumps, preserving raw text.            |
+| 0021  | Bound ACP fixture shutdown and collect stderr without waiting for inherited Windows pipe handles.         |
+| 0022  | Backport upstream's bounded-lock concurrency fixture while asserting all 80 writes land.                  |
+| 0023  | Verify and explicitly install the bundled Intel macOS cryptography wheel; refresh kernel identity.        |
 
 Patch 0014 comes from upstream commit
 [`7b89c111da0f1d9e67849b34f10552bbb4bd1bd1`](https://github.com/PrimeIntellect-ai/prime-agent/commit/7b89c111da0f1d9e67849b34f10552bbb4bd1bd1).
@@ -52,6 +56,58 @@ fixture shuts down its native worker before dropping its runtime, closing subpro
 Piped-input collection accepts a private receive function so its reset test can script arrivals;
 production still calls the standard receiver's `recv_timeout` with the full idle window on every read.
 Assertions keep their behavioral contracts rather than relying on provider speed or scheduler timing.
+
+Patch 0020 adapts upstream
+[`b1d71636710b0ea1b86380dfe3923b3c03fe2948`](https://github.com/PrimeIntellect-ai/prime-agent/commit/b1d71636710b0ea1b86380dfe3923b3c03fe2948):
+the session engine passes explicit append sources through the native resource loader and includes its
+resolved text in the native prompt builder. The stable builder's direct `prompt_guidelines` API remains
+available. The patch also includes discovered append sources in the CLI's `prompt` breakdown. Native
+provider regressions cover independent SYSTEM/APPEND scope precedence, explicit literals and files,
+empty overrides, raw Markdown and whitespace, default foundation layers, and a live model switch.
+Retirement requires those regressions and the CLI diagnostic case to pass on the candidate upstream
+base; the newer core fix alone does not qualify the CLI dump or the app's saved-worker restart path.
+
+Patch 0021 is test-only. The ACP fixture captures stderr in an anonymous temporary file, so
+descendants holding inherited Windows handles cannot stall its diagnostic reader. Cleanup requires
+the fixture socket's native shutdown acknowledgement, connection closure and supervisor process exit
+within a bounded asynchronous operation. Its child cleanup is also bounded. Cleanup errors fail the
+test visibly, or print alongside an active assertion failure without causing a second panic. The
+session/new and successful ACP EOF-exit assertions remain intact. The regression must pass without
+external process intervention before this fixture is qualified on a new upstream base.
+
+Patch 0022 backports only the refinement-test hunk from upstream
+[`f0d9c09676a1e6bb2782ad73eb3025ffdf2061d4`](https://github.com/PrimeIntellect-ai/prime-agent/commit/f0d9c09676a1e6bb2782ad73eb3025ffdf2061d4);
+its unrelated abort-boundary fixture hunk is excluded. The runtime lock intentionally has a bounded,
+unfair wait: repeated writer reacquisition can exhaust a waiter's retry budget without losing an
+accepted update. The stable fixture failed five isolated runs on Windows; the logs remain in
+`.cache/prime-refinement-repeat-{1..5}.log`. The upstream fixture races two fresh writers in each of
+40 rounds and still asserts all 80 updates, avoiding repeated reacquisition by one writer within a
+round. This is a test-only backport, not a runtime lock fix; lock behavior and timeouts do not change.
+Retire it when a candidate upstream base incorporates the hunk and passes repeated isolated runs
+and the full native suite. Qualification of this local backport is recorded with the release checks.
+
+Patch 0023 supports the source-built Intel macOS cryptography wheel shipped by Vengeance. Current
+cryptography releases no longer publish Intel macOS wheels; installing the kernel must not require
+an end-user Rust/OpenSSL build or select an older security release. The builder pins cryptography,
+OpenSSL, the build Python and build dependencies in `prime.runtimeWheels` in the engine lock. It
+stages the wheel, provenance receipt and license notices under `prime-agent-runtime/wheels` before
+the outer payload inventory is recorded.
+
+The native manifest is `wheels/manifest.json`, with `schemaVersion: 1`, `platform: "darwin-x64"`
+and one `wheels` entry containing `distribution`, `version`, `file` and `sha256`. The native bootstrap
+checks the manifest, a safe wheel basename matching its version and the wheel's SHA-256 before
+accepting kernel readiness or running uv. It supplies the verified wheel file as an explicit install
+requirement, so a future index source distribution cannot replace it during bootstrap. Missing or
+corrupt files fail visibly. All wheel-directory content participates in runtime identity, forcing an
+environment created by an earlier payload to refresh. Vengeance Intel macOS packages enforce this
+contract; source checkouts, upstream developer builds and other platforms keep native resolution.
+
+Requalify the source build, wheel metadata/RECORD, Mach-O architecture, deployment target, system-only
+dependencies, notices, actual loaded cryptography/OpenSSL versions and isolated cached-kernel upgrade
+on every new base or dependency update. Retire the native patch when upstream supports an equivalent
+verified bundled-wheel bootstrap, or Intel macOS is again covered by current official wheels and the
+packaged kernel and old-to-new environment regressions pass without it. No native account, session or
+helper protocol format changes.
 
 The first three patches originated on development commit
 `fa20be8e487b1889c2395ea33906149aef983ca0`. Patch 0002 was rebased onto stable source:

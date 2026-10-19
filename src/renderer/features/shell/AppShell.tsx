@@ -1,18 +1,23 @@
 import { memo, Suspense, useEffect, useLayoutEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { MessagesSquare, SquarePen } from 'lucide-react'
+import { cn } from '../../lib/cn'
 import { invoke, on, platform } from '../../lib/ipc'
 import { useHotkey } from '../../lib/keybindings'
 import { lazyWithPreload } from '../../lib/lazy-with-preload'
+import { samePath } from '../../lib/paths'
 import { duration, ease } from '../../lib/motion'
 import { useWindowFocused } from '../../lib/window-focus'
 import { useAgents } from '../../store/agents'
+import { hasReadyHistory } from '../../store/agent-state'
 import { useApp } from '../../store/app'
 import { Button, EmptyState, Sheet, Shimmer } from '../../ui'
 import { Composer } from '../composer'
+import type { OpeningFocus } from '../composer/focus'
 import { SessionHeader, Transcript } from '../chat'
 import { TranscriptBoundary } from '../chat/TranscriptBoundary'
 import { restoreOpenSessions, SessionSidebar } from '../sessions'
+import { agentSessionFile } from '../sessions/model'
 // Boot-time side effects of the lazily loaded settings feature: palette actions + settings change listeners.
 import '../settings/actions'
 import '../settings/store'
@@ -24,7 +29,7 @@ import { fitPanels, useWindowWidth } from './panel-layout'
 import { settingsSheet } from './settings-sheet'
 import { SidePanel } from './SidePanel'
 import { Titlebar } from './Titlebar'
-import { newSession, openWorkspace, useEngineSpawns } from './workspace'
+import { newSession, openWorkspace, releaseSessionFocus, useSessionOpenings } from './workspace'
 
 // Heavy, rarely visible surfaces load on demand (kept out of the main chunk) and show once their chunk is there,
 // without a Suspense fallback (see lazyWithPreload). Onboarding shows only on a first run.
@@ -149,7 +154,36 @@ function CenterPane() {
   const status = useAgents((s) => (agentId ? s.agents[agentId]?.status : undefined))
   const empty = useAgents((s) => (agentId ? (s.agents[agentId]?.entries.length ?? 0) === 0 : true))
   const workspace = useApp((s) => s.prefs.activeWorkspace)
-  const spawning = useEngineSpawns((s) => s.pending > 0)
+  const activationRevision = useAgents((state) => state.activationRevision)
+  const pendingOpening = useSessionOpenings(
+    (state) => (state.activations[activationRevision] ?? 0) > 0
+  )
+  const target = useSessionOpenings((state) =>
+    state.focusIntent?.revision === activationRevision ? state.focusIntent.target : null
+  )
+  const requestedHistoryReady = useAgents((state) => {
+    const agent = agentId ? state.agents[agentId] : undefined
+    return !!(
+      target &&
+      agent &&
+      hasReadyHistory(agent) &&
+      agent.info.engine === target.engine &&
+      samePath(agentSessionFile(agent), target.path)
+    )
+  })
+  const spawning = pendingOpening && !requestedHistoryReady
+  const focusOwner = useSessionOpenings((state) =>
+    state.focusIntent?.revision === activationRevision ? state.focusIntent.owner : undefined
+  )
+  const completedFocus = useSessionOpenings((state) => {
+    const intent = state.focusIntent
+    return intent && (intent.revision !== activationRevision || (!pendingOpening && intent.started))
+      ? intent.revision
+      : null
+  })
+  useEffect(() => {
+    if (completedFocus !== null) releaseSessionFocus(completedFocus)
+  }, [completedFocus])
   const firstRun = !workspace && !agentId
   const onboardingLoaded = onboardingPanel.useLoaded(firstRun)
 
@@ -179,34 +213,56 @@ function CenterPane() {
   }
   if (!agentId || !hasAgent) {
     return (
-      <div className="flex flex-1 items-center justify-center text-sm">
+      <div
+        data-session-opening
+        role="status"
+        className="flex flex-1 items-center justify-center text-sm"
+      >
         <Shimmer>Starting session…</Shimmer>
       </div>
     )
   }
   return (
-    <motion.div
-      key={agentId}
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0, transition: { duration: duration.panel, ease: ease.out } }}
-      className="relative flex min-h-0 flex-1 flex-col"
-    >
-      {status === 'crashed' ? (
-        <CrashedPane agentId={agentId} />
-      ) : (
-        <SessionPane agentId={agentId} starting={status === 'starting' && empty} />
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <motion.div
+        key={agentId}
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0, transition: { duration: duration.panel, ease: ease.out } }}
+        inert={spawning}
+        className={cn('relative flex min-h-0 flex-1 flex-col', spawning && 'invisible')}
+      >
+        {status === 'crashed' ? (
+          <CrashedPane agentId={agentId} />
+        ) : (
+          <SessionPane
+            agentId={agentId}
+            starting={status === 'starting' && empty}
+            opening={{ pending: spawning, owner: focusOwner }}
+          />
+        )}
+      </motion.div>
+      {spawning && (
+        <div
+          data-session-opening
+          role="status"
+          className="absolute inset-0 flex items-center justify-center text-sm"
+        >
+          <Shimmer>Opening session…</Shimmer>
+        </div>
       )}
-    </motion.div>
+    </div>
   )
 }
 
 /** Session layout: header, transcript, floating composer. Hosts `--composer-h` (default in globals.css). */
 const SessionPane = memo(function SessionPane({
   agentId,
-  starting
+  starting,
+  opening
 }: {
   agentId: string
   starting: boolean
+  opening: OpeningFocus
 }) {
   return (
     <div
@@ -225,7 +281,7 @@ const SessionPane = memo(function SessionPane({
           <Transcript agentId={agentId} />
         </TranscriptBoundary>
       )}
-      <Composer agentId={agentId} />
+      <Composer agentId={agentId} opening={opening} />
     </div>
   )
 })

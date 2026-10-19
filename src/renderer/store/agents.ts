@@ -1,24 +1,23 @@
 import { create } from 'zustand'
-import {
-  hasBridgeCommands,
-  isBridgeCommand,
-  type AgentInfo,
-  type CreateAgentArgs
-} from '@shared/api/engine'
-import { SUBAGENT_HOST_COMMANDS } from '@shared/subagents'
+import type { AgentInfo, CreateAgentArgs } from '@shared/api/engine'
 import type {
   EngineEvent,
   ImageContent,
   RpcExtensionUIResponse,
-  RpcSessionState,
-  RpcSlashCommand,
   ThinkingLevel
 } from '@shared/engine-types'
 import { clientCommandId, rpc } from '../lib/engine'
 import { invoke, on } from '../lib/ipc'
 import { samePath } from '../lib/paths'
 import { hydrateMessages, landBashRuns, pruneBashRuns, reduceAgentEvent } from './agent-reducer'
-import { createAgentState, type AgentState } from './agent-state'
+import { refreshAgentCapabilities } from './agent-capabilities'
+import {
+  createAgentState,
+  hasReadyHistory,
+  restartedRuntime,
+  sessionStatePatch,
+  type AgentState
+} from './agent-state'
 import { indexSubagentHistory } from './subagent-index'
 
 export interface PromptOptions {
@@ -78,6 +77,7 @@ const earlyEvents = new Map<string, EngineEvent[]>()
 const MAX_EARLY_EVENTS = 2000
 const restartRequests = new Set<string>()
 const switchRequests = new Set<string>()
+const historyRequests = new Map<string, Promise<void>>()
 
 function upsertInfo(state: AgentsStore, info: AgentInfo): Pick<AgentsStore, 'agents' | 'order'> {
   const existing = state.agents[info.agentId]
@@ -110,6 +110,8 @@ function upsertInfo(state: AgentsStore, info: AgentInfo): Pick<AgentsStore, 'age
         ...(reset ? restartedRuntime(existing) : {}),
         engineGeneration: existing.engineGeneration + (starting ? 1 : 0),
         snapshotRevision: existing.snapshotRevision + (replaced ? 1 : 0),
+        historyLoaded: existing.historyLoaded && !starting && !replaced,
+        commandsStatus: starting || replaced ? 'loading' : existing.commandsStatus,
         info,
         status: info.status,
         error: info.error,
@@ -119,27 +121,6 @@ function upsertInfo(state: AgentsStore, info: AgentInfo): Pick<AgentsStore, 'age
   return {
     agents: { ...state.agents, [info.agentId]: agent },
     order: state.order.includes(info.agentId) ? state.order : [...state.order, info.agentId]
-  }
-}
-
-function restartedRuntime(agent: AgentState): Partial<AgentState> {
-  const fresh = createAgentState({ ...agent.info, status: 'starting', busy: false })
-  return {
-    modelChangePending: false,
-    // The new engine process reports its own speed once it is ready.
-    speed: undefined,
-    phase: 'idle',
-    turnActive: false,
-    streaming: null,
-    queue: fresh.queue,
-    retry: null,
-    retryError: undefined,
-    compaction: null,
-    summarizationRetry: null,
-    liveUsage: undefined,
-    // The editor nonce must remain monotonic across engine replacement.
-    ext: { ...fresh.ext, editorText: agent.ext.editorText },
-    extensionErrors: []
   }
 }
 
@@ -243,6 +224,8 @@ export const useAgents = create<AgentsStore>()((set, get) => ({
     switchRequests.add(agentId)
     get().patchAgent(agentId, {
       status: 'starting',
+      historyLoaded: false,
+      commandsStatus: 'loading',
       engineGeneration: agent.engineGeneration + 1,
       snapshotRevision: agent.snapshotRevision + 1
     })
@@ -371,64 +354,17 @@ export const useAgents = create<AgentsStore>()((set, get) => ({
   },
 
   async refresh(agentId) {
-    const generation = get().agents[agentId]?.engineGeneration
-    const revision = get().agents[agentId]?.snapshotRevision
-    const modelRevision = get().agents[agentId]?.modelRevision
-    if (generation === undefined) return
-    if (get().agents[agentId]?.phase === 'running') {
-      await get().refreshCapabilities(agentId)
-      return
-    }
-    const stateRequest = rpc(agentId, { type: 'get_state' })
-    const history = Promise.all([stateRequest, rpc(agentId, { type: 'get_messages' })]).then(
-      async ([state, messages]) => {
-        if (!isCurrentGeneration(agentId, generation, revision)) return
-        applySessionState(agentId, state, modelRevision)
-        // A run that started meanwhile owns the transcript; replacing it would drop the live stream.
-        if (state.isStreaming || get().agents[agentId]?.phase === 'running') return
-        const { entries, tools } = hydrateMessages(messages.messages)
-        const current = get().agents[agentId]
-        const bash = pruneBashRuns(current?.bash ?? {}, entries)
-        const subagents = current
-          ? indexSubagentHistory(current.subagents, messages.messages, tools)
-          : undefined
-        get().patchAgent(agentId, {
-          phase: 'idle',
-          entries,
-          tools,
-          streaming: null,
-          bash,
-          ...(subagents ? { subagents } : {})
-        })
-        await get().refreshStats(agentId)
-      }
-    )
-    // Extension discovery can be slow; committed history does not depend on the command catalog.
-    const capabilities = Promise.all([
-      stateRequest,
-      rpc(agentId, { type: 'get_available_thinking_levels' }),
-      rpc(agentId, { type: 'get_commands' })
-    ]).then(([state, levels, commands]) => {
-      if (isCurrentGeneration(agentId, generation, revision)) {
-        applyCapabilities(agentId, state, levels.levels, commands.commands, modelRevision)
-      }
+    const agent = get().agents[agentId]
+    if (!agent) return
+    const key = `${agentId}:${agent.engineGeneration}:${agent.snapshotRevision}`
+    const request = refreshAgent(agentId).finally(() => {
+      if (historyRequests.get(key) === request) historyRequests.delete(key)
     })
-    await Promise.all([history, capabilities])
+    if (!agent.historyLoaded) historyRequests.set(key, request)
+    return request
   },
 
-  async refreshCapabilities(agentId) {
-    const generation = get().agents[agentId]?.engineGeneration
-    const revision = get().agents[agentId]?.snapshotRevision
-    const modelRevision = get().agents[agentId]?.modelRevision
-    if (generation === undefined) return
-    const [state, levels, commands] = await Promise.all([
-      rpc(agentId, { type: 'get_state' }),
-      rpc(agentId, { type: 'get_available_thinking_levels' }),
-      rpc(agentId, { type: 'get_commands' })
-    ])
-    if (!isCurrentGeneration(agentId, generation, revision)) return
-    applyCapabilities(agentId, state, levels.levels, commands.commands, modelRevision)
-  },
+  refreshCapabilities: refreshAgentCapabilities,
 
   async refreshStats(agentId) {
     const generation = get().agents[agentId]?.engineGeneration
@@ -465,6 +401,56 @@ export const useAgents = create<AgentsStore>()((set, get) => ({
     })
   }
 }))
+
+async function refreshAgent(agentId: string): Promise<void> {
+  const get = useAgents.getState
+  const generation = get().agents[agentId]?.engineGeneration
+  const revision = get().agents[agentId]?.snapshotRevision
+  const modelRevision = get().agents[agentId]?.modelRevision
+  if (generation === undefined) return
+  if (get().agents[agentId]?.phase === 'running') {
+    await get().refreshCapabilities(agentId)
+    return
+  }
+  const stateRequest = rpc(agentId, { type: 'get_state' })
+  const history = Promise.all([stateRequest, rpc(agentId, { type: 'get_messages' })]).then(
+    async ([state, messages]) => {
+      if (!isCurrentGeneration(agentId, generation, revision)) return
+      const current = get().agents[agentId]
+      if (!current) return
+      get().patchAgent(agentId, sessionStatePatch(current, state, modelRevision))
+      // A run that started meanwhile owns the transcript; replacing it would drop the live stream.
+      if (state.isStreaming || get().agents[agentId]?.phase === 'running') return
+      const { entries, tools } = hydrateMessages(messages.messages)
+      const bash = pruneBashRuns(current?.bash ?? {}, entries)
+      const subagents = current
+        ? indexSubagentHistory(current.subagents, messages.messages, tools)
+        : undefined
+      get().patchAgent(agentId, {
+        phase: 'idle',
+        historyLoaded: true,
+        entries,
+        tools,
+        streaming: null,
+        bash,
+        ...(subagents ? { subagents } : {})
+      })
+      await get().refreshStats(agentId)
+    }
+  )
+  // Extension discovery can be slow; committed history does not depend on the command catalog.
+  const capabilities = refreshAgentCapabilities(agentId, stateRequest)
+  await Promise.all([history, capabilities])
+}
+
+/** Activation joins initial hydration; explicit refreshes after native mutations always read again. */
+export function ensureAgentHistory(agentId: string): Promise<void> {
+  const store = useAgents.getState()
+  const agent = store.agents[agentId]
+  if (!agent || hasReadyHistory(agent)) return Promise.resolve()
+  const key = `${agentId}:${agent.engineGeneration}:${agent.snapshotRevision}`
+  return historyRequests.get(key) ?? store.refresh(agentId)
+}
 
 function isCurrentGeneration(agentId: string, generation: number, revision?: number): boolean {
   const agent = useAgents.getState().agents[agentId]
@@ -550,6 +536,7 @@ async function refreshModelState(agentId: string, allowPending = false): Promise
     return
   useAgents.getState().patchAgent(agentId, {
     session: state,
+    historyLoaded: current.historyLoaded && current.session?.sessionId === state.sessionId,
     model: state.model,
     thinkingLevel: state.thinkingLevel,
     thinkingLevels: levels,
@@ -578,58 +565,12 @@ function dropIdleDialogsSince(agentId: string, since: number): void {
     useAgents.getState().patchAgent(agentId, { ext: { ...agent.ext, dialogs } })
 }
 
-function applySessionState(
-  agentId: string,
-  state: RpcSessionState,
-  modelRevision: number | undefined
-): void {
-  const agent = useAgents.getState().agents[agentId]
-  if (!agent) return
-  useAgents.getState().patchAgent(agentId, {
-    ...(agent.modelRevision === modelRevision && !agent.modelChangePending
-      ? { session: state, model: state.model, thinkingLevel: state.thinkingLevel }
-      : {}),
-    sessionName: state.sessionName,
-    info: { ...agent.info, lineage: state.lineage }
-  })
-}
-
-/** Apply engine capabilities (state, levels, commands) without touching the transcript. */
-function applyCapabilities(
-  agentId: string,
-  state: RpcSessionState,
-  levels: ThinkingLevel[],
-  commands: RpcSlashCommand[],
-  modelRevision: number | undefined
-): void {
-  const agent = useAgents.getState().agents[agentId]
-  if (!agent) return
-  useAgents.getState().patchAgent(agentId, {
-    ...(agent.modelRevision === modelRevision && !agent.modelChangePending
-      ? {
-          session: state,
-          model: state.model,
-          thinkingLevel: state.thinkingLevel,
-          thinkingLevels: levels
-        }
-      : {}),
-    sessionName: state.sessionName,
-    commands: commands.filter(
-      (command) => !isBridgeCommand(command) && !SUBAGENT_HOST_COMMANDS.includes(command.name)
-    ),
-    info: {
-      ...agent.info,
-      lineage: state.lineage,
-      bridge: agent.info.engine === 'pi' ? hasBridgeCommands(commands) : agent.info.bridge
-    }
-  })
-}
-
 const pending = new Map<string, EngineEvent[]>()
 let frame: number | null = null
 let fallback: ReturnType<typeof setTimeout> | null = null
 const statsTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const stateTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const capabilityTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const REFRESH_DEBOUNCE_MS = 250
 const HIDDEN_WINDOW_FLUSH_MS = 120
 
@@ -637,7 +578,7 @@ function clearAgentWork(agentId: string): void {
   pending.delete(agentId)
   earlyEvents.delete(agentId)
   modelChanges.delete(agentId)
-  for (const timers of [statsTimers, stateTimers]) {
+  for (const timers of [statsTimers, stateTimers, capabilityTimers]) {
     const timer = timers.get(agentId)
     if (timer !== undefined) clearTimeout(timer)
     timers.delete(agentId)
@@ -688,7 +629,7 @@ function flush(): void {
       )
     ) {
       scheduleStats(agentId)
-      debounce(stateTimers, agentId, () => useAgents.getState().refreshCapabilities(agentId))
+      debounce(capabilityTimers, agentId, () => useAgents.getState().refreshCapabilities(agentId))
       continue
     }
     if (

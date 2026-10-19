@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { cargoPath, engineLock, prepareSource, root } from '../engines/common.mjs'
@@ -26,7 +26,7 @@ const guardedAccounts = await Promise.all(
 )
 let activeChild
 
-async function runCargo(args, environment) {
+async function runCargo(args, environment, stdoutMode = 'inherit') {
   const executable = args[0] === '--test-binary' ? resolve(args[1]) : cargoPath()
   const argumentsToRun = args[0] === '--test-binary' ? args.slice(2) : args
   console.log(`> ${executable} ${argumentsToRun.join(' ')}`)
@@ -34,9 +34,14 @@ async function runCargo(args, environment) {
     cwd: source,
     env: environment,
     windowsHide: true,
-    stdio: 'inherit'
+    stdio: ['inherit', stdoutMode, 'inherit']
   })
   activeChild = child
+  let output = ''
+  child.stdout?.setEncoding('utf8')
+  child.stdout?.on('data', (chunk) => {
+    output += chunk
+  })
   let timedOut = false
   const timeout = setTimeout(() => {
     timedOut = true
@@ -49,10 +54,62 @@ async function runCargo(args, environment) {
     })
     if (timedOut) throw new Error(`Native command exceeded ${timeoutMs} ms`)
     if (code !== 0) throw new Error(`Native command failed (${code}): cargo ${args.join(' ')}`)
+    return output
   } finally {
     clearTimeout(timeout)
     activeChild = undefined
   }
+}
+
+async function checkWorkspaceFormatting(environment) {
+  const pendingManifests = [join(source, 'Cargo.toml')]
+  const visitedManifests = new Set()
+  const packages = new Map()
+  while (pendingManifests.length) {
+    const manifest = realpathSync(pendingManifests.pop())
+    if (visitedManifests.has(manifest)) continue
+    visitedManifests.add(manifest)
+    const metadata = JSON.parse(
+      await runCargo(
+        [
+          'metadata',
+          '--format-version',
+          '1',
+          '--no-deps',
+          '--offline',
+          '--locked',
+          '--manifest-path',
+          manifest
+        ],
+        environment,
+        'pipe'
+      )
+    )
+    for (const nativePackage of metadata.packages) {
+      const packageManifest = realpathSync(nativePackage.manifest_path)
+      visitedManifests.add(packageManifest)
+      packages.set(packageManifest, nativePackage)
+      for (const dependency of nativePackage.dependencies) {
+        if (dependency.path) pendingManifests.push(join(dependency.path, 'Cargo.toml'))
+      }
+    }
+  }
+
+  if (!packages.size) throw new Error('Native workspace metadata did not contain any packages')
+
+  // cargo-fmt canonicalizes every target and exceeds Windows' command-line limit as one batch.
+  // Its --all coverage includes each workspace package and recursively declared path dependency.
+  for (const [manifest, nativePackage] of packages) {
+    await runCargo(
+      ['fmt', '--manifest-path', manifest, '--package', nativePackage.name, '--check'],
+      environment
+    )
+  }
+  const targetCount = [...packages.values()].reduce(
+    (total, nativePackage) => total + nativePackage.targets.length,
+    0
+  )
+  console.log(`✓ native formatting checked ${packages.size} packages and ${targetCount} targets`)
 }
 
 try {
@@ -99,10 +156,11 @@ try {
   if (['test', 'clippy', 'build'].includes(requested[0]) && !requested.includes('--target-dir')) {
     requested.splice(1, 0, ...buildArguments)
   }
+  const formattingCheck = ['fmt', '--all', '--check']
   const commands = requested.length
     ? [requested]
     : [
-        ['fmt', '--all', '--check'],
+        formattingCheck,
         ['test', ...buildArguments, '--workspace', '--no-fail-fast'],
         ['clippy', ...buildArguments, '--workspace', '--all-targets', '--', '-D', 'warnings']
       ]
@@ -128,7 +186,18 @@ try {
     environment.PA_E2E_KERNEL_PYTHON = python
     environment.PA_CORE_KERNEL_PYTHON = python
   }
-  for (const command of commands) await runCargo(command, environment)
+  for (const command of commands) {
+    if (
+      process.platform === 'win32' &&
+      command[0] === 'fmt' &&
+      command.length === formattingCheck.length &&
+      formattingCheck.every((argument) => command.includes(argument))
+    ) {
+      await checkWorkspaceFormatting(environment)
+    } else {
+      await runCargo(command, environment)
+    }
+  }
   console.log('✓ isolated native workspace checks passed')
 } finally {
   if (activeChild?.pid) await killTree(activeChild.pid)

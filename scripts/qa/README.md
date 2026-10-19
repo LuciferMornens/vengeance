@@ -23,6 +23,11 @@ node scripts/qa/settings/thinking.qa.mjs   # one suite directly
   `.agents/skills` in any ancestor of a workspace as project resources (Trust dialog), so
   workspaces never sit below the profile; a git-ignored folder would hide workspace files from
   `git ls-files` (@-mentions).
+- **Native worker sockets need a short POSIX temp path.** App launches use isolated `QA_TMP_ROOT`
+  as `TMPDIR` on macOS and Linux, rather than nesting it beneath the per-suite app profile. Before
+  launch, the harness validates the complete native worker socket's byte budget, including its
+  terminator (Darwin 104 bytes; Linux 108). An explicit `TMPDIR` must remain inside `QA_TMP_ROOT`
+  and fit that budget. Windows keeps its per-launch temporary directory and named pipes.
 - **Fake mode runs the app with a temp `HOME`**, so the user's own `~/.agents/skills` never load
   (on Windows Electron's `app.getPath('home')` still follows USERPROFILE; userData is always the temp
   profile). Real mode keeps the real HOME. `scripts/qa/shell/harness-isolation.qa.mjs` checks both.
@@ -53,6 +58,20 @@ node scripts/qa/settings/thinking.qa.mjs   # one suite directly
   Engine 2 and helper package builds. Both accept 1–32 jobs and default to four. For native tests,
   `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0` omits debug symbols while keeping test
   assertions, reducing GNU linker memory use on Windows.
+- **Engine 2 Python-tool suites require uv on PATH.** The first native kernel operation downloads
+  Python and kernel packages into isolated QA storage, so it also needs network access even when
+  model replies use local providers. Release runners install uv 0.13.1 with the pinned setup-uv
+  action and caching disabled. A Python tool or child failure after missing uv is failed setup,
+  not evidence that the intended native assertion ran.
+- **Intel macOS verifies the loaded Python wheel.** The integration suite starts without a kernel
+  cache or kernel-Python override. Its first real Python tool call reports cryptography, its OpenSSL
+  backend, the loaded native extension hash, and the installed wheel's `direct_url.json`. These must
+  match the packaged wheel manifest and build receipt, and the interpreter and extension must be in
+  the fixture's automatic kernel venv. No constraint, wheel-search or dependency override may reach
+  that kernel. The receipt is `engines-shots/intel-kernel.json`.
+- Prime workspace formatting on Windows runs per-package native checks across the workspace and its
+  recursive path dependencies. This keeps full `cargo fmt --all --check` coverage within Windows'
+  command-line length limit; other hosts use the single native workspace command.
 - The Engine workspace runner builds the locked `packages/env` Rust daemon before the full suite
   or a targeted `env` run, matching upstream CI. `QA_NATIVE_JOBS` also limits this prerequisite.
   The standalone Env package is outside the bundled SDK's runtime dependency graph.
@@ -254,7 +273,8 @@ through `launchApp({ env })`, since a variable deleted in main later does not re
 ```ts
 launchApp({ mode?, agentDir?, exe?, outDir?, env?, allowErrors?, size? }): Promise<QaApp>
   // built out/ app, or `exe`, an unpacked app's executable (platform.mjs unpackedExecutable)
-  // env: VENGEANCE_TEST=1, VENGEANCE_NO_MICA=1, VENGEANCE_USER_DATA=<temp>, TEMP/TMP/TMPDIR=<temp>,
+  // env: VENGEANCE_TEST=1, VENGEANCE_NO_MICA=1, VENGEANCE_USER_DATA=<temp>, TEMP/TMP=<temp>,
+  //      TMPDIR=<temp> on Windows; the short isolated QA_TMP_ROOT on macOS/Linux (byte-budget checked),
   //      VENGEANCE_MOCK and inherited PI_* / AI_AGENT removed; fake mode also removes PRIME_*.
   //      Fake mode adds temp HOME, PI_CODING_AGENT_DIR, PRIME_AGENT_CODING_AGENT_DIR,
   //      PRIME_AGENT_SESSION_DIR, PRIME_AGENT_CODING_AGENT_SESSION_DIR, PRIME_AGENT_KERNEL_VENV,
@@ -365,7 +385,7 @@ Prime account/model files. See `integration.qa.mjs` for public-boundary examples
 `node scripts/qa/engines/resident-upgrade.qa.mjs` qualifies attachment to a running older Engine 2
 package after selecting the current package. Supply the reviewed baseline's absolute
 `QA_PRIME_BASELINE_EXECUTABLE` and exact `QA_PRIME_BASELINE_SHA256`; without both, the historical
-suite skips. The successor defaults to the bundled Engine, or uses the reviewed candidate variables
+suite skips. The successor defaults to the bundled Engine 2, or uses the reviewed candidate variables
 below. It checks the resident's own catalog, custom text-only models with the same ID, live version
 notices, app relaunch and explicit restart with saved history and actual tool-image bytes. It records
 old native live-switch defects separately from app metadata; app hydration cannot repair that native
@@ -398,8 +418,10 @@ The native transition suite accepts `QA_PRIME_BASELINE_EXECUTABLE` to qualify a 
 package instead of the legacy `.engine-staging/prime/release` slot. Preparing/building the bundled
 engines does not create that legacy baseline; select and record one deliberately. The candidate
 requires its absolute `QA_PRIME_EXECUTABLE` and exact `QA_PRIME_SHA256`. Both endpoints use temporary
-QA account/session storage. Only the resident-upgrade suite additionally requires the baseline hash
-as `QA_PRIME_BASELINE_SHA256`; the transition suite computes and records its baseline executable hash.
+QA account/session storage. Packaged runs of both transition and resident-upgrade suites require the
+baseline's exact `QA_PRIME_BASELINE_SHA256`. A standalone built-app transition computes and records
+its baseline hash and validates this variable when supplied. Release upgrade runs use the verified
+official-package loader below rather than the legacy slot.
 
 ## Packaged qualification
 
@@ -408,10 +430,11 @@ Build once, then package and test serially from Git Bash on Windows (any POSIX s
 ```sh
 npm run build
 node scripts/dist-qa.mjs --dir
-QA_PACKAGED_EXE='D:/Coding/vengeance/release/qa/win-unpacked/VengeanceQA.exe' \
-QA_REPORT_DIR='D:/Coding/vengeance/.shots/qa/packaged' \
-node scripts/qa/run.mjs --only packaged.qa.mjs --only model-isolation.qa.mjs \
-  --only bundled-extensions.qa.mjs
+export QA_PACKAGED_EXE='D:/Coding/vengeance/release/qa/win-unpacked/VengeanceQA.exe'
+export QA_TMP_ROOT='D:/Coding/vengeance-qa'
+QA_PLATFORM_GROUP=core \
+QA_REPORT_DIR="$PWD/.shots/qa/platform" \
+node scripts/qa/engines/platform-qualification.mjs
 ```
 
 Adjust the absolute paths to your checkout. `dist-qa.mjs` ends with a `QA executable: <path>` line
@@ -425,14 +448,94 @@ naming the host's `QA_PACKAGED_EXE`, under `release/qa`:
 | Linux x64           | `linux-unpacked/vengeance-qa`                          |
 | Linux arm64         | `linux-arm64-unpacked/vengeance-qa`                    |
 
-The release workflow reads that line and runs only `engines/packaged.qa.mjs` against it, under Xvfb
-on Linux. On a Linux host without a display, prefix the `node scripts/qa/run.mjs` command with
-`xvfb-run -a -s '-screen 0 2560x1440x24'`. The basename filter `packaged.qa.mjs` matches both the
-engine and shell suites, so this command runs four suites. `QA_PI_PACKAGE_ROOT` optionally points
-at an installed pi agent directory to copy compatibility extensions and their dependencies into
-temporary QA storage; it does not authorize copying credentials or modifying that source.
-The shell suite checks the packaged version against `package.json`, including About and Updates.
-The native suite checks both engines, the external bridge and helper loading with a system-only PATH.
+The release workflow runs this default `core` group on all five native platforms: packaged,
+integration, model-isolation, system-prompts, restart-safety, stop-compaction, bash-queue,
+session-recovery and resident-close. On Linux without a display, prefix GUI commands with
+`xvfb-run -a -s '-screen 0 2560x1440x24'`.
+
+The runner verifies the QA identity, version, bundled native inventories and loaded resources. Each
+suite gets separate temporary accounts and a `packaged-target.json` receipt; missing or mismatched
+receipts fail. Its 15-minute per-suite deadline can be set with `QA_PLATFORM_TIMEOUT_MS` (1–2147483647
+milliseconds). Cleanup has a 30-second deadline, identifies owned processes before stopping them and
+protects pre-existing processes. A failure stops the sequence; a failed cleanup cannot admit another
+GUI suite. Evidence is `QA_REPORT_DIR/run-*/qualification.json`, with numbered suite folders containing
+`result.json`, `packaged-target.json`, stdout/stderr logs and PNGs. Successful temporary roots are
+removed; failed roots remain for diagnosis. In CI, this report root is `$RUNNER_TEMP/engine-qualification`.
+
+Optional compatibility coverage remains separate: use `scripts/qa/run.mjs --only bundled-extensions.qa.mjs`
+with `QA_PACKAGED_EXE`. `QA_PI_PACKAGE_ROOT` can select installed compatibility extensions to copy into
+temporary storage; the source account and credentials stay untouched.
+
+### macOS background applications
+
+On both macOS architectures, keep `QA_PACKAGED_EXE` set to the QA app and run:
+
+```sh
+QA_REPORT_DIR="$PWD/.shots/qa/background-applications" \
+  node scripts/qa/engines/background-apps.qa.mjs
+```
+
+The OS observer checks application activation policies during real Engine RPC, SDK/provider/CLI work,
+Engine 2 and its native helper, and a normal-mode login-shell probe, all using temporary accounts.
+The red/green witness must detect the old main-executable child behavior; the main app stays regular
+while background work stays out of the Dock. Inspect actual `*-desktop.png` files and
+`background-apps-evidence.json` under `QA_REPORT_DIR/background-apps-shots`, alongside page PNGs.
+This needs a macOS desktop. CI uses
+`$RUNNER_TEMP/background-applications` and temporarily shows the Dock, restoring its preference afterward.
+
+### Official release upgrades
+
+For 0.3.3, both macOS and both Linux architectures qualify official 0.3.2 Engine 2 `.10` to the final
+packaged `.12`. With the same absolute `QA_PACKAGED_EXE` and outside-home/repository `QA_TMP_ROOT`
+exported, run after core qualification and the macOS visibility check:
+
+```sh
+QA_REPORT_DIR="$PWD/.shots/qa/release-baseline" \
+  node scripts/qa/engines/release-baseline.mjs
+QA_PLATFORM_GROUP=upgrade \
+QA_RELEASE_BASELINE_ENV="$PWD/.shots/qa/release-baseline/release-baseline-env.json" \
+QA_REPORT_DIR="$PWD/.shots/qa/engine-upgrade" \
+  node scripts/qa/engines/platform-qualification.mjs
+```
+
+The loader verifies pinned public `SHA256SUMS`, archive hashes, complete native inventories and macOS
+signatures, retaining the extracted official package under `QA_TMP_ROOT`. It never launches its
+production app. `release-baseline.json` records both packages; `release-baseline-env.json` supplies
+the verified `QA_PRIME_BASELINE_EXECUTABLE`, `QA_PRIME_BASELINE_SHA256`,
+`QA_PRIME_BASELINE_VISION_SWITCH=working`, `QA_PRIME_EXECUTABLE` and `QA_PRIME_SHA256`.
+
+On Intel macOS, each upgrade fixture first invokes the actual `.10` installer's
+`--prime-agent-bootstrap` entry point under temporary HOME, account, cache and kernel directories.
+Only that bounded child gets a `UV_CONSTRAINT` file selecting the verified candidate's current
+cryptography wheel. The old executable writes its own readiness record. The app qualification then
+uses that venv with the constraint and kernel-Python overrides absent; the candidate's wheel-aware
+runtime identity must invalidate old readiness and its Python tool must load the packaged extension
+and OpenSSL. `baseline-prewarm.json` records bounded command output, and `intel-upgraded-kernel.json`
+records the candidate's loaded implementation and readiness. `baseline-inventory.json` records the
+complete official engine payload before and after qualification and rejects any mutation. Core
+integration always tests fresh candidate bootstrap, without baseline provisioning.
+
+The upgrade group runs candidate-transition and resident-upgrade serially against the packaged QA
+candidate and uses the same receipts, deadlines and report layout as core. CI uses
+`$RUNNER_TEMP/release-baseline` and `$RUNNER_TEMP/engine-upgrade`. Windows's native `.10` to `.11`
+transition has retained PR evidence that predates `.12`; this candidate needs fresh qualification.
+Pi's `.2` build is unchanged between these app releases, so the
+historical pi 1.2 to 1.3 transition fixture is not this release's gate.
+
+### Built-app navigation benchmark
+
+After the packaged and applicable upgrade checks, run separately on all five platforms:
+
+```sh
+node scripts/perf/first-navigation.mjs --label release-local --runs 3
+```
+
+This uses built `out/` and both native engines, not `QA_PACKAGED_EXE`. It retains
+`.shots/perf/first-navigation/release-local.json` plus per-sample PNGs and CPU profiles, including
+source-bundle/native identities and strict visible-history, syntax and scroll checks. CI labels are
+`release-<platform>`. Current-platform samples do not establish an improvement over an unmeasured
+baseline. CI uploads all four QA report roots and `.shots/perf/first-navigation` as
+`engine-qualification-<platform>`; inspect the PNGs as well as JSON outcomes.
 
 ## Known limits
 
@@ -448,6 +551,7 @@ The native suite checks both engines, the external bridge and helper loading wit
   launch is needed. Installer-specific tests use `npm run dist:qa`, which builds the host's packages
   under the QA identity: appId `com.vengeance.qa`, "Vengeance QA", `VengeanceQA.exe` /
   `VengeanceQA.app`, `vengeance-qa` as the Linux executable, package name and desktop entry, no
-  shortcuts, separate userData. Never use the production installer or packages as a development
-  fixture. Screenshots capture the page only: not Mica, the macOS traffic lights or Electron's Linux
-  caption buttons.
+  shortcuts, separate userData. Production release packages are used only as verified native upgrade
+  baselines above; never launch their production app or installer as a fixture. Ordinary suite PNGs
+  capture the page only: not Mica, the macOS traffic lights or Electron's Linux caption buttons.
+  The macOS background-application observer separately captures the actual desktop.

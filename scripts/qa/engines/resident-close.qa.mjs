@@ -6,6 +6,7 @@ import { TRASH_NAME } from '../lib/platform.mjs'
 import { isAlive } from '../lib/processes.mjs'
 import { waitFor } from '../settings/settings-ui.mjs'
 import { createEngineFixture, PRIME_MODELS, PRIME_PROVIDER } from './integration-fixture.mjs'
+import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
 
 const SUITE_NAME = 'engine2-resident-close'
 const SESSION_NAME = 'Release follow-up'
@@ -83,10 +84,11 @@ try {
     'README.md': '# Resident close QA\nOnly isolated files live here.\n'
   })
   application = await launchApp({
+    ...packagedLaunchOptions(fixture.environment),
     agentDir: fixture.piDirectory.dir,
-    env: fixture.environment,
     outDir: reportShotsDir('resident-close')
   })
+  await recordPackagedTarget(application)
   let { agentId } = await application.openWorkspace({
     cwd: workspace,
     args: {

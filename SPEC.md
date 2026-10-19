@@ -97,7 +97,9 @@ vengeance/
 - Each open pi session = one `EngineProcess` = one child `pi --mode rpc` process with `cwd` = workspace folder.
   Multiple sessions can run **in parallel** (a headline feature: several agents working at once, visible in the
   sidebar with live activity indicators).
-- Spawn: run the bundled CLI with `process.execPath` and `ELECTRON_RUN_AS_NODE=1`.
+- Spawn: run the bundled CLI with the app's Electron-as-Node executable and
+  `ELECTRON_RUN_AS_NODE=1`: `process.execPath` on Windows and Linux, the pinned Electron helper
+  executable on macOS (§2.4).
   Explicit custom locations can use compatible system Node, with Electron's Node as the fallback.
   `windowsHide: true`; on macOS and Linux the child leads its own process group (§2.4). Env:
   `childBaseEnv()` plus the managed variables. Args built from session options: `--session <path>` to resume,
@@ -206,6 +208,14 @@ beside the Windows one, never in its place.
   PID tree walk. Engine 2 daemons listen on named pipes on Windows and on Unix sockets elsewhere, in a
   folder only the user can open (`$XDG_RUNTIME_DIR/vengeance` on Linux, then the user's temporary
   folder, then `/tmp`), within the platform's socket path limit.
+  - On macOS the main Vengeance application remains a normal Dock application. Electron-as-Node
+    children use the signed Electron helper with `LSUIElement`, so Engine RPC, SDK/provider hosts,
+    CLI subcommands and the login-shell probe never create extra Dock applications or activate an
+    app of their own. The helper executable comes from Electron's internal `process.helperExecPath`
+    through `src/main/electron-node.ts`; a missing, invalid or unavailable helper fails the operation
+    rather than launching the main app executable as a child. Qualification is tied to
+    the pinned Electron version and must be repeated on upgrades. Explicit custom system Node
+    locations retain their existing behavior.
 - **Paths.** On macOS and Linux workspace folders enter the app as their physical path (symlinks
   resolved), the way POSIX `getcwd` reports them and pi records sessions. Canonical paths returned by
   native components map back below the roots they were listed under. Windows paths stay as given.
@@ -315,6 +325,18 @@ Read the selected pi package's `docs/settings.md` and implement _every_ key it l
 A restart offer ("Restart to apply") names what changed (packages, sign-ins, or the settings edited outside
 Vengeance). Writes an engine makes while applying a live change (runtime toggles it saves itself, models chosen in a
 session) never offer a restart, and a project's config changes only concern that folder's sessions.
+
+System prompt controls expose the selected engine's native foundation and an open conversation's
+assembled prompt as distinct views. A foundation preview excludes user files and runtime additions;
+the conversation view identifies its source session and is a snapshot, since native hooks can change
+later requests. The Engine 2 foundation comes from the bundled native helper, which is identified
+separately from a custom engine location.
+
+Users can edit global or project `SYSTEM.md`, `APPEND_SYSTEM.md` and context instructions, customize
+the built-in foundation, and restore inherited defaults. The editor explains native precedence and
+launch overrides, protects unsaved drafts, refuses conflicting external edits and bounds file sizes.
+Saving an instruction file never restarts open work, regardless of the automatic restart preference.
+Applying it to an open conversation is explicit and uses the guarded restart path.
 
 ### 3.7 Updates — qualified engines with app releases
 
@@ -517,6 +539,11 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   restart without interrupting it. The pinned helper applies the selected executable, saved settings and
   explicitly changed launch fields. Native recovery snapshots carry queued messages, goals, kernel,
   child-agent and schedule state; successful restoration verifies a new worker process.
+  After native preparation reaches `Prepared`, its mutation fence protects capture of every resident's
+  live provider, model and thinking level through `get_connection_state`. The helper validates complete,
+  unique roster/descriptor coverage and every native create envelope before commit. Each resident keeps
+  its captured selection in both descriptor replay and roster fallback; explicit target launch changes
+  apply last. A sibling's defaults or original launch selection never replace that live selection.
   Active product side questions and side questions observed through attached clients also block restart.
   The native API cannot query a previously unseen side question owned by an external client; the guard
   must not claim visibility into that work. The normal app-owned daemon disconnect aborts its client-owned
@@ -525,6 +552,10 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   session. Refusal keeps the temporary resident and its messages intact. Other user temporary sessions
   sharing the daemon must close before a saved resident restarts. Internal configuration-service workers
   drain within a bounded period before a native restart.
+- Both engines reject restart while startup or a session operation is in flight. Restart preparation
+  excludes new commands and checks native streaming and compaction state before stopping anything.
+  Engine refuses restart with queued messages or nonempty temporary history that cannot be restored;
+  it carries the live model and reasoning selection unless the restart explicitly changes them.
 - Launch-environment changes are rejected while other residents share the daemon. Unknown background
   launch environments also fail closed. Startup failures attempt the prior executable/environment/config
   rollback only after all relevant native processes are confirmed stopped. An ambiguous running
@@ -534,6 +565,8 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   the roster before commit. The installed native commit path can also run terminal cleanup and remove
   those recovery files. Restore their captured native contents only after verifying that the relevant
   workers stopped, then launch the selected successor and restore its roster through the native API.
+  If the successor fails, restore the raw backups and reapply every checkpointed live selection with no
+  target launch patch before launching the prior executable. Keep the raw recovery backups intact.
 - Prime saved-session listing and workspace discovery read native JSONL metadata without starting a
   worker, model request or Python environment. Discovery is cached and coalesced. Mutations invalidate
   the appropriate listing, while background residents remain reachable by their native identity.
@@ -560,7 +593,8 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   preview and requested uploads; upload actions send native session data only when the user invokes them.
   Its `--restart-config` mode applies typed native launch configuration to a prepared recovery snapshot;
   metadata advertises this as `restartConfig`. Its precommit capture mode is advertised as
-  `restartCapture`; both capabilities are required for native restart.
+  `restartCapture`, and complete live-selection validation and restoration as `restartSelections`.
+  All three capabilities are required before native restart preparation.
 - Private child-process JSON Lines carry credentials to main only. Renderer events contain prompts,
   notices and completion status. Bound frames, expire idle flows, cancel pending prompts and terminate
   the helper on cancellation or app shutdown. Once atomic credential saving begins, finish that write.
@@ -615,22 +649,57 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   boundaries with separate temporary account/session roots and local fake providers, native resident
   attachment/detachment, session provenance and configuration isolation. Live provider checks use tiny
   prompts and never write the user's real configuration during development.
-- For an unpacked release smoke, run `node scripts/dist-qa.mjs --dir` after the final build on each
+- For unpacked release qualification, run `node scripts/dist-qa.mjs --dir` after the final build on each
   platform. It prints the QA executable (`QA executable: …`): `release/qa/win-unpacked/VengeanceQA.exe`
   on Windows, `release/qa/mac-arm64/VengeanceQA.app/Contents/MacOS/VengeanceQA` on Apple silicon
   (`release/qa/mac/…` on Intel) and `release/qa/linux-unpacked/vengeance-qa` on Linux
-  (`linux-arm64-unpacked` on arm64). Run `scripts/qa/engines/packaged.qa.mjs` with `QA_PACKAGED_EXE`
+  (`linux-arm64-unpacked` on arm64). Run `scripts/qa/engines/platform-qualification.mjs` with `QA_PACKAGED_EXE`
   pointing at it and `QA_TMP_ROOT` outside the user's home and repository (the macOS and Linux defaults
-  already are), under Xvfb on a Linux host without a display. This exercises both native engines with
-  local providers, pi bridge loading and native helper loading through the public sign-in API. The helper
+  already are), under Xvfb on a Linux host without a display. It runs packaged, integration,
+  model-isolation, system-prompts, restart-safety, stop-compaction, bash-queue, session-recovery and
+  resident-close suites serially against the same packaged app. This exercises both native engines
+  with local providers, pi bridge loading and native helper loading through the public sign-in API. The helper
   also runs with a system-only PATH (`System32`, or `/usr/bin:/bin`) to expose missing DLLs or shared
   libraries. Inspect the generated PNGs. No installer launch or modification of a user's Vengeance
   installation is needed for this gate.
+  On both macOS architectures, also run `scripts/qa/engines/background-apps.qa.mjs` against the
+  packaged app in normal mode with separate temporary accounts. Observe operating-system activation
+  policies during Engine RPC, SDK/provider hosts, CLI commands, both native engines and the login-shell
+  probe; the main app must remain regular and background descendants must not become regular
+  applications. Retain actual desktop PNGs and a red/green witness proving the observer detects the
+  previous main-executable child behavior. Inspect the captures; renderer-only screenshots do not
+  establish Dock behavior.
+  For the 0.3.3 candidate, both macOS and both Linux architectures also qualify the official
+  same-platform 0.3.2 package's Engine 2 `0.10.0+vengeance.10` to the packaged candidate's `.12`.
+  `scripts/qa/engines/release-baseline.mjs` verifies pinned public `SHA256SUMS` and asset hashes,
+  extracts the complete baseline package, verifies native inventories and macOS signatures, and
+  writes `release-baseline-env.json`. Run `platform-qualification.mjs` with `QA_PLATFORM_GROUP=upgrade`
+  and `QA_RELEASE_BASELINE_ENV` pointing at that JSON. The candidate-transition and resident-upgrade
+  suites run serially against the final packaged candidate and retain baseline/candidate receipts.
+  This follows the core nine suites and macOS visibility gate, before the navigation benchmark.
+  Intel macOS packages include a source-built cryptography wheel with static OpenSSL. The lock pins
+  source and build inputs; native setup verifies the bundled wheel before accepting cached Python
+  readiness and includes it in runtime identity. Users need uv and network access, without a compiler
+  toolchain. The Intel upgrade fixture provisions the immutable `.10` package through its public
+  bootstrap command with a temporary constraint to that verified wheel. Candidate setup must run
+  without that constraint or a Python override and load the bundled wheel in its refreshed environment.
+  Windows's `.10` to `.11` transition evidence is retained in the prior PR qualification report;
+  the Intel wheel path does not change Windows dependency resolution. pi stays at `1.3.0+vengeance.2` in both
+  app releases; its historical 1.2 to 1.3 transition fixture is not a 0.3.3 release gate.
+  After packaged and applicable upgrade qualification, run
+  `scripts/perf/first-navigation.mjs --label <platform> --runs 3`
+  against the completed built app on every platform. Retain `.shots/perf/first-navigation` JSON,
+  CPU profiles and PNGs with source-bundle and native-payload hashes. This runner does not select
+  `QA_PACKAGED_EXE`; its built-app measurements are separate from packaged QA. A current-platform
+  run qualifies that candidate's benchmark checks, not an improvement over an unmeasured baseline
+  or another platform.
 - Releases come from `.github/workflows/release.yml`. A tag `vX.Y.Z` (or `vX.Y.Z-rc.N`, a prerelease) must
   match `package.json`. Each of the five platforms builds on its own clean runner without caches (Linux
   inside the pinned Ubuntu 22.04 container): engines, helper, app and packages, then the baked update
-  feed check, the GLIBC gate on Linux and signature, zip and dmg verification on macOS, then the smoke
-  above. The deb is install-tested on x64 and arm64 and the pacman package on Arch. One publish job then
+  feed check, the GLIBC gate on Linux and signature, zip and dmg verification on macOS, then the
+  packaged qualification, macOS background-process gate, applicable same-platform native upgrade
+  checks and built-app navigation benchmark above. The deb is
+  install-tested on x64 and arm64 and the pacman package on Arch. One publish job then
   drafts the GitHub release with every package, the update files (the two `latest-mac.yml` merged),
   `SHA256SUMS` and a build provenance attestation; a maintainer reviews and publishes it. Build jobs only
   read the repository. Pull requests that touch engines, patches, the helper, packaging, toolchain pins,
@@ -657,3 +726,8 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
 - Custom engine locations do not receive automatic native self-updates. Vengeance releases deliver
   qualified builds; the app updater does not run the maintainer qualification suite or rebase patches.
   Documentation and UI must distinguish upstream releases from verified compatibility and local patch identity.
+
+Current prompt and restart evidence is recorded in the
+[qualification report](docs/ENGINE-PROMPTS-QUALIFICATION-2026-10-18.md). The separate
+[navigation performance report](docs/PERFORMANCE-FIRST-NAVIGATION-2026-10-18.md) identifies its measured
+builds, fixtures and remaining qualification limits.

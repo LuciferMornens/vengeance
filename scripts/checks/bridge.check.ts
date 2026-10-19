@@ -74,14 +74,15 @@ const bridgeCommand = (
   sourceInfo: { path, source: 'cli', scope: 'temporary', origin: 'top-level' }
 })
 
-await check('hasBridgeCommands / isBridgeCommand: all six from the bridge file', () => {
+await check('hasBridgeCommands / isBridgeCommand: all commands from the bridge file', () => {
   const all = [
     'vengeance-tree',
     'vengeance-reload',
     'vengeance-tools',
     'vengeance-label',
     'vengeance-subagents',
-    'vengeance-speed'
+    'vengeance-speed',
+    'vengeance-system-prompt'
   ].map((n) => bridgeCommand(n))
   assert.equal(hasBridgeCommands(all), true)
   assert.equal(hasBridgeCommands(all.slice(1)), false)
@@ -192,6 +193,11 @@ await check(
     assert.ok(
       messages.success && messages.command === 'get_messages' && messages.data.messages.length === 0
     )
+    const prompt = await callBridge(mock, { op: 'system-prompt' }, 1000)
+    assert.ok(prompt.text.includes('careful coding assistant'))
+    const afterPrompt = await mock.send({ type: 'get_messages' })
+    assert.ok(afterPrompt.success && afterPrompt.command === 'get_messages')
+    assert.equal(afterPrompt.data.messages.length, 0)
 
     const tools: BridgeToolsState = await callBridge(
       mock,

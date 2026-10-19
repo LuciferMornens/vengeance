@@ -141,7 +141,7 @@ export async function checkRestartPeer(
       assert.ok(peerProcess && targetProcess)
       assert.equal(peerProcess.ppid, targetProcess.ppid, 'both resident workers share one daemon')
       const peerMessagesBefore = await application.rpc({ type: 'get_messages' }, peer.agentId)
-      await activateSession(application, primaryName)
+      // Activating the target starts history hydration, which correctly blocks its restart.
       try {
         await application.invoke('engine:restart', targetId, {
           thinking: 'medium',

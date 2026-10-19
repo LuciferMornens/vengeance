@@ -1,0 +1,294 @@
+diff --git a/crates/pa-cli/tests/acp_mode_e2e.rs b/crates/pa-cli/tests/acp_mode_e2e.rs
+index 0163d6d..8daf816 100644
+--- a/crates/pa-cli/tests/acp_mode_e2e.rs
++++ b/crates/pa-cli/tests/acp_mode_e2e.rs
+@@ -16,7 +16,7 @@
+ //! frames are checked against the TS capture corpus
+ //! (`crates/pa-daemon/testdata/acp`).
+ 
+-use std::io::{BufRead, BufReader, Write};
++use std::io::{BufRead, BufReader, Read, Seek, Write};
+ use std::process::{Child, Command, Stdio};
+ use std::sync::mpsc::{channel, Receiver};
+ use std::time::{Duration, Instant};
+@@ -34,7 +34,7 @@ struct AcpChild {
+     /// dropping the tempdir deletes it and the child's `current_dir` fails.
+     /// `None` for a second child sharing another child's home.
+     _home: Option<tempfile::TempDir>,
+-    spawn_stderr: Option<std::thread::JoinHandle<String>>,
++    stderr: std::fs::File,
+     /// The sandboxed supervisor socket the child spawned: the drop shuts
+     /// the supervisor down with it (a killed child must not leak the
+     /// supervisor into later test binaries).
+@@ -46,21 +46,19 @@ impl AcpChild {
+     /// the tempdir is held on the struct so the child's cwd directory
+     /// outlives the process, and the supervisor socket is the one the
+     /// drop shuts down.
+-    fn wrap(
+-        mut child: std::process::Child,
++    fn spawn_command(
++        command: &mut Command,
+         home: Option<tempfile::TempDir>,
+         socket: std::path::PathBuf,
+     ) -> AcpChild {
++        // Windows descendants can inherit pipe writers after the ACP child exits.
++        let stderr = tempfile::tempfile().expect("temporary stderr file");
++        let mut child = command
++            .stderr(stderr.try_clone().expect("stderr file clone"))
++            .spawn()
++            .expect("binary present");
+         let stdin = child.stdin.take().expect("stdin piped");
+         let stdout = child.stdout.take().expect("stdout piped");
+-        let mut stderr = child.stderr.take().expect("stderr piped");
+-        // Drain while the child runs: Windows pipes can fill before teardown.
+-        let stderr_reader = std::thread::spawn(move || {
+-            use std::io::Read;
+-            let mut text = String::new();
+-            let _ = stderr.read_to_string(&mut text);
+-            text
+-        });
+         let (tx, lines) = channel();
+         std::thread::spawn(move || {
+             let reader = BufReader::new(stdout);
+@@ -81,7 +79,7 @@ impl AcpChild {
+             lines,
+             next_id: 0,
+             _home: home,
+-            spawn_stderr: Some(stderr_reader),
++            stderr,
+             socket,
+         }
+     }
+@@ -95,10 +93,8 @@ impl AcpChild {
+         let home = tempfile::TempDir::new().unwrap();
+         let socket = home.path().join("daemon.sock");
+         std::fs::write(home.path().join("worker-script.json"), script.to_string()).unwrap();
+-        let child = daemon_attached_command(home.path(), &socket, args)
+-            .spawn()
+-            .expect("binary present");
+-        Self::wrap(child, Some(home), socket)
++        let mut command = daemon_attached_command(home.path(), &socket, args);
++        Self::spawn_command(&mut command, Some(home), socket)
+     }
+ 
+     /// The daemon-attached lane whose `rlm.spawn` children are scripted:
+@@ -117,12 +113,11 @@ impl AcpChild {
+         let child_script_path = home.path().join("child-script.json");
+         std::fs::write(home.path().join("worker-script.json"), script.to_string()).unwrap();
+         std::fs::write(&child_script_path, child_script.to_string()).unwrap();
+-        let child = daemon_attached_command(home.path(), &socket, args)
++        let mut command = daemon_attached_command(home.path(), &socket, args);
++        command
+             .env("PRIME_AGENT_FAUX_CHILD_SCRIPT", &child_script_path)
+-            .env("PRIME_AGENT_KERNEL_PYTHON", kernel_python)
+-            .spawn()
+-            .expect("binary present");
+-        Self::wrap(child, Some(home), socket)
++            .env("PRIME_AGENT_KERNEL_PYTHON", kernel_python);
++        Self::spawn_command(&mut command, Some(home), socket)
+     }
+ 
+     fn send(&mut self, frame: &Value) {
+@@ -263,13 +258,36 @@ fn worker_descriptor(home: &std::path::Path) -> Value {
+ impl Drop for AcpChild {
+     fn drop(&mut self) {
+         let _ = self.child.kill();
+-        let _ = self.child.wait();
+-        // On Windows the supervisor can inherit this pipe. Close it before waiting for EOF.
+-        shutdown_sandboxed_daemon(&self.socket);
+-        if let Some(stderr_reader) = self.spawn_stderr.take() {
+-            let text = stderr_reader.join().unwrap_or_default();
+-            if !text.is_empty() {
+-                eprintln!("ACP child stderr: {text}");
++        let deadline = Instant::now() + CLEANUP_TIMEOUT;
++        let child_cleanup = loop {
++            match self.child.try_wait() {
++                Ok(Some(_)) => break Ok(()),
++                Err(error) => break Err(anyhow::Error::from(error)),
++                Ok(None) if Instant::now() >= deadline => {
++                    break Err(anyhow::anyhow!("the fixture ACP child did not stop"));
++                }
++                Ok(None) => std::thread::sleep(CLEANUP_POLL_INTERVAL),
++            }
++        };
++        let cleanup = child_cleanup.and(shutdown_sandboxed_daemon(&self.socket));
++        let mut diagnostics = Vec::new();
++        if self.stderr.rewind().is_ok() {
++            let bytes = self.stderr.metadata().map_or(0, |metadata| metadata.len());
++            let _ = Read::by_ref(&mut self.stderr)
++                .take(bytes)
++                .read_to_end(&mut diagnostics);
++        }
++        if !diagnostics.is_empty() {
++            eprintln!(
++                "ACP child stderr: {}",
++                String::from_utf8_lossy(&diagnostics)
++            );
++        }
++        if let Err(error) = cleanup {
++            if std::thread::panicking() {
++                eprintln!("ACP fixture cleanup failed: {error:#}");
++            } else {
++                panic!("ACP fixture cleanup failed: {error:#}");
+             }
+         }
+     }
+@@ -284,6 +302,8 @@ fn initialize_params() -> Value {
+ }
+ 
+ const TIMEOUT: Duration = Duration::from_mins(1);
++const CLEANUP_TIMEOUT: Duration = Duration::from_secs(20);
++const CLEANUP_POLL_INTERVAL: Duration = Duration::from_millis(20);
+ 
+ /// Assert a settled turn's stop reason, printing the whole response
+ /// envelope on mismatch: an `internal_error`'s failure text (the
+@@ -1113,11 +1133,9 @@ fn acp_daemon_attached_default_session_persists_and_resumes() {
+         json!({ "engine": "faux", "responses": ["The Nile.", "Everest."] }).to_string(),
+     )
+     .unwrap();
+-    let child = daemon_attached_command(&home_path, &socket, &["--mode", "acp"])
+-        .env("DO_NOT_TRACK", "1")
+-        .spawn()
+-        .expect("binary present");
+-    let mut first = AcpChild::wrap(child, Some(home), socket.clone());
++    let mut command = daemon_attached_command(&home_path, &socket, &["--mode", "acp"]);
++    command.env("DO_NOT_TRACK", "1");
++    let mut first = AcpChild::spawn_command(&mut command, Some(home), socket.clone());
+     let session_id = initialize_and_new_session(&mut first);
+     assert_prompt_ends_turn(&mut first, &session_id, "Name a river.");
+ 
+@@ -1164,7 +1182,7 @@ fn acp_daemon_attached_default_session_persists_and_resumes() {
+         .parent()
+         .and_then(std::path::Path::parent)
+         .expect("the agent dir holding the session dir");
+-    let child = daemon_attached_command(
++    let mut command = daemon_attached_command(
+         &home_path,
+         &socket,
+         &[
+@@ -1173,11 +1191,9 @@ fn acp_daemon_attached_default_session_persists_and_resumes() {
+             "--resume",
+             &format!("sessions/{file_name}"),
+         ],
+-    )
+-    .current_dir(agent_dir)
+-    .spawn()
+-    .expect("binary present");
+-    let mut second = AcpChild::wrap(child, None, socket.clone());
++    );
++    command.current_dir(agent_dir);
++    let mut second = AcpChild::spawn_command(&mut command, None, socket.clone());
+     let session_id = initialize_and_new_session(&mut second);
+     assert_prompt_ends_turn(&mut second, &session_id, "Name a mountain.");
+     let sessions = live_sessions(&socket);
+@@ -1541,19 +1557,84 @@ fn acp_daemon_attached_image_only_prompt_reaches_the_session() {
+ 
+ /// Stop the sandboxed supervisor a test spawned (the shared-daemon
+ /// product behavior leaves it running; a test owns its sandbox).
+-fn shutdown_sandboxed_daemon(socket: &std::path::Path) {
+-    use std::io::Write as _;
+-    let Ok(mut stream) = pa_types::platform::transport::connect_blocking(socket) else {
+-        return;
+-    };
+-    let frame = format!(
+-            "{{\"type\":\"command\",\"id\":\"shutdown-test\",\"protocol\":{{\"name\":\"prime-agent.daemon\",\"version\":{}}},\"command\":{{\"type\":\"shutdown\"}}}}\n",
+-            pa_types::daemon::DAEMON_PROTOCOL_VERSION
+-        );
+-    let _ = stream.write_all(frame.as_bytes());
+-    let _ = stream.flush();
+-    // The supervisor exits after the shutdown response.
+-    std::thread::sleep(Duration::from_millis(300));
++fn shutdown_sandboxed_daemon(socket: &std::path::Path) -> anyhow::Result<()> {
++    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
++
++    let runtime = tokio::runtime::Builder::new_current_thread()
++        .enable_all()
++        .build()?;
++    runtime.block_on(async {
++        tokio::time::timeout(CLEANUP_TIMEOUT, async {
++            let stream = match pa_types::platform::transport::connect_transport(socket).await {
++                Ok(stream) => stream,
++                Err(error)
++                    if error.downcast_ref::<std::io::Error>().is_some_and(|error| {
++                        matches!(
++                            error.kind(),
++                            std::io::ErrorKind::NotFound
++                                | std::io::ErrorKind::ConnectionRefused
++                                | std::io::ErrorKind::NotConnected
++                        )
++                    }) =>
++                {
++                    return Ok(())
++                }
++                Err(error) => return Err(error),
++            };
++            let (reader, mut writer) = stream.split();
++            let mut lines = tokio::io::BufReader::new(reader).lines();
++            let line = lines
++                .next_line()
++                .await?
++                .ok_or_else(|| anyhow::anyhow!("the daemon closed before its hello"))?;
++            let hello: Value = serde_json::from_str(&line)?;
++            anyhow::ensure!(
++                hello["type"] == "daemon_hello",
++                "unexpected daemon hello: {hello}"
++            );
++            anyhow::ensure!(
++                hello["socketPath"] == socket.to_string_lossy().as_ref(),
++                "the daemon hello names another fixture socket: {hello}"
++            );
++            let supervisor_pid = u32::try_from(
++                hello["supervisorPid"]
++                    .as_u64()
++                    .ok_or_else(|| anyhow::anyhow!("the daemon hello has no supervisor pid"))?,
++            )?;
++            let supervisor_identity = pa_types::platform::process_start_id(supervisor_pid);
++            let frame = json!({
++                "type": "command", "id": "shutdown-test",
++                "protocol": { "name": "prime-agent.daemon",
++                    "version": pa_types::daemon::DAEMON_PROTOCOL_VERSION },
++                "command": { "type": "shutdown" }
++            });
++            writer.write_all(format!("{frame}\n").as_bytes()).await?;
++            writer.flush().await?;
++            let mut acknowledged = false;
++            while let Some(line) = lines.next_line().await? {
++                let response: Value = serde_json::from_str(&line)?;
++                if response["id"] == "shutdown-test" {
++                    anyhow::ensure!(response["success"] == true, "shutdown failed: {response}");
++                    acknowledged = true;
++                }
++            }
++            anyhow::ensure!(
++                acknowledged,
++                "the daemon closed without acknowledging shutdown"
++            );
++            while pa_types::platform::is_process_alive(supervisor_pid)? {
++                if supervisor_identity.is_some()
++                    && pa_types::platform::process_start_id(supervisor_pid) != supervisor_identity
++                {
++                    break;
++                }
++                tokio::time::sleep(CLEANUP_POLL_INTERVAL).await;
++            }
++            Ok(())
++        })
++        .await
++        .map_err(|_| anyhow::anyhow!("fixture daemon cleanup exceeded {CLEANUP_TIMEOUT:?}"))?
++    })
+ }
+ 
+ #[test]
+@@ -1987,10 +2068,8 @@ fn spawn_with_compaction_settings(
+     .expect("write settings.json");
+     let socket = home.path().join("daemon.sock");
+     std::fs::write(home.path().join("worker-script.json"), script.to_string()).unwrap();
+-    let child = daemon_attached_command(home.path(), &socket, args)
+-        .spawn()
+-        .expect("binary present");
+-    AcpChild::wrap(child, Some(home), socket)
++    let mut command = daemon_attached_command(home.path(), &socket, args);
++    AcpChild::spawn_command(&mut command, Some(home), socket)
+ }
+ 
+ /// The compaction metas among a turn's updates (a ran compaction carries

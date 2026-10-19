@@ -1,201 +1,173 @@
-import { useCallback, useEffect, useState } from 'react'
-import { FilePlus2, FileText, Trash2 } from 'lucide-react'
-import type {
-  InstructionFileKind,
-  InstructionFileRef,
-  InstructionFileState,
-  SettingsScope
-} from '@shared/api/settings'
-import { cn } from '../../../lib/cn'
-import { TRASH_NAME } from '../../../lib/platform-copy'
-import { invoke, on } from '../ipc'
-import { Button, Dialog, toast } from '../../../ui'
-import { FOCUS_RING } from '../controls'
-import { Group, Row } from '../layout'
-import { activeCwd, useSettings } from '../store'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { AlertCircle, FilePlus2, FileText, RotateCcw } from 'lucide-react'
+import type { InstructionFileKind, InstructionFileState, SettingsScope } from '@shared/api/settings'
+import { ENGINE_LABELS } from '@shared/api/engine'
+import { useApp } from '../../../store/app'
+import { Badge, Button, Skeleton } from '../../../ui'
+import { settingsInvokeForFolder, on } from '../ipc'
+import { Callout, Group, Row } from '../layout'
+import { useSettings } from '../store'
+import { InstructionEditor, type InstructionEditorTarget } from './instruction-editor'
+import { SystemPromptRows } from './system-prompt-viewer'
 
-/** Create and edit AGENTS.md, SYSTEM.md and APPEND_SYSTEM.md (global agent dir or the open project). */
-
-const KINDS: Array<{ kind: InstructionFileKind; title: string; description: string }> = [
-  {
-    kind: 'AGENTS.md',
-    title: 'Instructions',
-    description: 'AGENTS.md: guidance loaded into every session, globally or for this project.'
-  },
+const INSTRUCTION_KINDS: Array<{
+  kind: InstructionFileKind
+  title: string
+  description: string
+}> = [
   {
     kind: 'APPEND_SYSTEM.md',
-    title: 'Append to system prompt',
-    description: 'APPEND_SYSTEM.md: extra rules added after the engine’s system prompt.'
+    title: 'Additional instructions',
+    description: 'Add your rules to the engine’s prompt with APPEND_SYSTEM.md.'
   },
   {
     kind: 'SYSTEM.md',
-    title: 'Replace system prompt',
-    description: 'SYSTEM.md: replaces the engine’s default system prompt entirely. Use with care.'
+    title: 'Custom foundation',
+    description: 'Replace the built-in foundation with SYSTEM.md. Context and skills still apply.'
+  },
+  {
+    kind: 'AGENTS.md',
+    title: 'Project guidance',
+    description: 'AGENTS.md or CLAUDE.md: conventions and guidance loaded as project context.'
   }
 ]
 
 const SCOPE_LABEL: Record<SettingsScope, string> = { global: 'Global', project: 'Project' }
 
-function fileName(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path
-}
-
-function InstructionEditor({
-  target,
-  onClose,
-  onSaved
-}: {
-  target: InstructionFileState | null
-  onClose: () => void
-  onSaved: () => void
-}) {
-  const [text, setText] = useState('')
-  const [saving, setSaving] = useState(false)
-  useEffect(() => setText(target?.text ?? ''), [target])
-  const save = async (next: string | null) => {
-    if (!target) return
-    setSaving(true)
-    try {
-      await invoke(
-        'settings:instruction-file-write',
-        activeCwd(),
-        { kind: target.kind, scope: target.scope },
-        next
-      )
-      toast({
-        level: 'success',
-        title:
-          next === null
-            ? `${fileName(target.path)} moved to the ${TRASH_NAME}`
-            : `${fileName(target.path)} saved`,
-        description: 'New sessions use it right away.'
-      })
-      onSaved()
-      onClose()
-    } catch (error) {
-      toast({ level: 'error', title: 'Not saved', description: (error as Error).message })
-    } finally {
-      setSaving(false)
-    }
-  }
-  const dirty = !!target && text !== target.text
-  return (
-    <Dialog
-      open={!!target}
-      onOpenChange={(open) => !open && onClose()}
-      width={720}
-      title={target ? `${fileName(target.path)} · ${SCOPE_LABEL[target.scope]}` : ''}
-      description={target && <span className="font-mono text-xs text-fg-3">{target.path}</span>}
-      footer={
-        <>
-          {target?.exists && (
-            <Button
-              variant="ghost"
-              leading={<Trash2 />}
-              className="mr-auto text-fg-3"
-              disabled={saving}
-              onClick={() => void save(null)}
-            >
-              Delete
-            </Button>
-          )}
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            loading={saving}
-            disabled={!dirty && target?.exists}
-            onClick={() => void save(text)}
-          >
-            {target?.exists ? 'Save' : 'Create'}
-          </Button>
-        </>
-      }
-    >
-      <textarea
-        aria-label={target ? fileName(target.path) : 'Instructions'}
-        value={text}
-        spellCheck={false}
-        placeholder={
-          target?.kind === 'SYSTEM.md'
-            ? 'You are a careful senior engineer…'
-            : '# Project notes\n\n- Run the tests before committing.'
-        }
-        onChange={(e) => setText(e.target.value)}
-        className={cn(
-          'selectable h-[380px] w-full resize-none rounded-card bg-surface-1 px-4 py-3 font-mono text-[12.5px] leading-[1.65] text-fg placeholder:text-fg-3',
-          'shadow-[inset_0_0_0_1px_var(--hairline)] outline-none',
-          FOCUS_RING
-        )}
-      />
-    </Dialog>
-  )
-}
-
 export function InstructionsGroup() {
-  const hasProject = useSettings((s) => !!s.snapshot?.project)
+  const engine = useSettings((state) => state.engine)
+  const scope = useSettings((state) => state.scope)
+  const project = useSettings((state) => state.snapshot?.project)
+  const cwd = useApp((state) => state.prefs.activeWorkspace)
   const [files, setFiles] = useState<Record<string, InstructionFileState>>({})
-  const [editing, setEditing] = useState<InstructionFileState | null>(null)
+  const [editing, setEditing] = useState<InstructionEditorTarget | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const loadRevision = useRef(0)
+  const hasProject = !!project
   const scopes: SettingsScope[] = hasProject ? ['global', 'project'] : ['global']
 
   const load = useCallback(async () => {
-    const refs: InstructionFileRef[] = KINDS.flatMap(({ kind }) =>
-      (['global', 'project'] as const).map((scope) => ({ kind, scope }))
+    const revision = ++loadRevision.current
+    const references = INSTRUCTION_KINDS.flatMap(({ kind }) =>
+      (hasProject ? (['global', 'project'] as const) : (['global'] as const)).map((fileScope) => ({
+        kind,
+        scope: fileScope
+      }))
     )
-    const states = await Promise.all(
-      refs.map((ref) =>
-        ref.scope === 'project' && !hasProject
-          ? null
-          : invoke('settings:instruction-file', activeCwd(), ref).catch(() => null)
+    try {
+      const states = await Promise.all(
+        references.map((reference) =>
+          settingsInvokeForFolder(engine, cwd, 'settings:instruction-file', cwd, reference)
+        )
       )
-    )
-    setFiles(
-      Object.fromEntries(
-        states
-          .filter((s): s is InstructionFileState => s !== null)
-          .map((s) => [`${s.scope}:${s.kind}`, s])
-      )
-    )
-  }, [hasProject])
+      if (loadRevision.current !== revision) return
+      setFiles(Object.fromEntries(states.map((file) => [`${file.scope}:${file.kind}`, file])))
+      setError(null)
+    } catch (failure) {
+      if (loadRevision.current === revision)
+        setError(failure instanceof Error ? failure.message : String(failure))
+    } finally {
+      if (loadRevision.current === revision) setLoading(false)
+    }
+  }, [engine, cwd, hasProject])
+
   useEffect(() => {
+    setLoading(true)
+    setFiles({})
+    setEditing(null)
     void load()
-    return on('settings:changed', ({ area }) => {
-      if (area === 'instructions') void load()
+    const unsubscribe = on('settings:changed', (event) => {
+      if ((event.engine ?? 'pi') !== engine || event.area !== 'instructions') return
+      if (event.project && event.project.cwd !== cwd) return
+      void load()
     })
-  }, [load])
+    return () => {
+      loadRevision.current++
+      unsubscribe()
+    }
+  }, [load, engine, cwd])
+
+  const customize = (text: string) => {
+    const file = files[`${hasProject ? scope : 'global'}:SYSTEM.md`]
+    if (file) setEditing({ engine, cwd, file, initialText: text })
+  }
 
   return (
     <Group
       title="System prompt & instructions"
-      description="Plain Markdown files the engine reads when a session starts."
+      description={`Inspect ${ENGINE_LABELS[engine]}’s prompt and shape the guidance new sessions use.`}
     >
-      {KINDS.map(({ kind, title, description }) => (
-        <Row key={kind} settingKey={`instructions.${kind}`} label={title} description={description}>
-          <div className="flex items-center gap-1.5">
-            {scopes.map((scope) => {
-              const file = files[`${scope}:${kind}`]
-              return (
+      <SystemPromptRows
+        key={`${engine}:${cwd}`}
+        onCustomize={customize}
+        canCustomize={!loading && !error}
+      />
+      {error && (
+        <div className="p-4">
+          <Callout tone="danger" icon={<AlertCircle />} title="Instruction files unavailable">
+            {error}
+          </Callout>
+          <Button size="sm" variant="ghost" leading={<RotateCcw />} onClick={() => void load()}>
+            Reload instruction files
+          </Button>
+        </div>
+      )}
+      {INSTRUCTION_KINDS.map(({ kind, title, description }) => (
+        <Row
+          key={kind}
+          settingKey={`instructions.${kind}`}
+          label={title}
+          description={description}
+          badges={
+            kind === 'SYSTEM.md' &&
+            !loading &&
+            !error && (
+              <Badge>
+                {files[`project:${kind}`]?.exists &&
+                (engine === 'prime' || project?.trust.effective)
+                  ? 'Project replacement'
+                  : files[`global:${kind}`]?.exists
+                    ? 'Global replacement'
+                    : 'Engine default'}
+              </Badge>
+            )
+          }
+        >
+          <div className="flex flex-wrap items-center gap-1.5">
+            {scopes.map((fileScope) => {
+              const file = files[`${fileScope}:${kind}`]
+              return loading ? (
+                <Skeleton key={fileScope} className="h-7 w-20" />
+              ) : (
                 <Button
-                  key={scope}
+                  key={fileScope}
                   size="sm"
                   variant={file?.exists ? 'secondary' : 'ghost'}
                   leading={file?.exists ? <FileText /> : <FilePlus2 />}
                   disabled={!file}
-                  onClick={() => file && setEditing(file)}
+                  onClick={() => file && setEditing({ engine, cwd, file })}
                 >
-                  {SCOPE_LABEL[scope]}
+                  {SCOPE_LABEL[fileScope]}
                 </Button>
               )
             })}
           </div>
         </Row>
       ))}
-      <InstructionEditor
-        target={editing}
-        onClose={() => setEditing(null)}
-        onSaved={() => void load()}
-      />
+      <div className="border-t border-hairline-soft px-4 py-3 text-xs leading-relaxed text-fg-3">
+        Project prompt files take precedence over global files of the same name; they are not
+        combined.
+        {engine === 'pi' && ' Project prompt files load only in trusted projects.'} Saving never
+        restarts an open session. Use an explicit restart when you are ready to apply changes.
+      </div>
+      {editing && (
+        <InstructionEditor
+          target={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => void load()}
+        />
+      )}
     </Group>
   )
 }

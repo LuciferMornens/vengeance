@@ -5,6 +5,7 @@ import { launchApp, reportShotsDir, ROOT } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
 import { softSteps } from '../lib/steps.mjs'
 import { createEngineFixture, PRIME_MODELS, PRIME_PROVIDER } from './integration-fixture.mjs'
+import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
 
 const SUITE_NAME = 'prime-bash-queue'
 const WAIT_TIMEOUT_MS = 60_000
@@ -51,10 +52,11 @@ const checks = softSteps(step, { app: () => application, name: SUITE_NAME })
 
 try {
   application = await launchApp({
+    ...packagedLaunchOptions(fixture.environment),
     agentDir: fixture.piDirectory.dir,
-    env: fixture.environment,
     outDir: OUTPUT_DIRECTORY
   })
+  await recordPackagedTarget(application)
   const { agentId } = await application.openWorkspace({
     cwd: await fixture.root.folder('workspace'),
     args: {
@@ -150,7 +152,7 @@ try {
   await checks.check(
     'explicit native reopen projects included shell history and excludes !!',
     async () => {
-      // This isolated probe intentionally resets the runtime; production shell runs must not do this.
+      // Native reopen is explicit here; interactive shell runs keep their runtime.
       const state = await application.rpc({ type: 'get_state' }, agentId)
       await application.rpc({ type: 'switch_session', sessionPath: state.sessionFile }, agentId)
       fixture.primeServer.queue(turn.text('Native shell history reload checked.'))
@@ -215,13 +217,25 @@ try {
       }
       const queue = await native('get_queue')
       assert.equal(queue.followUp.length, 3)
+      const waitForRenderedQueue = async (previews) => {
+        await until(async () => {
+          const buttons = application.page.getByRole('button', { name: 'Remove queued message' })
+          if ((await buttons.count()) !== previews.length) return false
+          const counts = await Promise.all(
+            previews.map((preview) => application.page.getByText(preview, { exact: true }).count())
+          )
+          return counts.every((count) => count === 1)
+        }, 'native queue previews rendered')
+      }
       const removeChip = async (text) => {
         const chip = application.page
           .locator('span')
           .filter({ hasText: text })
           .filter({ has: application.page.getByRole('button', { name: 'Remove queued message' }) })
-        await chip.last().getByRole('button', { name: 'Remove queued message' }).click()
+        await chip.getByRole('button', { name: 'Remove queued message' }).click()
       }
+      // Native replies can precede queue rendering; exiting chips keep stale removal handlers.
+      await waitForRenderedQueue(queue.followUp)
       await removeChip(PLAIN_MESSAGE)
       await until(
         async () => (await native('get_queue')).followUp.length === 2,
@@ -248,6 +262,7 @@ try {
       })
       assert.equal(stale.status, 'rejected')
       assert.deepEqual((await native('get_queue')).followUp, remaining.followUp)
+      await waitForRenderedQueue(remaining.followUp)
       await removeChip(SECOND_INJECTED)
       await until(
         async () => (await native('get_queue')).followUp.length === 1,

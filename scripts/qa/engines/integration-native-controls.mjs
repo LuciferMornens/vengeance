@@ -394,6 +394,25 @@ export async function checkNativeControls(application, server, agentId, checkSte
       const composer = await application.composer()
       await composer.fill('/speed on')
       await composer.press('Enter')
+      try {
+        await application.page.getByText('Token speed display on', { exact: true }).waitFor()
+        await application.page
+          .getByRole('button', { name: 'Turn off token speed display' })
+          .waitFor()
+      } catch (error) {
+        const active = await application.agentState(agentId)
+        console.error(
+          '      token-speed command state:',
+          JSON.stringify({
+            commandsStatus: active.commandsStatus,
+            engineGeneration: active.engineGeneration,
+            snapshotRevision: active.snapshotRevision,
+            nativeSpeedCommand: active.commands.some((command) => command.name === 'speed'),
+            draft: await composer.inputValue()
+          })
+        )
+        throw error
+      }
       server.queue(
         turn.text('Engine2 token speed answer.', {
           chunkSize: 1,

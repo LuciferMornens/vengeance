@@ -216,7 +216,7 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
     switch (command.type) {
       case 'prompt': {
         // Extension commands run immediately, even while streaming (like pi).
-        const bridge = /^\/(vengeance-[a-z]+) (.*)$/s.exec(command.message)
+        const bridge = /^\/(vengeance-[a-z-]+) (.*)$/s.exec(command.message)
         if (bridge) {
           this.runBridgeCommand(bridge[1]!, bridge[2]!)
           return this.ok(command, { disposition: 'handled' })
@@ -466,6 +466,10 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
         )
       case 'vengeance-reload':
         return null
+      case 'vengeance-system-prompt':
+        return {
+          text: 'You are a careful coding assistant.\n\n<rules>\nVerify changes and report concrete results.\n</rules>\n\n<project_context>\nPrefer small, reviewable changes.\n</project_context>'
+        }
       case 'vengeance-tools':
         if (payload.op === 'set' && Array.isArray(payload.names)) {
           const known = new Set(
