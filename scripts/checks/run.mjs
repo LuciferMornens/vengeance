@@ -94,7 +94,7 @@ if (pi) {
 }
 
 console.log('▶ checks')
-for (const script of ['native-kernel.mjs', 'prime-runtime-wheels.mjs']) {
+for (const script of ['native-kernel.mjs', 'native-macho.mjs', 'prime-runtime-wheels.mjs']) {
   try {
     await import(pathToFileURL(join(here, script)).href)
   } catch (error) {

@@ -7,18 +7,20 @@ import { run } from './common.mjs'
 /** Electron's minimum macOS release; Engine 2 and its helper must start wherever the app does. */
 const MACOS_MINIMUM = '13.0'
 /**
- * Linux builds run in an Ubuntu 22.04 container; no symbol may require a newer glibc. On a newer distribution,
- * VENGEANCE_GLIBC_BASELINE=host builds for that machine alone. Release builds never set it, and they check the
- * packaged app again (scripts/ci/glibc-gate.mjs).
+ * Linux builds run in an Ubuntu 22.04 container; no symbol may require a newer glibc. On a newer
+ * distribution, VENGEANCE_GLIBC_BASELINE=host builds for that machine. Releases never set it;
+ * they check the packaged app again (scripts/ci/glibc-gate.mjs).
  */
 const GLIBC_MAXIMUM = '2.35'
 /** Thin Mach-O headers in either byte order (32- and 64-bit), read big-endian. */
 const MACHO_MAGIC = new Set([0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe])
-/** Universal binaries. Java class files share 0xcafebabe, but their version field is at least 45. */
+/** Java class files share 0xcafebabe with universal binaries, but their version is at least 45. */
 const FAT_MAGIC = new Set([0xcafebabe, 0xcafebabf])
 const FAT_ARCHITECTURES_MAXIMUM = 20
-const ELF_SYSTEM_LIBRARY =
-  /^(libc\.so\.6|libm\.so\.6|libgcc_s\.so\.1|libpthread\.so\.0|libdl\.so\.2|librt\.so\.1|ld-linux[\w.-]*\.so\.\d+)$/
+const ELF_SYSTEM_LIBRARY = new RegExp(
+  '^(libc\\.so\\.6|libm\\.so\\.6|libgcc_s\\.so\\.1|libpthread\\.so\\.0|' +
+    'libdl\\.so\\.2|librt\\.so\\.1|ld-linux[\\w.-]*\\.so\\.\\d+)$'
+)
 const MACHO_SYSTEM_LIBRARIES = [
   '/usr/lib/libSystem',
   '/usr/lib/libc++',
@@ -28,6 +30,15 @@ const MACHO_SYSTEM_LIBRARIES = [
   '/usr/lib/libiconv',
   '/System/Library/Frameworks/'
 ]
+const MACHO_DEPENDENCY_COMMANDS = new Set([
+  'LC_LOAD_DYLIB',
+  'LC_LOAD_WEAK_DYLIB',
+  'LC_REEXPORT_DYLIB',
+  'LC_LOAD_UPWARD_DYLIB',
+  'LC_LAZY_LOAD_DYLIB',
+  'LC_PREBOUND_DYLIB',
+  'LC_LOADFVMLIB'
+])
 
 export function nativeBuildEnvironment() {
   if (process.platform !== 'darwin') return process.env
@@ -57,8 +68,8 @@ async function isMachO(path) {
 }
 
 /**
- * Ad-hoc signs every Mach-O file below `directory` (prebuilt Node addons ship linker-signed or unsigned). The
- * packaged app leaves engine payloads untouched (electron-builder.yml signIgnore), so this is where they get signed.
+ * Prebuilt Node addons can be unsigned. Packaging leaves engine payloads untouched
+ * (electron-builder.yml signIgnore), so they get signed here.
  */
 export async function signMachOFiles(directory) {
   for (const entry of await readdir(directory, { recursive: true, withFileTypes: true })) {
@@ -89,10 +100,10 @@ async function scanLines(command, args, onLine) {
 }
 
 function compareVersions(left, right) {
-  const a = left.split('.').map(Number)
-  const b = right.split('.').map(Number)
-  for (let index = 0; index < Math.max(a.length, b.length); index++) {
-    const difference = (a[index] ?? 0) - (b[index] ?? 0)
+  const leftParts = left.split('.').map(Number)
+  const rightParts = right.split('.').map(Number)
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index++) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0)
     if (difference) return difference
   }
   return 0
@@ -139,12 +150,68 @@ async function verifyElf(executable) {
   }
 }
 
-async function verifyMachO(executable) {
+function machOLoadCommands(executable, lines) {
+  const commands = []
+  let current
+  for (const line of lines) {
+    if (/^\s*Load command \d+\s*$/.test(line)) {
+      current = {}
+      commands.push(current)
+      continue
+    }
+    const kind = /^\s*cmd\s+(LC_\w+)(?:\s|$)/.exec(line)
+    if (kind && current) {
+      if (current.kind !== undefined) {
+        throw new Error(`${executable} has duplicate cmd fields in a Mach-O load command`)
+      }
+      current.kind = kind[1]
+    }
+    const field = /^\s*(name|minos)\s+(.+)$/.exec(line)
+    if (!field || !current) continue
+    const [, name, value] = field
+    if (current[name] !== undefined) {
+      throw new Error(`${executable} has duplicate ${name} fields in ${current.kind}`)
+    }
+    current[name] = value.trim()
+  }
+  if (commands.some((command) => !command.kind)) {
+    throw new Error(`${executable} has an unrecognized Mach-O load command`)
+  }
+  return commands
+}
+
+function machOLibraryName(executable, command) {
+  const name = /^(\S.*?) \(offset \d+\)$/.exec(command.name ?? '')?.[1]
+  if (!name) throw new Error(`${executable} has no valid name in ${command.kind}`)
+  return name
+}
+
+/** LC_ID_DYLIB names the image itself; only load commands create library dependencies. */
+export function verifyMachOLoadCommands(executable, lines) {
+  const commands = machOLoadCommands(executable, lines)
   const libraries = []
-  await scanLines('otool', ['-L', executable], (line) => {
-    const match = /^\s+(\S.*?) \(compatibility version /.exec(line)
-    if (match) libraries.push(match[1])
-  })
+  const minimums = []
+  for (const command of commands) {
+    if (MACHO_DEPENDENCY_COMMANDS.has(command.kind)) {
+      libraries.push(machOLibraryName(executable, command))
+    } else if (command.kind === 'LC_LOAD_DYLINKER') {
+      const linker = machOLibraryName(executable, command)
+      if (linker !== '/usr/lib/dyld') {
+        throw new Error(`${executable} uses a dynamic linker outside macOS: ${linker}`)
+      }
+    } else if (
+      command.kind !== 'LC_ID_DYLIB' &&
+      (/^LC_LOAD/.test(command.kind) || /(?:DYLIB|FVMLIB)$/.test(command.kind))
+    ) {
+      throw new Error(`${executable} has an unsupported dependency command: ${command.kind}`)
+    }
+    if (command.kind === 'LC_BUILD_VERSION') {
+      if (!/^\d+(?:\.\d+)+$/.test(command.minos ?? '')) {
+        throw new Error(`${executable} has no valid minos in LC_BUILD_VERSION`)
+      }
+      minimums.push(command.minos)
+    }
+  }
   const system = (name) => MACHO_SYSTEM_LIBRARIES.some((prefix) => name.startsWith(prefix))
   if (
     !libraries.some((name) => name.startsWith('/usr/lib/libSystem')) ||
@@ -152,18 +219,19 @@ async function verifyMachO(executable) {
   ) {
     throw new Error(`${executable} links libraries outside macOS: ${libraries.join(', ')}`)
   }
-  const minimums = []
-  let command
-  await scanLines('otool', ['-l', executable], (line) => {
-    const field = /^\s*(cmd|minos)\s+(\S+)/.exec(line)
-    if (field?.[1] === 'cmd') command = field[2]
-    else if (field && command === 'LC_BUILD_VERSION') minimums.push(field[2])
-  })
-  if (!minimums.length || minimums.some((version) => compareVersions(version, MACOS_MINIMUM) > 0)) {
+  const requiresNewerMacOS = minimums.some((value) => compareVersions(value, MACOS_MINIMUM) > 0)
+  if (!minimums.length || requiresNewerMacOS) {
     throw new Error(
-      `${executable} must support macOS ${MACOS_MINIMUM}; found ${minimums.join(', ') || 'no LC_BUILD_VERSION'}`
+      `${executable} must support macOS ${MACOS_MINIMUM}; found ` +
+        `${minimums.join(', ') || 'no LC_BUILD_VERSION'}`
     )
   }
+}
+
+async function verifyMachO(executable) {
+  const lines = []
+  await scanLines('otool', ['-l', executable], (line) => lines.push(line))
+  verifyMachOLoadCommands(executable, lines)
   run('codesign', ['--verify', '--strict', executable])
 }
 

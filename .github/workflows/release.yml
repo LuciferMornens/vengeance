@@ -34,6 +34,7 @@ on:
       - scripts/checks/prime-process-liveness.mjs
       - scripts/checks/prime-runtime-wheels.mjs
       - scripts/checks/native-kernel.mjs
+      - scripts/checks/native-macho.mjs
       - scripts/dist.mjs
       - scripts/dist-qa.mjs
       - scripts/engines/**
@@ -196,6 +197,7 @@ jobs:
           node scripts/checks/prime-process-liveness.mjs
           node scripts/checks/prime-runtime-wheels.mjs
           node scripts/checks/native-kernel.mjs
+          node scripts/checks/native-macho.mjs
       - name: Validate the macOS application observer
         if: runner.os == 'macOS'
         run: |
