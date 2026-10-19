@@ -6,8 +6,8 @@ of the window's rendering thread. On macOS, background Engine and settings proce
 background helper so they do not create extra Dock applications.
 
 **Cross-platform release qualification is pending.** Local Windows app, packaged-engine and benchmark
-checks pass. The final 0.3.3 candidate still needs the five-platform CI and release dry-run results,
-including macOS Dock observations and macOS/Linux upgrades.
+checks pass, as does current ordinary CI. macOS arm64 passes its native core, Dock and upgrade gates;
+remaining platform, upgrade, benchmark and package-install results are still required.
 
 On 0.3.1 or 0.3.2, the Vengeance card in **Settings → Updates** offers the next published release.
 The Windows installer and Linux AppImage can download and install updates; macOS and the deb, rpm,
@@ -125,15 +125,16 @@ six PNGs visually reviewed. First-open, second-open and cached-return medians ar
 `.shots/perf/first-navigation/release-0.3.3-win-local.json`. These current-candidate measurements are
 separate from the historical before/after comparison above.
 
-At `835f034`, ordinary CI and CodeQL pass. Windows and Linux have 383 mock captures each; macOS has
-363, with responsive layouts beyond its 1024×684 runner work area skipped by the existing guards.
-Selected Windows/Linux/macOS mock reviews and all 79 macOS native core captures are visually clear.
-Release QA remains partial: macOS arm64 passes nine core suites; Linux instruction restore, the
-Windows queue fixture, macOS Dock cleanup and Intel Python bootstrap still need a clean release run.
-The Linux dependency fix is committed, and the queue-readiness and Dock cleanup repairs have clear
-independent reviews. The queue witness establishes fixture susceptibility, not the archived CI cause.
-Intel's bootstrap cause remains unknown; the next attempt preserves native worker logs before cleanup.
-All five release build jobs failed and installation jobs were skipped.
+At `404d24d`, ordinary CI and all three CodeQL analyses pass. All 383 Windows/Linux and 363 macOS
+provided mock captures have clear static review coverage; 20 macOS display variants are absent. Windows, both Linux
+architectures and macOS arm64 pass all nine native core suites. macOS arm64 also passes the Dock
+observer and both official upgrade suites; its reviewed desktop shows one Vengeance icon and no exec
+icons. Remaining blockers concern macOS benchmark process identity, Windows benchmark setup and Linux
+resident-upgrade timeouts. Intel's retained logs identify a transitive cryptography source-build
+failure; current wheel packaging is being repaired without downgrading the dependency. Native visual
+review is clear for 95 macOS and 158 Linux captures. Follow-up QA fixes are committed; local liveness
+static/build/package gates pass, with source review, affected native reruns and the new build identity pending.
+Details and scoped evidence are in the qualification record; overall release qualification remains pending.
 
 The final 0.3.3 candidate requires:
 
@@ -161,9 +162,9 @@ The final 0.3.3 candidate requires:
 
 Final workflow run links, inspected desktop evidence and per-platform hashes must be recorded before
 publication. The remaining platform matrix, macOS witnesses, same-platform upgrades and per-platform
-benchmarks remain pending after
-[release run 39222762172](https://github.com/LuciferMornens/vengeance/actions/runs/39222762172)
-for candidate `835f034`. The next attempt tests the reviewed repairs and captures Intel bootstrap diagnostics.
-[CI 39222761658](https://github.com/LuciferMornens/vengeance/actions/runs/39222761658)
-and [CodeQL 39222757745](https://github.com/LuciferMornens/vengeance/actions/runs/39222757745) pass.
+benchmarks remain pending in
+[release run 39229025591](https://github.com/LuciferMornens/vengeance/actions/runs/39229025591)
+for candidate `404d24d`, with diagnostic, runtime and harness repairs awaiting qualification.
+[CI 39229025642](https://github.com/LuciferMornens/vengeance/actions/runs/39229025642)
+and [CodeQL 39229020899](https://github.com/LuciferMornens/vengeance/actions/runs/39229020899) pass.
 The local Windows results do not qualify another platform or a later source revision.
