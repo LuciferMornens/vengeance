@@ -217,13 +217,25 @@ try {
       }
       const queue = await native('get_queue')
       assert.equal(queue.followUp.length, 3)
+      const waitForRenderedQueue = async (previews) => {
+        await until(async () => {
+          const buttons = application.page.getByRole('button', { name: 'Remove queued message' })
+          if ((await buttons.count()) !== previews.length) return false
+          const counts = await Promise.all(
+            previews.map((preview) => application.page.getByText(preview, { exact: true }).count())
+          )
+          return counts.every((count) => count === 1)
+        }, 'native queue previews rendered')
+      }
       const removeChip = async (text) => {
         const chip = application.page
           .locator('span')
           .filter({ hasText: text })
           .filter({ has: application.page.getByRole('button', { name: 'Remove queued message' }) })
-        await chip.last().getByRole('button', { name: 'Remove queued message' }).click()
+        await chip.getByRole('button', { name: 'Remove queued message' }).click()
       }
+      // Native replies can precede queue rendering; exiting chips keep stale removal handlers.
+      await waitForRenderedQueue(queue.followUp)
       await removeChip(PLAIN_MESSAGE)
       await until(
         async () => (await native('get_queue')).followUp.length === 2,
@@ -250,6 +262,7 @@ try {
       })
       assert.equal(stale.status, 'rejected')
       assert.deepEqual((await native('get_queue')).followUp, remaining.followUp)
+      await waitForRenderedQueue(remaining.followUp)
       await removeChip(SECOND_INJECTED)
       await until(
         async () => (await native('get_queue')).followUp.length === 1,

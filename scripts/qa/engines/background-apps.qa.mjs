@@ -80,9 +80,12 @@ exec /bin/zsh -f "$@"
     VENGEANCE_USER_DATA: profile
   }
   let application
+  let child
   let identity
   let agentId
   let lifetimeTimer
+  let result
+  let failure
   try {
     application = await electron.launch({
       executablePath: executable,
@@ -90,12 +93,12 @@ exec /bin/zsh -f "$@"
       env: environment,
       timeout: WAIT_TIMEOUT_MS
     })
-    identity = await identifyMacQaChild(application.process())
+    child = application.process()
+    identity = await identifyMacQaChild(child)
     lifetimeTimer = setTimeout(() => {
-      const child = application.process()
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
     }, PRODUCTION_LIFETIME_MS)
-    await observer.attach(application.process().pid)
+    await observer.attach(child.pid)
     const isolation = await application.evaluate(({ app }) => ({
       packaged: app.isPackaged,
       userData: app.getPath('userData'),
@@ -155,35 +158,53 @@ exec /bin/zsh -f "$@"
     await observer.checkpoint('production-login-shell', [agent.pid])
     await invoke('engine:dispose', agentId)
     agentId = undefined
-    return { description, isolation, identity, shellArguments, output: response.data.output }
+    result = { description, isolation, identity, shellArguments, output: response.data.output }
+  } catch (error) {
+    failure = error
   } finally {
-    if (application) {
-      if (agentId) {
-        const page = await application.firstWindow().catch(() => undefined)
-        await page
-          ?.evaluate((identifier) => window.vengeance.invoke('engine:dispose', identifier), agentId)
-          .catch(() => undefined)
+    try {
+      if (application) {
+        if (agentId) {
+          const page = await application.firstWindow().catch(() => undefined)
+          await page
+            ?.evaluate(
+              (identifier) => window.vengeance.invoke('engine:dispose', identifier),
+              agentId
+            )
+            .catch(() => undefined)
+        }
+        let closeTimer
+        try {
+          await Promise.race([
+            application.close().catch(() => undefined),
+            new Promise((resolveTimeout) => {
+              closeTimer = setTimeout(resolveTimeout, WAIT_TIMEOUT_MS)
+            })
+          ])
+        } finally {
+          clearTimeout(closeTimer)
+          clearTimeout(lifetimeTimer)
+          if (identity) await stopMacQaChild(child, identity)
+          else if (child && child.exitCode === null && child.signalCode === null) {
+            child.kill('SIGKILL')
+          }
+        }
       }
-      let closeTimer
-      try {
-        await Promise.race([
-          application.close().catch(() => undefined),
-          new Promise((resolveTimeout) => {
-            closeTimer = setTimeout(resolveTimeout, WAIT_TIMEOUT_MS)
-          })
-        ])
-      } finally {
-        clearTimeout(closeTimer)
-        clearTimeout(lifetimeTimer)
-        if (identity) await stopMacQaChild(application.process(), identity)
-        else if (
-          application.process().exitCode === null &&
-          application.process().signalCode === null
-        )
-          application.process().kill('SIGKILL')
-      }
+    } catch (error) {
+      failure = failure
+        ? new AggregateError(
+            [failure, error],
+            [
+              'Production shell operation and cleanup failed:',
+              failure.stack ?? String(failure),
+              error.stack ?? String(error)
+            ].join('\n')
+          )
+        : error
     }
   }
+  if (failure) throw failure
+  return result
 }
 
 function providerExtension(server, addon) {
