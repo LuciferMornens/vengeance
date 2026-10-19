@@ -364,8 +364,8 @@ into isolated QA storage; the source account and credentials were not used as wr
 Screenshots are under `.shots/qa/final-f35781f/packaged`.
 
 ```text
-QA_PACKAGED_EXE=C:/Users/mitte/.codex/worktrees/engine-prompts-performance/vengeance/release/qa/win-unpacked/VengeanceQA.exe \
-QA_PI_PACKAGE_ROOT=C:/Users/mitte/.pi/agent \
+QA_PACKAGED_EXE=C:/Users/dev/.codex/worktrees/engine-prompts-performance/vengeance/release/qa/win-unpacked/VengeanceQA.exe \
+QA_PI_PACKAGE_ROOT=C:/Users/dev/.pi/agent \
 QA_TMP_ROOT=D:/Coding/vengeance-qa-engine-prompts \
 node scripts/qa/run.mjs --only packaged.qa.mjs --only model-isolation.qa.mjs \
   --only bundled-extensions.qa.mjs
@@ -386,7 +386,7 @@ followed by a valid highlighted worker request. Public input acknowledgment was 
 they are not additional cold-navigation benchmark samples.
 
 ```text
-QA_PACKAGED_EXE=C:/Users/mitte/.codex/worktrees/engine-prompts-performance/vengeance/release/qa/win-unpacked/VengeanceQA.exe \
+QA_PACKAGED_EXE=C:/Users/dev/.codex/worktrees/engine-prompts-performance/vengeance/release/qa/win-unpacked/VengeanceQA.exe \
 QA_TMP_ROOT=D:/Coding/vengeance-qa-engine-prompts \
 node scripts/qa/run.mjs --only chat/code-highlight.qa.mjs \
   --only sessions/open-feedback.qa.mjs --only settings/system-prompts.qa.mjs
@@ -410,7 +410,7 @@ Resident checks also cover relaunch, live/selected version notices, native model
 actual tool-image bytes after explicit restart. These suites use the built app, not the QA package.
 
 ```text
-QA_PRIME_EXECUTABLE=C:/Users/mitte/.codex/worktrees/engine-prompts-performance/vengeance/.engine-staging/bundled/prime/prime-agent.exe \
+QA_PRIME_EXECUTABLE=C:/Users/dev/.codex/worktrees/engine-prompts-performance/vengeance/.engine-staging/bundled/prime/prime-agent.exe \
 QA_PRIME_SHA256=d5b58cad3bb96f2c7075626cbf4215125ad8a118281b10a2717904d0ebdbdad1 \
 QA_PRIME_BASELINE_EXECUTABLE=D:/Coding/vengeance/.engine-staging/bundled/prime/prime-agent.exe \
 QA_PRIME_BASELINE_SHA256=764badef53b7bd986d6ca125f86ccd6b6806a2489819ccb95b6342eae7089561 \
