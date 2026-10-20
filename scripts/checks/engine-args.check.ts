@@ -78,3 +78,24 @@ await check('buildEngineArgs: --fork wins over --session/--no-session; no bridge
   assert.deepEqual(buildEngineArgs({ cwd: 'C:\\w', forkFrom: 'C:\\f.jsonl', sessionPath: 'C:\\s.jsonl', noSession: true, approve: true }), ['--fork', 'C:\\f.jsonl', '--approve'])
   assert.deepEqual(buildEngineArgs({ cwd: 'C:\\w', noSession: true }), ['--no-session'])
 })
+
+await check('buildEngineArgs: conversation instructions join the launch prompt flags only with discovered sources', () => {
+  const conversationPrompt = { mode: 'append' as const, text: 'Answer in French.', updatedAt: 1 }
+  assert.deepEqual(
+    buildEngineArgs(
+      { cwd: 'C:/w', sessionPath: 'C:/s.jsonl', conversationPrompt, launch: { systemPrompt: 'base', offline: true }, extraArgs: ['--verbose'] },
+      'C:/app/bridge.ts',
+      { conversationFile: 'C:/data/prompt.md', appendSystemFile: 'C:/data/append.md' }
+    ),
+    [
+      '--session', 'C:/s.jsonl',
+      '--extension', 'C:/app/bridge.ts',
+      '--system-prompt', 'base',
+      '--append-system-prompt', 'C:/data/append.md',
+      '--append-system-prompt', 'C:/data/prompt.md',
+      '--offline',
+      '--verbose'
+    ]
+  )
+  assert.deepEqual(buildEngineArgs({ cwd: 'C:/w', noSession: true, conversationPrompt }), ['--no-session'])
+})

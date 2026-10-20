@@ -378,6 +378,15 @@ GPT 6.1 Sol descriptor and a local provider URL override. It checks native sessi
 model switches in both directions, generated prompts, kernel `model.info`, `attach_image` bytes,
 composer warnings, pasted-image transport and vision startup. No real account or paid request is used.
 
+`node scripts/qa/engines/mcp-live.qa.mjs` checks Engine 2's live MCP status with the stdio fixture
+server (`ext/fixtures/qa-mcp-server.mjs`) in the temporary account's `mcpServers`. A file in place of
+the kernel venv's parent holds the prewarmed kernel off, so the composer chip deterministically reports
+configured-only states first. A Python tool call then starts the kernel; the suite checks connected
+with the tool count, Reconnect from the chip and from Settings → MCP (each a new server process), and
+a second conversation's own kernel. That conversation also runs the fixture with `--hang`, a server
+that never answers: it reads as failed with the reason and keeps Reconnect. Engine 2 starts servers
+with a cleared environment, so the fixture also takes its start log as `--log=<file>`.
+
 `node scripts/qa/engines/model-isolation.qa.mjs` checks that sibling defaults and a differently
 configured native child cannot change the parent's GPT 6.1 Sol / Max / Fast request identity.
 It also verifies saved identity/history after restart and preservation of an unfamiliar settings key.

@@ -1,7 +1,8 @@
 // MCP end to end: the Settings → MCP editor (add, edit, exposure, project override, remove), a
 // project .pi/mcp.json server behind project trust, the stdio fixture server's tools and resources
-// called by the fake LLM, env and HTTP headers reaching the servers, connection status, a failing
-// server, and "Reconnect in open sessions".
+// called by the fake LLM, env and HTTP headers reaching the servers, connection status, the
+// composer's live server list, a failing server, Reconnect from the chip and from Settings, and the
+// chip's on/off switch saving a project override in a trusted folder, never the global mcp.json.
 //
 //   node scripts/qa/ext/mcp.qa.mjs
 import assert from 'node:assert/strict'
@@ -57,6 +58,7 @@ try {
       const starts = () =>
         existsSync(startLog) ? readFileSync(startLog, 'utf8').split('\n').filter(Boolean).length : 0
       const globalMcp = () => agentDir.readJson('mcp.json')
+      const globalMcpText = () => readFileSync(join(agentDir.dir, 'mcp.json'), 'utf8')
       let cwd
       const projectMcp = () => JSON.parse(readFileSync(join(cwd, '.pi', 'mcp.json'), 'utf8'))
       const serverRow = (name) => page.locator(`[id="setting-mcp.${name}"]`)
@@ -160,11 +162,18 @@ try {
       })
 
       await step(
-        'Test connections: both servers connected with 3 tools and resource support',
+        'Test connections: the new server tests connected; the running one shows its live state',
         async () => {
           await page.getByRole('button', { name: 'Test connections' }).click()
-          await serverRow('qa-mcp').getByText('3 tools · resources').waitFor({ timeout: 90_000 })
-          await serverRow('qa-proj').getByText('3 tools · resources').waitFor({ timeout: 30_000 })
+          // qa-mcp was added after the session started, so its row shows the test result.
+          await serverRow('qa-mcp')
+            .getByText('Test connected · 3 tools · resources')
+            .waitFor({ timeout: 90_000 })
+          // The open session runs qa-proj: its row shows that live state instead of the test.
+          await serverRow('qa-proj')
+            .locator('[data-mcp-row-live][data-mcp-row-state="connected"]')
+            .getByText('Connected · 3 tools in the open session')
+            .waitFor({ timeout: 30_000 })
           await reportShot(app, 'ext-mcp-settings-connected')
         }
       )
@@ -197,6 +206,29 @@ try {
         await reportShot(app, 'ext-mcp-tool-card')
       })
 
+      await step(
+        'the composer MCP chip lists each server live; Reconnect restarts one',
+        async () => {
+          const chip = page.locator('[data-mcp-chip]')
+          await chip.waitFor()
+          await chip.click()
+          const panel = page.locator('[data-mcp-panel]')
+          const qaMcp = panel.locator('[data-mcp-server="qa-mcp"]')
+          await panel.locator('[data-mcp-server="qa-mcp"][data-mcp-state="connected"]').waitFor()
+          await panel.locator('[data-mcp-server="qa-proj"]').waitFor()
+          assert.match(await qaMcp.innerText(), /Connected · 3 tools/)
+          await reportShot(app, 'ext-mcp-chip-panel')
+          const before = starts()
+          await qaMcp.getByRole('button', { name: 'Reconnect qa-mcp', exact: true }).click()
+          await until(() => starts() > before, { timeoutMs: 30_000, label: 'a new server process' })
+          await panel
+            .locator('[data-mcp-server="qa-mcp"][data-mcp-state="connected"]')
+            .waitFor({ timeout: 30_000 })
+          await page.keyboard.press('Escape')
+          await panel.waitFor({ state: 'detached' })
+        }
+      )
+
       await step('env reaches each server (global and project values)', async () => {
         assert.match(
           (await callTool('mcp__qa_mcp__qa_env', {}, 'toolu_mcp_env')).text,
@@ -227,19 +259,44 @@ try {
       )
 
       await step(
-        '"Reconnect in open sessions" restarts the server in the running engine',
+        '"Reconnect in open sessions in this folder" restarts the server in the running engine',
         async () => {
           const before = starts()
           await app.test('openSettings', 'mcp')
           await serverRow('qa-mcp').getByRole('button', { name: 'Server actions' }).click()
-          await page.getByRole('menuitem', { name: 'Reconnect in open sessions' }).click()
+          await page
+            .getByRole('menuitem', {
+              name: 'Reconnect in open sessions in this folder',
+              exact: true
+            })
+            .click()
           await page.locator('[data-toaster]').getByText('Reconnecting qa-mcp').waitFor()
           await until(() => starts() > before, { timeoutMs: 30_000, label: 'a new server process' })
         }
       )
 
+      await step('the live Settings row reconnects the server in the open session', async () => {
+        const row = serverRow('qa-mcp')
+        await row
+          .locator('[data-mcp-row-live][data-mcp-row-state="connected"]')
+          .getByText('Connected · 3 tools in the open session')
+          .waitFor({ timeout: 30_000 })
+        const before = starts()
+        await row
+          .getByRole('button', {
+            name: 'Reconnect qa-mcp in open sessions in this folder',
+            exact: true
+          })
+          .click()
+        await until(() => starts() > before, { timeoutMs: 30_000, label: 'a new server process' })
+        await row
+          .locator('[data-mcp-row-live][data-mcp-row-state="connected"]')
+          .waitFor({ timeout: 30_000 })
+      })
+
       await step('edit: the change keeps env values; exposure select writes mcp.json', async () => {
-        await serverRow('qa-mcp').getByRole('button', { name: 'qa-mcp' }).click()
+        // Exact: the live row also has "Reconnect qa-mcp in open sessions in this folder".
+        await serverRow('qa-mcp').getByRole('button', { name: 'qa-mcp', exact: true }).click()
         await editor.waitFor()
         await editor
           .getByPlaceholder('What the model should use it for')
@@ -260,6 +317,80 @@ try {
         )
         assert.equal(entry.exposure, undefined)
       })
+
+      await step(
+        'the chip switch turns a global server off and on for this trusted folder alone',
+        async () => {
+          await app.test('closeSettings')
+          // Settings and its exposure select hand focus back as they unmount, which would dismiss a
+          // panel opened before that.
+          await page.waitForFunction(
+            () => !document.querySelector('[role="dialog"], [role="listbox"]')
+          )
+          const globalBefore = globalMcpText()
+          const projectServer = projectMcp().mcpServers['qa-proj']
+          // The Engine saves a switch it already applied here, so it offers no restart. The Settings
+          // edits above offered one; dismiss their toasts first (closing Settings moves the toasts
+          // away from the pointer without a pointer event, which can leave them paused).
+          const restartOffers = page.locator('[data-toaster]').getByText('Restart to apply')
+          await until(
+            () =>
+              page.evaluate(() => {
+                const dismiss = document.querySelectorAll(
+                  '[data-toaster] button[aria-label="Dismiss"]'
+                )
+                for (const button of dismiss) button.click()
+                return dismiss.length === 0
+              }),
+            { label: 'the earlier toasts to be dismissed' }
+          )
+          const assertNoRestartOffer = async () => {
+            // Past the config watcher's debounce and the offer's animation.
+            await page.waitForTimeout(1_500)
+            assert.equal(await restartOffers.count(), 0, 'no restart offer for the switch')
+          }
+          await page.locator('[data-mcp-chip]').click()
+          const panel = page.locator('[data-mcp-panel]')
+          const qaMcp = panel.locator('[data-mcp-server="qa-mcp"]')
+          const off = qaMcp.getByRole('switch', {
+            name: 'Turn off qa-mcp for this folder',
+            exact: true
+          })
+          await off.hover()
+          await page
+            .getByRole('tooltip')
+            .getByText('Saved to the project mcp.json, for this folder only')
+            .first()
+            .waitFor()
+          assert.equal(
+            await panel.getByText(/for every folder/).count(),
+            0,
+            'no switch here saves globally'
+          )
+          await off.click()
+          await panel
+            .locator('[data-mcp-server="qa-mcp"][data-mcp-state="disabled"]')
+            .waitFor({ timeout: 30_000 })
+          assert.deepEqual(projectMcp().mcpServers['qa-mcp'], { enabled: false })
+          assert.deepEqual(projectMcp().mcpServers['qa-proj'], projectServer)
+          assert.equal(globalMcpText(), globalBefore, 'the global mcp.json is unchanged')
+          await assertNoRestartOffer()
+          await reportShot(app, 'ext-mcp-chip-switch-project')
+          // The override now holds the state, so turning it on again saves there too.
+          await qaMcp
+            .getByRole('switch', { name: 'Turn on qa-mcp for this folder', exact: true })
+            .click()
+          await panel
+            .locator('[data-mcp-server="qa-mcp"][data-mcp-state="connected"]')
+            .waitFor({ timeout: 30_000 })
+          assert.deepEqual(projectMcp().mcpServers['qa-mcp'], { enabled: true })
+          assert.equal(globalMcpText(), globalBefore, 'the global mcp.json is still unchanged')
+          await assertNoRestartOffer()
+          await page.keyboard.press('Escape')
+          await panel.waitFor({ state: 'detached' })
+          await app.test('openSettings', 'mcp')
+        }
+      )
 
       await step(
         '"Disable in this project" writes a project override and badges the row',
@@ -291,7 +422,9 @@ try {
           Authorization: 'Bearer ${QA_HTTP_TOKEN}'
         })
         await page.getByRole('button', { name: 'Test connections' }).click()
-        await serverRow('qa-http').getByText('3 tools · resources').waitFor({ timeout: 60_000 })
+        await serverRow('qa-http')
+          .getByText('Test connected · 3 tools · resources')
+          .waitFor({ timeout: 60_000 })
         assert.ok(
           http.seen.some((r) => r.headers.authorization === `Bearer ${HTTP_TOKEN}`),
           'the header reached the server with the variable expanded'
@@ -313,15 +446,20 @@ try {
         await editor.waitFor({ state: 'detached' })
         await page.getByRole('button', { name: 'Test connections' }).click()
         const row = serverRow('qa-broken')
-        await until(
+        // The row reads "Not tested" / "Testing…" (idle / connecting) until its test settles.
+        const state = await until(
           async () => {
-            const text = await row.innerText()
-            return !/Connecting|Unknown/.test(text) && text
+            const value = await row
+              .locator('[data-mcp-row-state]')
+              .getAttribute('data-mcp-row-state')
+            return value !== 'idle' && value !== 'connecting' && value
           },
-          { timeoutMs: 90_000, label: 'qa-broken status' }
+          { timeoutMs: 90_000, label: 'qa-broken test result' }
         )
         await reportShot(app, 'ext-mcp-broken')
         const text = await row.innerText()
+        assert.equal(state, 'failed', `broken server state: ${text}`)
+        assert.match(text, /Test failed/)
         assert.doesNotMatch(text, /tools/, `broken server is not shown as connected: ${text}`)
       })
 
@@ -345,6 +483,25 @@ try {
             .locator('[data-toaster]')
             .getByText(/MCP servers need attention:\s+qa-broken: failed/)
             .waitFor({ timeout: 30_000, state: 'attached' })
+        }
+      )
+
+      await step(
+        'the chip panel shows qa-broken failed with its error beside working servers',
+        async () => {
+          const chip = page.locator('[data-mcp-chip]')
+          await chip.click()
+          const panel = page.locator('[data-mcp-panel]')
+          const broken = panel.locator('[data-mcp-server="qa-broken"][data-mcp-state="failed"]')
+          await broken.waitFor({ timeout: 30_000 })
+          await panel.locator('[data-mcp-server="qa-http"][data-mcp-state="connected"]').waitFor()
+          assert.equal(await chip.getAttribute('data-mcp-chip'), 'failed')
+          // The error is clamped until expanded; its text is complete either way.
+          const error = await broken.locator('button[aria-expanded]').textContent()
+          assert.match(error, /missing-server\.mjs/, error)
+          await reportShot(app, 'ext-mcp-chip-failed')
+          await page.keyboard.press('Escape')
+          await panel.waitFor({ state: 'detached' })
         }
       )
 

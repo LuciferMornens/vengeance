@@ -34,6 +34,7 @@ import {
 } from './session-paths'
 import { asRecord, stringValue, type PrimeRecord } from './transport'
 
+/** The native create request; `args` carry the configuration with the conversation's instructions. */
 export function primeCreatePayload(args: CreateAgentArgs): PrimeRecord {
   const launch = args.launch?.prime
   return {

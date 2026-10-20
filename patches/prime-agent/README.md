@@ -3,7 +3,7 @@
 Follow [UPSTREAM.md](../../UPSTREAM.md) for reconstruction and qualification.
 
 Vengeance ships a source build of stable `v0.10.0`, upstream commit
-`763094e1b6a7c17450ee8399b06cda1853847ca5`, identified as `0.10.0+vengeance.12`.
+`763094e1b6a7c17450ee8399b06cda1853847ca5`, identified as `0.10.0+vengeance.13`.
 The exact source, catalog revision, toolchain and patch order live in
 [engines.lock.json](../../engines.lock.json). The native helper links this same stable base.
 
@@ -32,6 +32,7 @@ The exact source, catalog revision, toolchain and patch order live in
 | 0021  | Bound ACP fixture shutdown and collect stderr without waiting for inherited Windows pipe handles.         |
 | 0022  | Backport upstream's bounded-lock concurrency fixture while asserting all 80 writes land.                  |
 | 0023  | Verify and explicitly install the bundled Intel macOS cryptography wheel; refresh kernel identity.        |
+| 0024  | Report each open session's live MCP server state from its kernel and reconnect one server on request.     |
 
 Patch 0014 comes from upstream commit
 [`7b89c111da0f1d9e67849b34f10552bbb4bd1bd1`](https://github.com/PrimeIntellect-ai/prime-agent/commit/7b89c111da0f1d9e67849b34f10552bbb4bd1bd1).
@@ -108,6 +109,20 @@ on every new base or dependency update. Retire the native patch when upstream su
 verified bundled-wheel bootstrap, or Intel macOS is again covered by current official wheels and the
 packaged kernel and old-to-new environment regressions pass without it. No native account, session or
 helper protocol format changes.
+
+Patch 0024 adds the session-plane commands `get_mcp_status` and `reconnect_mcp_server`. The first
+asks the running kernel for each enabled MCP server's tools or error over the existing MCP status lane;
+it is read-only and never builds a session or starts a kernel, answering `kernelRunning: false`
+instead. The second reloads one server in the kernel and lists it again. The kernel's `mcp_status`
+frame gains an optional `reload` list. Before this patch, `get_mcp_connections` reported only what
+configuration and credentials declare, so a broken server still read as connected and nothing could
+reconnect it. `mcp_tool_listing` keeps its public signature for the native helper. The native
+`mcp_status` unit tests of `pa-core` and `pa-daemon`, the `pa-daemon` protocol and `pa-types` command
+tests, `mcp_status_answers_without_building_the_session`, `command_breadth` and the runtime's
+`test_repl.py` qualify it. `kernel_mcp_reconnect` runs against a real kernel and skips without one: point
+`PA_CORE_KERNEL_PYTHON` at an isolated kernel interpreter, never the user's own install, so it runs.
+Retire the patch when upstream offers live per-server MCP status and reconnect for hosts and Vengeance
+moves to them.
 
 The first three patches originated on development commit
 `fa20be8e487b1889c2395ea33906149aef983ca0`. Patch 0002 was rebased onto stable source:

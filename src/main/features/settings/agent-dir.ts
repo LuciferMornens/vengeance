@@ -48,6 +48,12 @@ export function agentDir(): string {
   return resolve(fromEnv ? expandHome(fromEnv) : join(homedir(), '.pi', 'agent'))
 }
 
+/** An Engine spawn's agent dir: its launch env's `PI_CODING_AGENT_DIR`, else Vengeance's own. */
+export function spawnAgentDir(cwd: string, launchEnv: Record<string, string> | undefined): string {
+  const fromEnv = launchEnv?.PI_CODING_AGENT_DIR
+  return fromEnv ? resolve(cwd, expandHome(fromEnv)) : agentDir()
+}
+
 /** pi's env override for session storage (docs/sessions.md); it wins over the `sessionDir` setting. */
 export const SESSION_DIR_ENV = 'PI_CODING_AGENT_SESSION_DIR'
 

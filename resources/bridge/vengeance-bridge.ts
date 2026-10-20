@@ -12,6 +12,8 @@
  *   /vengeance-subagents {"reqId","method","params"?}
  *   /vengeance-speed  {"reqId","mode"?}   (mode: "standard" | "fast" | "ultrafast")
  *   /vengeance-system-prompt {"reqId"}
+ *   /vengeance-mcp    {"reqId","action"?,"server"?}
+ *                     (action: "reconnect" | "enable" | "disable" | "enable-project" | "disable-project" | "logout")
  *
  * `vengeance-subagents` proxies pi-subagents' in-process event-bus RPC (`subagents:rpc:v1:request` →
  * `subagents:rpc:v1:reply:<requestId>`), which an RPC host cannot reach directly. It posts nothing to the
@@ -20,7 +22,14 @@
  *
  * `vengeance-speed` reads the session's response speed (`speed-mode.ts`), or requests `mode` first, and answers with
  * its `SpeedState`.
- * `vengeance-system-prompt` reads `ctx.getSystemPrompt()` without making a model request.
+ * `vengeance-system-prompt` answers without making a model request, with the prompt of the latest turn in this
+ * session while what it was built from still holds: the base prompt (`ctx.getSystemPrompt()` between turns:
+ * tools, skills, context files, prompt sources), the active tools and the MCP servers' status, whoever changed
+ * them. Otherwise (no turn ran since the latest `session_start`, which a process start, a reload and an in-place
+ * session switch emit, or one of them changed) it answers the base prompt with `partial: true`, without the
+ * sections extensions add when a run starts (`before_agent_start`, e.g. the MCP servers).
+ * `vengeance-mcp` answers the conversation's MCP status (`mcp-status.ts`), after running `action` on
+ * `server` first; null when no MCP extension reports.
  *
  * Each handler replies with `ctx.ui.setStatus('__vengeance:<reqId>', JSON)` carrying `{ ok, data | error }`.
  * pi awaits the handler before it answers the `prompt` command, so the reply always precedes that response
@@ -28,12 +37,13 @@
  *
  * APIs used (pi 1.2.0 `dist/core/extensions/types.d.ts`): `ExtensionAPI.registerCommand`, `getActiveTools`,
  * `getAllTools`, `setActiveTools`, `setLabel`, `appendEntry`, `events`, `on` (`session_start`, `session_tree`,
- * `model_select`, `before_provider_request`, `provider_stream_event`, `message_end`, compaction events);
+ * `turn_start`, `agent_settled`, `model_select`, `before_provider_request`, `provider_stream_event`,
+ * `message_end`, compaction events);
  * `ExtensionCommandContext.navigateTree`, `reload`, `sessionManager.getEntry` / `getLeafId` / `getBranch`,
  * `modelRegistry.isUsingOAuth` / `getApiKeyAndHeaders`; `ExtensionUIContext.setStatus`.
  *
- * The bridge also registers OpenAI native compaction (`openai-native-compaction.ts`) and response speed
- * (`speed-mode.ts`), next to this file.
+ * The bridge also registers OpenAI native compaction (`openai-native-compaction.ts`), response speed
+ * (`speed-mode.ts`) and the MCP status (`mcp-status.ts`), next to this file.
  *
  * pi loads these files with jiti: type imports are erased, and `@earendil-works/pi-coding-agent` and
  * `@earendil-works/pi-ai` resolve to the running Engine, so no runtime dependency ships with them.
@@ -43,6 +53,8 @@ import type {
   ExtensionCommandContext,
   ExtensionUIContext
 } from '@earendil-works/pi-coding-agent'
+import { registerMcpStatus } from './mcp-status'
+import { isMcpLiveAction } from './mcp-status-core'
 import { registerOpenAINativeCompaction } from './openai-native-compaction'
 import { isSpeedMode } from './speed-mode-core'
 import { registerSpeedMode } from './speed-mode'
@@ -166,6 +178,28 @@ function entryEditorText(ctx: ExtensionCommandContext, entryId: string): string 
 export default function vengeanceBridge(pi: ExtensionAPI): void {
   const speed = registerSpeedMode(pi)
   registerOpenAINativeCompaction(pi, speed)
+  const mcp = registerMcpStatus(pi)
+
+  /**
+   * The full prompt of this session's latest turn, with what it was built from: the active tools and MCP
+   * servers at that turn, and the base prompt as its run settled (during a run the prompt includes the
+   * sections added when the run started, so the base can only be read between runs).
+   */
+  let turn: { prompt: string; inputs: string; base?: string } | undefined
+  const turnInputs = () =>
+    JSON.stringify([
+      pi.getActiveTools(),
+      mcp.current()?.servers.map(({ name, state }) => [name, state]) ?? null
+    ])
+  pi.on('session_start', () => {
+    turn = undefined
+  })
+  pi.on('turn_start', (_event, ctx) => {
+    turn = { prompt: ctx.getSystemPrompt(), inputs: turnInputs() }
+  })
+  pi.on('agent_settled', (_event, ctx) => {
+    if (turn) turn.base ??= ctx.getSystemPrompt()
+  })
 
   const command = (
     name: string,
@@ -230,9 +264,12 @@ export default function vengeanceBridge(pi: ExtensionAPI): void {
     return null
   })
 
-  command('vengeance-system-prompt', async (_payload, ctx) => ({
-    text: ctx.getSystemPrompt()
-  }))
+  command('vengeance-system-prompt', async (_payload, ctx) => {
+    const base = ctx.getSystemPrompt()
+    return turn?.base === base && turn.inputs === turnInputs()
+      ? { text: turn.prompt }
+      : { text: base, partial: true }
+  })
 
   command('vengeance-tools', async (payload) => {
     if (payload.op === 'set') {
@@ -259,6 +296,17 @@ export default function vengeanceBridge(pi: ExtensionAPI): void {
   command('vengeance-subagents', async (payload) =>
     requestSubagents(pi, payload.reqId, requiredString(payload, 'method'), payload.params)
   )
+
+  command('vengeance-mcp', async (payload) => {
+    const action = payload.action
+    if (action === undefined) return mcp.current()
+    if (!isMcpLiveAction(action)) {
+      throw new Error(
+        'Vengeance bridge: "action" must be "reconnect", "enable", "disable", "enable-project", "disable-project" or "logout"'
+      )
+    }
+    return mcp.run(requiredString(payload, 'server'), action)
+  })
 
   command('vengeance-speed', async (payload, ctx) => {
     const mode = payload.mode

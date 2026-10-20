@@ -11,7 +11,7 @@ import { registerUpdatesIpc } from './updates'
 
 /** Register every IPC handler. Each feature owns its own module; this list is the only shared line. */
 export function registerIpc(context: IpcContext): void {
-  registerEngineIpc(context.manager)
+  registerEngineIpc(context.manager, context.conversationPrompts)
   registerSystemIpc(context.manager)
   registerAppIpc()
   registerComposerIpc(context)

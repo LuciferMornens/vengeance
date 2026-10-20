@@ -8,7 +8,7 @@ import { settingsInvokeForFolder, on } from '../ipc'
 import { Callout, Group, Row } from '../layout'
 import { useSettings } from '../store'
 import { InstructionEditor, type InstructionEditorTarget } from './instruction-editor'
-import { SystemPromptRows } from './system-prompt-viewer'
+import { FoundationPromptRow } from './system-prompt-viewer'
 
 const INSTRUCTION_KINDS: Array<{
   kind: InstructionFileKind
@@ -96,9 +96,9 @@ export function InstructionsGroup() {
   return (
     <Group
       title="System prompt & instructions"
-      description={`Inspect ${ENGINE_LABELS[engine]}’s prompt and shape the guidance new sessions use.`}
+      description={`Read ${ENGINE_LABELS[engine]}’s foundation and shape the guidance new sessions use.`}
     >
-      <SystemPromptRows
+      <FoundationPromptRow
         key={`${engine}:${cwd}`}
         onCustomize={customize}
         canCustomize={!loading && !error}
@@ -159,7 +159,8 @@ export function InstructionsGroup() {
         Project prompt files take precedence over global files of the same name; they are not
         combined.
         {engine === 'pi' && ' Project prompt files load only in trusted projects.'} Saving never
-        restarts an open session. Use an explicit restart when you are ready to apply changes.
+        restarts an open session. Open a conversation’s Instructions, in its header or with
+        /instructions, to restart it with saved files or to give it instructions of its own.
       </div>
       {editing && (
         <InstructionEditor

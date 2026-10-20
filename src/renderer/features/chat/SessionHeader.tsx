@@ -10,6 +10,7 @@ import { LiveDot, liveState } from '../sessions'
 import { renameSession, targetForAgent } from '../sessions/actions'
 import { agentOwnTitle } from '../sessions/model'
 import { ContextUsage } from './ContextRing'
+import { ConversationPromptButton } from './ConversationPrompt'
 
 /** The session's own title (a child subagent session reads as "Worker subagent · <task>"), else "New session". */
 function useSessionTitle(agentId: string): string {
@@ -106,7 +107,7 @@ function EngineStatus({ agentId }: { agentId: string }) {
   return null
 }
 
-/** Fork · export | inspector toggle (the toggle sits next to the pane it opens). */
+/** Instructions · fork · export | inspector toggle (the toggle sits next to the pane it opens). */
 function HeaderToolbar({ agentId }: { agentId: string }) {
   const ready = useAgents((s) => s.agents[agentId]?.status === 'ready')
   // Nothing to fork from or export until the session has a message.
@@ -114,6 +115,7 @@ function HeaderToolbar({ agentId }: { agentId: string }) {
   const inspectorOpen = useApp((s) => s.prefs.inspector.open)
   return (
     <div className="flex shrink-0 items-center gap-1">
+      <ConversationPromptButton agentId={agentId} />
       <IconButton label="Fork from a message…" disabled={!ready || empty} onClick={() => runAction('session.fork')}>
         <GitBranchPlus />
       </IconButton>

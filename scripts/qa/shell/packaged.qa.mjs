@@ -124,6 +124,7 @@ await runSuite(
       const bridge = commands.filter((c) => c.name.startsWith('vengeance-'))
       assert.deepEqual(bridge.map((command) => command.name).sort(), [
         'vengeance-label',
+        'vengeance-mcp',
         'vengeance-reload',
         'vengeance-speed',
         'vengeance-subagents',

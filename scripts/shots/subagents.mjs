@@ -165,8 +165,10 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   // The TypeScript server ran earlier and has since idled: the calm idle chip explains the quiet.
   const idle = page.locator('[data-lsp-chip="idle"]')
   assert((await idle.innerText()).includes('Code intelligence idle'), 'idle LSP chip wording after a server ran')
-  await idle.hover()
+  await idle.click()
+  await page.locator('[data-status-details]').waitFor()
   await shot('composer-lsp-idle', { settleMs: 700 })
+  await page.keyboard.press('Escape')
   await parkMouse(page, wait)
 
   // LSP active: pi-lens reports the TypeScript server after the first source read (showcase script).
@@ -175,6 +177,8 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   await test('mockPlay', { script: 'showcase', instant: true, pauseAt: 'select' })
   await page.locator('[data-lsp-chip="success"]').waitFor({ timeout: 10_000 })
   assert((await page.locator('[data-lsp-chip="success"]').innerText()).includes('TypeScript'), 'active LSP chip names the language')
-  await page.locator('[data-lsp-chip="success"]').hover()
+  await page.locator('[data-lsp-chip="success"]').click()
+  await page.locator('[data-status-details]').waitFor()
   await shot('composer-lsp-active', { settleMs: 700 })
+  await page.keyboard.press('Escape')
 }

@@ -156,8 +156,8 @@ export async function runPrimeRestartIsolationQa({
         executablePath,
         {}
       )
-      assert.ok(carried)
-      const restored = await open({ ...carried, nativeAgentId: primaryId })
+      assert.equal(carried.applied, true, 'the resident took the configuration')
+      const restored = await open({ ...carried.args, nativeAgentId: primaryId })
       const restoredPeer = await open({ ...initial, nativeAgentId: peerId })
       const after = await liveRoster(probePrimeDaemon, agentDirectory)
       for (const id of [primaryId, peerId]) {
@@ -175,8 +175,8 @@ export async function runPrimeRestartIsolationQa({
         executablePath,
         initial
       )
-      assert.ok(reset)
-      const resetTarget = await open({ ...reset, nativeAgentId: primaryId })
+      assert.equal(reset.applied, true, 'the resident took the reset')
+      const resetTarget = await open({ ...reset.args, nativeAgentId: primaryId })
       const resetPeer = await open({ ...initial, nativeAgentId: peerId })
       await assertSelection(resetTarget, initial, 'Explicit reset selects the initial provider')
       await assertSelection(resetPeer, live, 'Peer keeps its provider through target reset')

@@ -147,6 +147,11 @@ export function seedMockAgentDir(agentDir: string, workspacesDir: string): void 
         url: 'https://mcp.sentry.dev/mcp',
         oauth: { clientName: 'Vengeance', callbackPort: 8765 }
       },
+      linear: {
+        command: 'npx',
+        args: ['-y', 'mcp-remote', 'https://mcp.linear.app/sse'],
+        description: 'Issues and project updates'
+      },
       postgres: {
         command: 'uvx',
         args: ['postgres-mcp', '--access-mode=restricted'],

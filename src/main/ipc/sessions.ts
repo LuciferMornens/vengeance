@@ -562,25 +562,39 @@ export function registerSessionsIpc(context: IpcContext): void {
       const { trashMockSession } = await loadMockSessions()
       trashMockSession(path)
       await changed()
-      return
+    } else if ((await sessionEngine(context, path)) === 'prime') {
+      await deletePrimeSession(path, context.engineOverridePath('prime'))
+    } else {
+      await trashSession(override(), path)
     }
-    if ((await sessionEngine(context, path)) === 'prime') {
-      return deletePrimeSession(path, context.engineOverridePath('prime'))
-    }
-    await trashSession(override(), path)
+    // The session is gone either way; an entry left behind names a file that no longer exists.
+    await context.conversationPrompts.forget(path).catch((error: unknown) => {
+      console.error('[vengeance] conversation instructions could not be forgotten:', error)
+    })
   })
 
   handle('sessions:branch', async ({ sessionPath, entryId, engine }) => {
+    let source: EngineId
+    let created: string
     if (env.mock) {
       const { branchMockSession } = await loadMockSessions()
-      const created = branchMockSession(sessionPath)
+      source = normalizeEngineId(engine)
+      created = branchMockSession(sessionPath)
       await changed()
-      return created
+    } else {
+      source = await sessionEngine(context, sessionPath, engine)
+      created =
+        source === 'prime'
+          ? await branchPrimeSession(sessionPath, entryId, context.engineOverridePath('prime'))
+          : await branchSession(override(), sessionPath, entryId)
     }
-    if ((await sessionEngine(context, sessionPath, engine)) === 'prime') {
-      return branchPrimeSession(sessionPath, entryId, context.engineOverridePath('prime'))
-    }
-    return branchSession(override(), sessionPath, entryId)
+    // A branch continues the conversation, instructions included; it exists even when they cannot be saved.
+    await context.conversationPrompts
+      .copy({ engine: source, sessionFile: sessionPath }, { engine: source, sessionFile: created })
+      .catch((error: unknown) => {
+        console.error('[vengeance] conversation instructions could not be copied:', error)
+      })
+    return created
   })
 
   handle('sessions:prewarm', async (engine) => {
@@ -677,9 +691,21 @@ export function registerSessionsIpc(context: IpcContext): void {
         engine: normalizeEngineId(args.engine)
       }
     }
-    if (args.engine === 'prime')
-      return importPrimeSession(args, context.engineOverridePath('prime'))
-    return importSession(override(), args)
+    const engine = normalizeEngineId(args.engine)
+    const result =
+      engine === 'prime'
+        ? await importPrimeSession(args, context.engineOverridePath('prime'))
+        : await importSession(override(), args)
+    // A copy that continues the conversation, in a moved folder or another session folder, keeps its
+    // instructions; it exists even when they cannot be saved.
+    if (!samePath(result.path, args.sourcePath)) {
+      await context.conversationPrompts
+        .copy({ engine, sessionFile: args.sourcePath }, { engine, sessionFile: result.path })
+        .catch((error: unknown) => {
+          console.error('[vengeance] conversation instructions could not be copied:', error)
+        })
+    }
+    return result
   })
 
   handle('sessions:share-readiness', async (args) => sessionShareReadiness(context, args))

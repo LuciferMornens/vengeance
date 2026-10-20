@@ -1,8 +1,9 @@
-import { Brain, Copy, Cpu, Info, Layers, RefreshCw } from 'lucide-react'
+import { Brain, Copy, Cpu, Info, Layers, RefreshCw, ScrollText } from 'lucide-react'
 import type { AppAction } from '../../lib/actions'
 import type { RpcCommandType } from '@shared/engine-types'
 import { platform } from '../../lib/ipc'
 import { useAgents } from '../../store/agents'
+import { openConversationPrompt } from '../chat/ConversationPrompt'
 import {
   activeAgentId,
   compactContext,
@@ -35,11 +36,19 @@ const hasReadyCommand = (command: RpcCommandType) => (): boolean => {
 /** The Engine's `app.model.cycleBackward` key: Alt+P on Windows (where terminals swallow Shift+Ctrl+P). */
 export const CYCLE_MODEL_BACKWARD_HOTKEY = platform.os === 'win32' ? 'alt+p' : 'mod+shift+p'
 
+/** The active session's pane is showing (not the crashed-engine card). */
+const hasOpenAgent = (): boolean => {
+  const { activeAgentId: id, agents } = useAgents.getState()
+  const status = id ? agents[id]?.status : undefined
+  return status !== undefined && status !== 'crashed'
+}
+
 const hasIdleAgent = (): boolean =>
   hasReadyAgent() && useAgents.getState().agents[activeAgentId()!]?.phase === 'idle'
 
 /**
- * Palette actions backed by composer operations (compact, copy, cycle model/thinking, reload, session info).
+ * Palette actions backed by composer operations (compact, copy, cycle model/thinking, reload, session info,
+ * conversation instructions).
  * Registered as fallbacks by the palette: another feature registering the same id takes precedence.
  * Session export belongs to the sessions feature (`session.export`).
  */
@@ -72,6 +81,15 @@ export const COMPOSER_ACTIONS: AppAction[] = [
     icon: Info,
     when: hasReadyCommand('get_session_stats'),
     run: withActiveAgent(openSessionInfo)
+  },
+  {
+    id: 'session.instructions',
+    title: 'Conversation instructions',
+    group: 'Session',
+    keywords: ['system prompt', 'instructions', 'foundation', 'APPEND_SYSTEM.md', '/instructions'],
+    icon: ScrollText,
+    when: hasOpenAgent,
+    run: withActiveAgent((id) => openConversationPrompt(id))
   },
   {
     id: 'engine.reload',

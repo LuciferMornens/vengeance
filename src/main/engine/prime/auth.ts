@@ -284,7 +284,18 @@ export async function startPrimeLogin(
   }
   const store = async (key: string): Promise<void> => {
     if (server !== null) {
-      await nativeCommand!('set_mcp_static_token', { server, token: key }, args.cwd ?? context.cwd)
+      const result = await nativeCommand!(
+        'set_mcp_static_token',
+        { server, token: key },
+        args.cwd ?? context.cwd
+      )
+      // Engine 2 keeps an unverified token; the prompt stays open so another one can be entered.
+      if (result.verified !== true) {
+        const reason = typeof result.error === 'string' && result.error ? result.error : null
+        throw new Error(
+          reason ? `${server} did not accept the token: ${reason}` : `${server} could not verify the token.`
+        )
+      }
       return
     }
     await updatePrimeJson(join(getPrimeAgentDir(), 'auth.json'), (current) => ({

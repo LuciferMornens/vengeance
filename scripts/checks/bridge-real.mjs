@@ -79,6 +79,7 @@ try {
   )
   const expectedBridgeCommands = [
     'vengeance-label',
+    'vengeance-mcp',
     'vengeance-reload',
     'vengeance-speed',
     'vengeance-subagents',

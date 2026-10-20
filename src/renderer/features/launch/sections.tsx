@@ -233,7 +233,7 @@ export function PromptSection({ draft, patch, cwd }: SectionProps) {
     <>
       <Group
         title="Replace"
-        description="Text, or the path of a file. Replaces the engine’s default system prompt."
+        description="Text, or the path of a file. Replaces the engine’s default system prompt and any SYSTEM.md."
         actions={
           <Button
             size="xs"
@@ -256,7 +256,7 @@ export function PromptSection({ draft, patch, cwd }: SectionProps) {
       </Group>
       <Group
         title="Append"
-        description="Added after the system prompt, in order. Text or file paths."
+        description="Added to the system prompt in order. Text or file paths. Any entry here replaces APPEND_SYSTEM.md."
         actions={
           <div className="flex items-center gap-1">
             <Button

@@ -1,8 +1,17 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Pencil, Plus, RefreshCw, Server, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { ChevronRight, Pencil, Plus, RefreshCw, RotateCw, Server, Trash2 } from 'lucide-react'
 import type { JsonObject, JsonValue, McpServerStatus } from '@shared/api/settings'
+import { cn } from '../../lib/cn'
 import { invoke } from '../../lib/ipc'
 import { Badge, Button, Dialog, IconButton, Input, Select, Switch } from '../../ui'
+import {
+  MCP_DOT,
+  mcpStateTone,
+  plural,
+  workspaceStateText,
+  type WorkspaceMcpServer
+} from '../mcp/status'
+import { canReconnectInSessions, reconnectInSessions, useWorkspaceMcp } from '../mcp/workspace'
 import { KeyValueEditor, ListEditor, NumberField } from '../settings/controls'
 import { LoginDialog, useLoginFlow } from '../settings/auth-flow'
 import { afterEngineConfigChange, agentsForEngine } from '../settings/engines'
@@ -334,7 +343,61 @@ function PrimeMcpEditor({ name, initial, project, names, onClose, onSave }: Prim
 
 type McpAuthenticationAction = 'login' | 'logout' | 'token'
 
-function ConnectionActions({
+/** Engine 2's connection states (`connectionStatus`) in words. */
+const CONFIGURED_STATE: Record<string, string> = {
+  connected: 'Connected',
+  pending: 'Signed in, not verified',
+  not_connected: 'Not connected',
+  disconnected: 'Not connected',
+  setup_required: 'Needs setup',
+  disabled: 'Off',
+  error: 'Needs attention'
+}
+
+/** States without a stored credential, so there is nothing to sign out of. */
+const NOTHING_TO_SIGN_OUT = new Set(['not_connected', 'setup_required', 'disabled'])
+
+/** Catalog services this account set up; the rest of the catalog stays folded away. */
+const SET_UP_STATES = new Set(['connected', 'pending', 'error', 'disabled'])
+
+function configuredState(state: string | undefined): string {
+  if (!state) return 'Configured'
+  return CONFIGURED_STATE[state] ?? state.replaceAll('_', ' ')
+}
+
+/** The state in the folder's open sessions, or the configured state when none runs the server. */
+function ServerState({ live, configured }: { live: WorkspaceMcpServer | undefined; configured: string }) {
+  if (!live) return <Badge>{configured}</Badge>
+  return (
+    <span
+      data-mcp-row-state={live.server.state}
+      data-mcp-row-live
+      className={cn(
+        'flex max-w-[52ch] items-center gap-1.5 text-xs break-words',
+        mcpStateTone(live.server.state)
+      )}
+    >
+      <span className={cn('size-2 shrink-0 rounded-full', MCP_DOT[live.server.state])} aria-hidden />
+      <span className="line-clamp-2">{workspaceStateText(live)}</span>
+    </span>
+  )
+}
+
+/** Engine 2 reconnects at once, also a server whose status read had it still opening. */
+function ReconnectButton({ name, live }: { name: string; live: WorkspaceMcpServer | undefined }) {
+  if (!canReconnectInSessions(live)) return null
+  return (
+    <IconButton
+      label={`Reconnect ${name} in open sessions in this folder`}
+      onClick={() => void reconnectInSessions(name, live)}
+    >
+      <RotateCw />
+    </IconButton>
+  )
+}
+
+/** A connection's sign-in and setup actions and tool count; empty when it offers none. */
+function connectionActions({
   name,
   status,
   oauth,
@@ -346,36 +409,50 @@ function ConnectionActions({
   oauth: boolean
   onAuthenticate: (name: string, action: McpAuthenticationAction) => Promise<void>
   onOpenDocs: (url: string) => Promise<void>
-}) {
-  return (
-    <>
-      {oauth && status?.connectable !== false && (
-        <Button size="xs" onClick={() => void onAuthenticate(name, 'login')}>
-          Sign in
-        </Button>
-      )}
-      {status?.pasteToken === true && (
-        <Button size="xs" onClick={() => void onAuthenticate(name, 'token')}>
-          Paste token
-        </Button>
-      )}
-      {(oauth || status?.pasteToken === true) && (
-        <Button size="xs" variant="ghost" onClick={() => void onAuthenticate(name, 'logout')}>
-          Sign out
-        </Button>
-      )}
-      {status?.docsUrl && (
-        <Button size="xs" variant="ghost" onClick={() => void onOpenDocs(status.docsUrl!)}>
-          Setup guide
-        </Button>
-      )}
-      {status && (
-        <span className="text-xs text-fg-3">
-          {status.toolCount ?? status.tools.length} tools available
-        </span>
-      )}
-    </>
-  )
+}): ReactNode[] {
+  const actions: ReactNode[] = []
+  if (oauth && status?.connectable !== false && status?.state !== 'connected') {
+    actions.push(
+      <Button key="login" size="xs" onClick={() => void onAuthenticate(name, 'login')}>
+        Sign in
+      </Button>
+    )
+  }
+  if (status?.pasteToken === true) {
+    actions.push(
+      <Button key="token" size="xs" onClick={() => void onAuthenticate(name, 'token')}>
+        Paste token
+      </Button>
+    )
+  }
+  if ((oauth || status?.pasteToken === true) && !NOTHING_TO_SIGN_OUT.has(status?.state ?? '')) {
+    actions.push(
+      <Button
+        key="logout"
+        size="xs"
+        variant="ghost"
+        onClick={() => void onAuthenticate(name, 'logout')}
+      >
+        Sign out
+      </Button>
+    )
+  }
+  const docsUrl = status?.docsUrl
+  if (docsUrl) {
+    actions.push(
+      <Button key="docs" size="xs" variant="ghost" onClick={() => void onOpenDocs(docsUrl)}>
+        Setup guide
+      </Button>
+    )
+  }
+  if (typeof status?.toolCount === 'number') {
+    actions.push(
+      <span key="tools" className="text-xs text-fg-3">
+        {plural(status.toolCount, 'tool')} available
+      </span>
+    )
+  }
+  return actions
 }
 
 export function PrimeMcpSection() {
@@ -395,6 +472,8 @@ export function PrimeMcpSection() {
   const [runId, setRunId] = useState<string | null>(null)
   const run = useRuns((state) => (runId ? state.runs[runId] : undefined))
   const workspace = useSettings((state) => state.snapshot?.project?.cwd) ?? activeCwd()
+  const live = useWorkspaceMcp('prime', workspace)
+  const [catalogOpen, setCatalogOpen] = useState(false)
   const reload = useCallback(async () => {
     setLoading(true)
     setError(null)
@@ -496,6 +575,35 @@ export function PrimeMcpSection() {
     }
   }
 
+  const native = statuses.filter((status) => servers[status.name] === undefined)
+  const setUp = native.filter((status) => SET_UP_STATES.has(status.state) || live.has(status.name))
+  const catalog = native.filter((status) => !setUp.includes(status))
+  const nativeRow = (status: McpServerStatus) => {
+    const liveEntry = live.get(status.name)
+    const actions = connectionActions({
+      name: status.name,
+      status,
+      oauth: status.usesOAuth === true,
+      onAuthenticate: authenticate,
+      onOpenDocs: openDocs
+    })
+    return (
+      <Row
+        key={status.name}
+        label={status.label ?? status.name}
+        description={status.error ?? status.description}
+        badges={<ServerState live={liveEntry} configured={configuredState(status.state)} />}
+        below={
+          actions.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-2">{actions}</div>
+          ) : undefined
+        }
+      >
+        <ReconnectButton name={status.label ?? status.name} live={liveEntry} />
+      </Row>
+    )
+  }
+
   return (
     <>
       <LoginDialog flow={loginFlow} />
@@ -528,6 +636,14 @@ export function PrimeMcpSection() {
           const config = objectValue(value)
           const status = statuses.find((item) => item.name === name)
           const inherited = scope === 'project' && projectServers[name] === undefined
+          const liveEntry = config.enabled === false ? undefined : live.get(name)
+          const actions = connectionActions({
+            name,
+            status,
+            oauth: status?.usesOAuth ?? (config.type === 'http' && config.oauth === true),
+            onAuthenticate: authenticate,
+            onOpenDocs: openDocs
+          })
           return (
             <Row
               key={name}
@@ -537,43 +653,41 @@ export function PrimeMcpSection() {
                 (config.type === 'http' ? stringValue(config.url) : stringValue(config.command))
               }
               badges={
-                <Badge>
-                  {config.enabled === false ? 'Disabled' : (status?.state ?? 'Configured')}
-                </Badge>
+                <ServerState
+                  live={liveEntry}
+                  configured={configuredState(config.enabled === false ? 'disabled' : status?.state)}
+                />
               }
               below={
-                <div className="flex flex-wrap items-center gap-2">
-                  <ConnectionActions
-                    name={name}
-                    status={status}
-                    oauth={status?.usesOAuth ?? (config.type === 'http' && config.oauth === true)}
-                    onAuthenticate={authenticate}
-                    onOpenDocs={openDocs}
-                  />
-                  {removing === name && (
-                    <>
-                      <span className="text-xs text-fg-2">
-                        {scope === 'project'
-                          ? 'Remove this project override?'
-                          : 'Remove this configuration?'}
-                      </span>
-                      <Button
-                        size="xs"
-                        variant="danger"
-                        loading={writing}
-                        onClick={() => void updateServer(name, undefined)}
-                      >
-                        Remove
-                      </Button>
-                      <Button size="xs" variant="ghost" onClick={() => setRemoving(null)}>
-                        Keep
-                      </Button>
-                    </>
-                  )}
-                </div>
+                actions.length > 0 || removing === name ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {actions}
+                    {removing === name && (
+                      <>
+                        <span className="text-xs text-fg-2">
+                          {scope === 'project'
+                            ? 'Remove this project override?'
+                            : 'Remove this configuration?'}
+                        </span>
+                        <Button
+                          size="xs"
+                          variant="danger"
+                          loading={writing}
+                          onClick={() => void updateServer(name, undefined)}
+                        >
+                          Remove
+                        </Button>
+                        <Button size="xs" variant="ghost" onClick={() => setRemoving(null)}>
+                          Keep
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                ) : undefined
               }
             >
               <div className="flex items-center gap-2">
+                <ReconnectButton name={name} live={liveEntry} />
                 <IconButton label={`Edit ${name}`} onClick={() => setEditing({ name, config })}>
                   <Pencil />
                 </IconButton>
@@ -600,29 +714,25 @@ export function PrimeMcpSection() {
           )
         })}
       </Group>
-      {statuses.some((status) => servers[status.name] === undefined) && (
+      {native.length > 0 && (
         <Group title="Native connections">
-          {statuses
-            .filter((status) => servers[status.name] === undefined)
-            .map((status) => (
-              <Row
-                key={status.name}
-                label={status.label ?? status.name}
-                description={status.error ?? status.description}
-                badges={<Badge>{status.state.replaceAll('_', ' ')}</Badge>}
-                below={
-                  <div className="flex flex-wrap items-center gap-2">
-                    <ConnectionActions
-                      name={status.name}
-                      status={status}
-                      oauth={status.usesOAuth === true}
-                      onAuthenticate={authenticate}
-                      onOpenDocs={openDocs}
-                    />
-                  </div>
-                }
+          {setUp.length === 0 && <Note>No catalog service is connected yet.</Note>}
+          {setUp.map(nativeRow)}
+          {catalog.length > 0 && (
+            <button
+              type="button"
+              aria-expanded={catalogOpen}
+              onClick={() => setCatalogOpen((open) => !open)}
+              className="flex h-10 w-full items-center gap-1.5 px-4 text-left text-sm text-fg-2 hover:text-fg"
+            >
+              <ChevronRight
+                className={cn('size-3.5 transition-transform', catalogOpen && 'rotate-90')}
               />
-            ))}
+              {catalogOpen ? 'Hide' : 'Show'} {plural(catalog.length, 'more service')} you can
+              connect
+            </button>
+          )}
+          {catalogOpen && catalog.map(nativeRow)}
         </Group>
       )}
       {editing && (

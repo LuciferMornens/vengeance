@@ -9,6 +9,7 @@ import {
   type BridgeCallOptions,
   type BridgeRequest,
   type BridgeResult,
+  type ConversationPrompt,
   type CreateAgentArgs,
   type EngineExitInfo,
   type EngineId,
@@ -27,6 +28,7 @@ import type {
 import { samePath } from '../paths'
 import type { SubagentInspectReply, SubagentInspectRequest } from '@shared/subagents'
 import { bridgeLoadFailed, bridgeTimeout, callBridge } from './bridge'
+import { withPiConversationPrompt, type PiPromptSources } from './conversation-prompt'
 import type { EngineHandle } from './handle'
 import { locateEngine, type EngineLocation } from './locate'
 import { EngineProcess } from './rpc-process'
@@ -69,6 +71,8 @@ export interface EngineManagerOptions {
   bridgeEnv?: () => Record<string, string>
   /** Models the user's accounts offer (`account-models.ts`); hidden ones leave the model list and the model cycle. */
   offeredModel?: () => ((model: { provider: string; id: string }) => boolean) | null
+  /** Where the Engine reads a conversation's own instructions from, discovered fresh for each spawn. */
+  piPromptSources?: (args: CreateAgentArgs) => Promise<PiPromptSources | undefined>
 }
 
 /** Most hidden models a forward cycle steps over before it gives up and keeps where it landed. */
@@ -93,10 +97,35 @@ const AGENT_ID = /^[A-Za-z0-9-]{1,64}$/
 
 export { withAbsoluteSessionFile } from './session-attachment'
 
-/** Build pi CLI args (after `--mode rpc`) from session options, loading the bridge extension when given. */
+/**
+ * The conversation instructions for a spawn that continues a running conversation, once the session file
+ * its process runs now is known (undefined for a temporary chat).
+ */
+export type InstructionsFor = (
+  sessionFile: string | undefined
+) => ConversationPrompt | null | undefined
+
+/**
+ * Told that a restart's configuration took effect, with the successor's args and the session file its
+ * engine reported once known. It must not throw: the old engine may already have released its connection.
+ */
+export type RestartApplied = (successor: Pick<AgentInfo, 'args' | 'sessionFile'>) => Promise<void>
+
+/** The saved session file a spawn of `args` resumes, if any (a fork writes a new one). */
+export function resumedSessionFile(args: CreateAgentArgs): string | undefined {
+  return args.noSession || args.forkFrom
+    ? undefined
+    : absoluteSessionFile(args.sessionPath, args.cwd)
+}
+
+/**
+ * Build pi CLI args (after `--mode rpc`) from session options, loading the bridge extension when given.
+ * The conversation's instructions apply through `promptSources`, which the caller discovered for this spawn.
+ */
 export function buildEngineArgs(
   args: CreateAgentArgs,
-  bridgeExtensionPath: string | null = null
+  bridgeExtensionPath: string | null = null,
+  promptSources?: PiPromptSources
 ): string[] {
   const out: string[] = []
   if (args.forkFrom) out.push('--fork', args.forkFrom)
@@ -111,7 +140,13 @@ export function buildEngineArgs(
   else if (args.approve === false) out.push('--no-approve')
   // Explicit extension paths load even with --no-extensions.
   if (bridgeExtensionPath) out.push('--extension', bridgeExtensionPath)
-  out.push(...launchOptionsToArgs(args.launch))
+  out.push(
+    ...launchOptionsToArgs(
+      args.conversationPrompt && promptSources
+        ? withPiConversationPrompt(args.launch, args.conversationPrompt, promptSources)
+        : args.launch
+    )
+  )
   if (args.extraArgs) out.push(...args.extraArgs)
   return out
 }
@@ -261,6 +296,12 @@ export class EngineManager {
     request: BridgeRequest,
     options: BridgeCallOptions = {}
   ): Promise<BridgeResult> {
+    // Engine 2 can take many seconds to list MCP servers, and the read changes nothing: restarts
+    // and engine switches do not wait for it (they close its connection, which fails the read).
+    const engine = this.agents.get(agentId)?.info.engine
+    if (request.op === 'mcp' && !request.action && engine === 'prime') {
+      return this.sendBridge(this.admit(agentId), request, options)
+    }
     return this.operation(agentId, (agent) => this.sendBridge(agent, request, options))
   }
 
@@ -329,8 +370,18 @@ export class EngineManager {
     return this.require(agentId).handle?.stderr() ?? ''
   }
 
-  /** Restart with the same args (resuming the session file); `patch` keys, even undefined ones, replace stored args. */
-  async restart(agentId: string, patch?: Partial<CreateAgentArgs>): Promise<AgentInfo> {
+  /**
+   * Restart with the same args (resuming the session file); `patch` keys, even undefined ones, replace stored
+   * args. `instructionsFor` picks the conversation instructions for the session file the restart resumes.
+   * `onApplied` hears when the successor's configuration took effect: once its spawn did not crash, or as
+   * soon as the old backend applied it natively (an Engine 2 resident keeps it whatever happens next).
+   */
+  async restart(
+    agentId: string,
+    patch?: Partial<CreateAgentArgs>,
+    instructionsFor?: InstructionsFor,
+    onApplied?: RestartApplied
+  ): Promise<AgentInfo> {
     const agent = this.require(agentId)
     if (agent.switching) throw new Error('Wait for the engine switch to finish')
     if (agent.restarting) throw new Error('This engine is already restarting')
@@ -352,8 +403,12 @@ export class EngineManager {
       assertOpen()
       assertRestartIdle(agent.info, agent.operations, agent.dialogs)
       let args = await prepareRestartArgs(agent.info, agent.handle, patch)
+      if (instructionsFor) {
+        args = { ...args, conversationPrompt: instructionsFor(resumedSessionFile(args)) }
+      }
       assertOpen()
       assertRestartIdle(agent.info, agent.operations, agent.dialogs)
+      let applied = false
       // A failed startup already released its client; retry creation and native resident lookup.
       if (agent.started) {
         const prepared = await agent.handle?.prepareRestart?.(
@@ -361,7 +416,13 @@ export class EngineManager {
           this.options.engineOverridePath(agent.info.engine),
           patch
         )
-        if (prepared) args = prepared
+        if (prepared) args = prepared.args
+        if (prepared?.applied) {
+          // The backend committed the configuration natively: the session keeps it even when the
+          // re-attach below fails.
+          applied = true
+          await onApplied?.({ args })
+        }
       }
       assertOpen()
       if (agent.info.engine === 'pi') {
@@ -370,13 +431,20 @@ export class EngineManager {
       await this.stopAgent(agent)
       assertOpen()
       this.agents.delete(agentId)
-      return await this.create(args, agentId, location)
+      const restarted = await this.create(args, agentId, location)
+      if (!applied && restarted.status !== 'crashed') await onApplied?.(restarted)
+      return restarted
     } finally {
       agent.restarting = false
     }
   }
 
-  async switchEngine(agentId: string, args: CreateAgentArgs): Promise<AgentInfo> {
+  /** `instructionsFor` picks the conversation instructions the switched conversation keeps. */
+  async switchEngine(
+    agentId: string,
+    args: CreateAgentArgs,
+    instructionsFor?: InstructionsFor
+  ): Promise<AgentInfo> {
     const source = this.require(agentId)
     if (!isEngineId(args.engine) || args.engine === source.info.engine) {
       throw new Error('Choose a different engine for this session')
@@ -418,6 +486,11 @@ export class EngineManager {
         cwd: source.info.cwd,
         name: snapshot.state.sessionName ?? args.name,
         noSession
+      }
+      if (instructionsFor) {
+        target.conversationPrompt = instructionsFor(
+          absoluteSessionFile(snapshot.state.sessionFile, source.info.cwd)
+        )
       }
       await this.resolveSwitchSelection(target, candidateId)
       assertOpen()
@@ -570,10 +643,14 @@ export class EngineManager {
         executablePath: this.options.engineOverridePath('prime')
       })
     } else if (location) {
+      const promptSources = info.args.conversationPrompt
+        ? await this.options.piPromptSources?.(info.args)
+        : undefined
+      if (this.agents.get(info.agentId) !== agent) return
       handle = new EngineProcess({
         location,
         cwd: info.args.cwd,
-        args: buildEngineArgs(info.args, bridgePath),
+        args: buildEngineArgs(info.args, bridgePath, promptSources),
         env: {
           ...(bridgePath ? this.options.bridgeEnv?.() : undefined),
           ...info.args.launch?.env
@@ -738,7 +815,9 @@ export class EngineManager {
     agent.info.nativeAgentId = handle.nativeAgentId
     agent.info.runtime = handle.runtime
     const initialState = handle.consumeInitialState?.() ?? null
-    const [state, commands] = await Promise.all([
+    // Each answer applies on its own: a command list that times out under load must not discard the
+    // session file the state reported.
+    const replies = await Promise.allSettled([
       initialState
         ? Promise.resolve<RpcResponse>({
             type: 'response',
@@ -749,16 +828,20 @@ export class EngineManager {
         : handle.send({ type: 'get_state' }),
       handle.send({ type: 'get_commands' })
     ])
-    if (state.success && state.command === 'get_state') {
+    const [state, commands] = replies.map((reply) =>
+      reply.status === 'fulfilled' ? reply.value : undefined
+    )
+    if (state?.success && state.command === 'get_state') {
       agent.info.sessionFile = absoluteSessionFile(state.data.sessionFile, agent.info.cwd)
       agent.info.sessionId = state.data.sessionId
       agent.info.sessionName = state.data.sessionName
       agent.info.lineage = state.data.lineage
     }
-    if (commands.success && commands.command === 'get_commands') {
+    if (commands?.success && commands.command === 'get_commands') {
       agent.info.bridge =
         agent.info.engine === 'prime' ? !!handle.bridge : hasBridgeCommands(commands.data.commands)
     }
+    for (const reply of replies) if (reply.status === 'rejected') throw reply.reason
   }
 
   private require(agentId: string): ManagedAgent {
@@ -767,13 +850,19 @@ export class EngineManager {
     return agent
   }
 
+  /** The agent, unless a restart or engine switch is replacing its engine. */
+  private admit(agentId: string): ManagedAgent {
+    const agent = this.require(agentId)
+    if (agent.switching) throw new Error('Wait for the engine switch to finish')
+    if (agent.restarting) throw new Error('Wait for the engine restart to finish')
+    return agent
+  }
+
   private async operation<Result>(
     agentId: string,
     run: (agent: ManagedAgent) => Promise<Result>
   ): Promise<Result> {
-    const agent = this.require(agentId)
-    if (agent.switching) throw new Error('Wait for the engine switch to finish')
-    if (agent.restarting) throw new Error('Wait for the engine restart to finish')
+    const agent = this.admit(agentId)
     agent.operations++
     try {
       return await run(agent)

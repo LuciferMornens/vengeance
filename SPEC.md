@@ -297,12 +297,25 @@ collapsible body. Per tool:
   `bash` command and shows it in transcript.
 - Attachments: drag-drop / paste images (sent as image content), files (inserted as @-references or content).
 - Footer row inside composer: model pill, thinking level, attachment button, context ring mini, keyboard hint.
+- **MCP chip** in the row above the composer when the conversation has MCP servers or MCP configuration
+  errors: connected out of total (`not started` while Engine 2 has not opened them, `config error` for
+  errors alone), how many need attention, and the worst state as its dot. It opens a panel listing every
+  server separately with its live state (connected with its tool count, connecting, needs sign-in, failed
+  with its error, off, blocked until the project is trusted), _Reconnect_ for each server the
+  conversation runs, sign-in where the server needs it and, on the Engine, an on/off switch. The switch
+  never changes every folder without saying so: in a trusted folder it turns a server of the global
+  mcp.json on or off for this folder alone, as a project override (like the Engine's own _Disable in
+  this project_); otherwise it saves where the Engine says, and its tooltip and accessible name say
+  where (this folder, every folder, or this conversation only). When switches save to the global
+  mcp.json, a line in the panel says they apply to every folder. A server that is connecting again
+  shows no error from its earlier attempt. Engine 2 turns servers on and off in Settings. The panel
+  links to MCP settings.
 
 ### 3.5 Extension UI (rpc-extension-ui.md)
 
 `select` → elegant list dialog; `confirm` → dialog; `input` → prompt dialog; `editor` → modal code editor;
-`notify` → toast (info/warning/error); `setStatus` → status entries in inspector + subtle footer chips;
-`setWidget` → widget cards in inspector (render lines as styled text, ANSI-aware); `setTitle` → session title;
+`notify` → toast (info/warning/error); `setStatus` → status entries in inspector + subtle footer chips,
+each of which opens the full status text it abbreviates; `setWidget` → widget cards in inspector (render lines as styled text, ANSI-aware); `setTitle` → session title;
 `set_editor_text` → replaces composer text. Timeouts honored.
 
 ### 3.6 Settings (every pi setting is editable)
@@ -317,26 +330,90 @@ mode, auto-retry, compaction + branch summary settings and per-model overrides, 
 this project, add your own extension file or package folder; read-only network, respects offline mode),
 **Packages** (installed list, install from npm/git with live log, update, remove, global vs project scope),
 **Resources** (extensions/skills/prompt templates/themes —
-enable/disable like `pi config`, show source package), **MCP** (servers list, status, sign-in), **Sessions &
+enable/disable like `pi config`, show source package), **MCP** (servers list, sign-in, and each server's live state across the folder's open sessions
+(the worst state, and how many sessions are in each), with _Reconnect_ in those that run it), **Sessions &
 Context** (context files, session dir, trust), **Keyboard shortcuts** (app-level), **Engine** (detected
 version/path, development override, app-owned update policy, diagnostics/stderr log, open config folder), **Raw JSON** (global and
 project settings.json with validation). Global vs Project scope switch where pi supports project settings.
 Read the selected pi package's `docs/settings.md` and implement _every_ key it lists.
 A restart offer ("Restart to apply") names what changed (packages, sign-ins, or the settings edited outside
-Vengeance). Writes an engine makes while applying a live change (runtime toggles it saves itself, models chosen in a
-session) never offer a restart, and a project's config changes only concern that folder's sessions.
+Vengeance). Writes an engine makes while applying a live change (runtime toggles it saves itself, such as the MCP
+panel's switches, models chosen in a session) never offer a restart, and a project's config changes only concern
+that folder's sessions.
 
-System prompt controls expose the selected engine's native foundation and an open conversation's
-assembled prompt as distinct views. A foundation preview excludes user files and runtime additions;
-the conversation view identifies its source session and is a snapshot, since native hooks can change
-later requests. The Engine 2 foundation comes from the bundled native helper, which is identified
-separately from a custom engine location.
+System prompt settings show the selected engine's native foundation as a read-only view. A foundation
+preview excludes user files and runtime additions. The Engine 2 foundation comes from the bundled native
+helper, which is identified separately from a custom engine location. An open conversation's assembled
+prompt is shown with that conversation (below), not in Settings.
 
 Users can edit global or project `SYSTEM.md`, `APPEND_SYSTEM.md` and context instructions, customize
 the built-in foundation, and restore inherited defaults. The editor explains native precedence and
 launch overrides, protects unsaved drafts, refuses conflicting external edits and bounds file sizes.
 Saving an instruction file never restarts open work, regardless of the automatic restart preference.
-Applying it to an open conversation is explicit and uses the guarded restart path.
+Applying it to an open conversation is explicit: that conversation's instructions dialog restarts it
+through the guarded restart path. On both engines explicit launch-time append text replaces
+`APPEND_SYSTEM.md` for that launch, and a launch-time replacement replaces `SYSTEM.md`.
+
+**Conversation instructions** belong to one conversation and are edited there, never in Settings. A
+session-header control (highlighted while the conversation has instructions), `/instructions [text]` on
+both engines and a palette action open one dialog. It stays with its conversation, draft and errors
+while another session comes to the front or the engine stops, and closes with the conversation.
+Engine 2's `/system-prompt` still opens its native context panel.
+
+- **Modes.** _Add to engine prompt_ (the default) adds the text to the engine's prompt; a saved
+  `APPEND_SYSTEM.md`, or explicit launch-time append text in its place, stays and comes first.
+  _Replace foundation_ replaces the foundation like `SYSTEM.md` and wins over `SYSTEM.md` and
+  launch-time replacements: the Engine drops its tool list, tool rules and docs sections, Engine 2 its
+  core, usage, opinionated and per-model layers. `APPEND_SYSTEM.md` still applies. In both modes each
+  engine keeps its own runtime assembly: project context, skills, MCP, the working folder and, for
+  Engine 2, the date, environment, capability and role sections.
+- **Composition.** Main composes the instructions with each engine's native explicit sources at every
+  spawn, from fresh discovery, never inside `launch` or workspace defaults. The Engine receives
+  `--append-system-prompt` (the effective `APPEND_SYSTEM.md` or the launch append entries, then the
+  instructions) or `--system-prompt`; Engine 2 receives the same sources in its create configuration.
+  Both engines read explicit sources again later (the Engine on a reload, Engine 2 when a worker is
+  recreated) and take a missing path as literal text, so a discovered `APPEND_SYSTEM.md` goes in as a
+  copy of its text taken at that spawn: in these conversations an edit or removal of the file applies
+  from the next restart, not on a reload. For the Engine the instructions and that copy travel as
+  content-addressed files in userData, never deleted while a conversation references them or a process
+  of this run uses them; Engine 2 gets both as literal text. Its restart patch carries changes and
+  removals, and always sends the prompt sources of a conversation with instructions to a resident the
+  restarting process did not create.
+- **Persistence.** Main owns the store, keyed by engine and session file, in an atomic JSON file in
+  userData. It writes only once a restart applied them (the restarted process started without crashing,
+  or Engine 2's native restart applied them to its running resident, even when the re-attach then fails;
+  without a running resident only the started process counts), or when Switch engine or a fork carried
+  instructions to a new session file, so a refused or rolled-back restart changes nothing. Every
+  resume of the session file (open, restore, background resume, crash restart) gets them from main.
+  Fork, branch, clone and import (continuing a session from a moved folder or another session folder)
+  copy them to the new file, and Switch engine carries them. Moving the session to the trash deletes
+  them, and so does closing an Engine chat before its session file was written. Temporary sessions keep
+  them only for the open agent. A store file that
+  cannot be read is read again on the next use and is never written or cleaned up over meanwhile (a
+  change is refused); one that cannot be parsed is kept aside as `conversation-prompts.json.corrupt-<time>`
+  before the first write.
+- **Process boundaries.** Instructions are launch flags of the process started with them. Main refuses an
+  in-place session switch from or to a conversation that has instructions; the app opens the target in
+  its own agent instead. A process that moved to another session file without the app (an extension
+  command, a native session replacement) restarts with that file's own saved instructions, and so does
+  an Engine temporary chat that opened a saved conversation.
+- **Applying.** _Save and restart_, _Remove_ and _Restart_ (for prompt files saved since the
+  conversation started) use the guarded restart path. They are disabled with a reason while the engine
+  starts, works, compacts or waits on an extension dialog, and for temporary chats that cannot restart
+  (Engine 2 temporary chats; Engine temporary chats with messages). A refusal shows in the dialog and
+  keeps the draft. The Engine applies a change from its next turn as a mid-conversation system update;
+  Engine 2 restarts with every idle session running in it, and busy work blocks it. Text is bounded by
+  `CONVERSATION_PROMPT_MAX_CHARS` and an unsaved draft is protected. `/instructions <text>` on a
+  conversation with instructions starts the draft as the saved text followed by the new text.
+- **Assembled prompt.** _View assembled prompt_ reads the open conversation's prompt from its engine,
+  identifies the session and says it is a snapshot (the Engine's: as of its latest turn), since native
+  hooks can change later requests. Between turns the Engine reports the full prompt of the latest turn
+  in its session while what it was built from holds (the base prompt, the active tools and the MCP
+  servers' status, whoever changed them); before a turn ran since the Engine last opened the
+  conversation (a restart opens it again), or after one of them changed, it reports the base prompt
+  without turn-start sections such as MCP servers, labeled as partial. The button is disabled while the engine is not running or cannot
+  report its prompt, and on the Engine while a turn runs; the dialog then says why, also when it already
+  explains that the conversation cannot restart.
 
 ### 3.7 Updates — qualified engines with app releases
 
@@ -444,7 +521,8 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
    one shared `ModelPicker` popover (features/chat/ModelPicker, exported with `ModelRow`); the thinking pill
    opens the thinking control. The **session header** no longer has model/thinking pickers: it shows the
    session title (inline rename), a passive context ring + cost (hover breakdown), and a right-aligned
-   toolbar (fork, export, inspector toggle). The palette Models page reuses `ModelRow`.
+   toolbar (conversation instructions, fork, export, inspector toggle). The palette Models page reuses
+   `ModelRow`.
 2. **Titlebar = workspace crumb only** (+ search pill, neutral background-activity pill, updates pill).
    The session title lives in the session header. Session titles never repeat the workspace name
    (strip a leading "<workspace> · " from extension-set titles).
@@ -463,6 +541,30 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
    `-e`, exposing hidden commands for in-place tree navigation, reload, tool toggles and labels; results
    flow back through `setStatus('__vengeance:<reqId>', json)` and are hidden from the UI. If it fails to
    load, the app falls back gracefully.
+10. **Live MCP status** (`src/shared/api/mcp.ts`) has one shape for both engines. In the Engine the
+    bridge publishes it on the hidden status `__vengeance:mcp`, from the built-in MCP extension's host
+    channel on `pi.events` (`mcp:state` and `mcp:request`, Vengeance patch 0009) or, when only
+    pi-mcp-adapter runs, from the status snapshot it publishes; adapter actions go through its own
+    `/mcp` commands. Each built-in server says where on/off saves (`saves`: the global or project
+    mcp.json, or the session for servers an extension registers) and, for a global server without a
+    project override in a trusted folder, the project mcp.json that `enable-project` and
+    `disable-project` save an override to; the panel's switch uses those actions whenever they are
+    offered, and is hidden for a server whose save target the Engine does not report. Engine 2
+    answers on request from its configured connections and the session kernel's `get_mcp_status` and
+    `reconnect_mcp_server` (Vengeance patch 0024), which never start a kernel. The active conversation
+    asks 4 s after start (at once when it already has a status), after each turn, then every 30 s, or
+    every 5 s while the panel is open or, twice in a row, while a server is connecting; never while the
+    window is hidden, and at once when it is shown again. A conversation's MCP requests run one at a
+    time (a listing holds each server while it opens it), and a reply older than the one shown, or
+    from before a restart, is dropped. The kernel gives each server 10 s in a read and 20 s in a
+    Reconnect, and cancels an open that takes longer, so its bare timeout says only that the server
+    did not answer: the first since the server last answered, the kernel started or a Reconnect reads
+    as connecting (it may still be opening, or wait behind a tool call), and the next reads as failed
+    with that reason. Without a running kernel the states come from the configuration and the chip
+    reads `not started`; a listing that fails keeps the last status. Reconnect reaches every
+    connection of a row (each account of a catalog service), is offered only for servers the running
+    kernel lists, and stays available while a read has one connecting: Engine 2's reconnect settles
+    before it answers.
 
 ## 10. Dual-engine decisions (supersede earlier pi-only assumptions)
 
@@ -552,7 +654,9 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   session. Refusal keeps the temporary resident and its messages intact. Other user temporary sessions
   sharing the daemon must close before a saved resident restarts. Internal configuration-service workers
   drain within a bounded period before a native restart.
-- Both engines reject restart while startup or a session operation is in flight. Restart preparation
+- Both engines reject restart while startup or a session operation is in flight. Engine 2's read-only
+  MCP status reads are not session operations: restarts and engine switches do not wait for them and
+  close their connection, which fails the read; MCP actions are. Restart preparation
   excludes new commands and checks native streaming and compaction state before stopping anything.
   Engine refuses restart with queued messages or nonempty temporary history that cannot be restored;
   it carries the live model and reasoning selection unless the restart explicitly changes them.

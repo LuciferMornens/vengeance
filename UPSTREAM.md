@@ -21,8 +21,8 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 
 `engines.lock.json` is the source of truth. Current stable bases are pi `v1.3.0` at
 `71023aec1546d6d677a65669c5665c0927ce0dd0` and Prime `v0.10.0` at
-`763094e1b6a7c17450ee8399b06cda1853847ca5`. The builds identify as `1.3.0+vengeance.2` and
-`0.10.0+vengeance.12`. Never reuse a Vengeance build version for different shipped behavior.
+`763094e1b6a7c17450ee8399b06cda1853847ca5`. The builds identify as `1.3.0+vengeance.3` and
+`0.10.0+vengeance.13`. Never reuse a Vengeance build version for different shipped behavior.
 
 The current stable-release verification and Prime patch decisions are recorded in
 [ENGINE-STABLE-AUDIT-2026-10-18.md](docs/ENGINE-STABLE-AUDIT-2026-10-18.md), with the preceding
@@ -149,6 +149,31 @@ official Intel wheel availability, refresh the source/checksum locks, and rerun 
 `0023` when a supported upstream stable release provides equivalent verified bundled-wheel support,
 or current official Intel wheels make it unnecessary, and packaged bootstrap plus cached-kernel
 upgrade regressions pass without the patch. See the [native patch guide](patches/prime-agent/README.md).
+
+### Live MCP status
+
+pi build `.3` adds patch `0009` and Prime build `.13` adds patch `0024`, so the app can list each MCP
+server of an open conversation with its real state and reconnect one. Neither engine exposed this:
+pi kept MCP state private to its built-in extension, and Prime reported only configured and
+credential states. Both patches are additive: existing commands, `/mcp`, prompts and saved formats
+are unchanged, and the native helper keeps linking Prime's unchanged `mcp_tool_listing`.
+
+- pi `0009`: the built-in MCP extension publishes `mcp:state` on the extension event bus and answers
+  `mcp:request` (state, reconnect, enable, disable, enable or disable for the trusted project alone,
+  sign-out). Each server says where enable and disable save and, when it can, which project
+  `mcp.json` takes an override instead; the conversation panel's switch prefers that override.
+  Vengeance's bridge extension relays them as `/vengeance-mcp`. With the built-in replaced by
+  pi-mcp-adapter, the bridge only relays the adapter's own `pi-mcp-adapter/status/v1` snapshot: the
+  adapter takes no bus requests, so the app sends its `/mcp` and `/mcp-auth` subcommands to the
+  conversation as prompts.
+- Prime `0024`: `get_mcp_status` (read-only, session plane, never starts a kernel) and
+  `reconnect_mcp_server` (session plane) answer from the session's kernel; the kernel's
+  `mcp_status` frame takes an optional `reload` list.
+
+Qualify on every base: the native MCP suites named in each patch guide, `scripts/checks/mcp-status.check.ts`,
+the `mcp-status` shots, `scripts/qa/ext/mcp.qa.mjs` against the real Engine and
+`scripts/qa/engines/mcp-live.qa.mjs` against the real Engine 2. Retire each patch when its upstream
+offers an equivalent host-facing interface and the app moves to it.
 
 ## Platforms
 
@@ -400,6 +425,8 @@ sign-in testing only with explicit user authorization; report coverage gaps rath
 | Model/reasoning changes and restart notices                         | `scripts/qa/engines/restart-notices.qa.mjs`, `scripts/qa/engines/candidate-controls.qa.mjs`                                                                        |
 | Active-work restart refusal and deferred restart admission          | `scripts/checks/engine-restart.check.ts`, `scripts/qa/engines/restart-safety.qa.mjs`                                                                               |
 | Native prompt inspection, scoped edits and explicit application     | `scripts/qa/settings/system-prompts.qa.mjs`, `scripts/shots/system-prompts.mjs`; helper `system_prompt` tests                                                      |
+| Conversation instructions: composition, store and restart lifecycle | `scripts/checks/conversation-prompt.check.ts`, `scripts/shots/conversation-prompt.mjs`, `scripts/qa/settings/system-prompts.qa.mjs`                                |
+| Live MCP status and per-server reconnect in open conversations      | `scripts/qa/ext/mcp.qa.mjs`, `scripts/qa/engines/mcp-live.qa.mjs`, `scripts/checks/mcp-status.check.ts`; native suites of pi `0009` and Prime `0024`               |
 | Parent/child model isolation and concurrent settings preservation   | `scripts/qa/engines/model-isolation.qa.mjs`; native `model_isolation`, settings persistence and `settings_mcp_save` regressions                                    |
 | Image capabilities, live model switches and tool/image delivery     | `scripts/qa/engines/image-capabilities.qa.mjs`; native model-switch and prompt regressions                                                                         |
 | Response speed, subscription entitlement and native tier transport  | `scripts/qa/engines/speed-mode-engine2.qa.mjs`, `speed-mode.qa.mjs`, `speed-mode-subscriptions.qa.mjs`; native `service_tiers` and `service_tiers_transport` tests |

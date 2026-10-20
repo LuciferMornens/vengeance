@@ -20,6 +20,7 @@ import { useAgents } from '../../store/agents'
 import { Kbd, Spinner, toast } from '../../ui'
 import { RetryNotice } from '../chat/notices'
 import { ExtensionStatusChips, ExtensionWidgets } from '../extension-ui'
+import { McpChip } from '../mcp/McpChip'
 import { getEffectiveSetting } from '../settings/effective'
 import { FleetPill } from '../subagents'
 import { TodoDock } from '../tools'
@@ -634,6 +635,7 @@ export function Composer({ agentId, opening }: { agentId: string; opening: Openi
       <div className="relative w-full max-w-[var(--transcript-w)]">
         <div className="mb-2 flex h-[22px] items-center gap-2 px-1 [&>*]:pointer-events-auto">
           {engine === 'pi' && capabilities?.subagents && <FleetPill agentId={agentId} />}
+          {capabilities?.mcp && <McpChip agentId={agentId} />}
           {capabilities?.extensionUi && <ExtensionStatusChips agentId={agentId} />}
           <div className="flex-1" />
           <AnimatePresence>

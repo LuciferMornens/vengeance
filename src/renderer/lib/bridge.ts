@@ -87,6 +87,17 @@ export const bridge = {
     await call(agentId, { op: 'label', entryId, label }, options)
   },
 
+  /**
+   * The conversation's assembled system prompt as the engine reports it. `partial`: the Engine
+   * between turns, before a turn in this process added its turn-start sections.
+   */
+  systemPrompt(
+    agentId: string,
+    options?: BridgeCallOptions
+  ): Promise<BridgeResultMap['system-prompt']> {
+    return call(agentId, { op: 'system-prompt' }, options)
+  },
+
   /** The session's response speed; with `mode`, request that speed first (Engine 2: natively). */
   speed(agentId: string, mode?: SpeedMode, options?: BridgeCallOptions): Promise<SpeedState> {
     return call(agentId, { op: 'speed', mode }, options)

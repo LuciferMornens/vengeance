@@ -4,9 +4,14 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { EngineManager } from '../../src/main/engine/manager'
+import type { EngineManager, RestartApplied } from '../../src/main/engine/manager'
 import type { primeRestartSelection } from '../../src/main/engine/prime/restart'
-import type { AgentInfo, CreateAgentArgs, EngineId } from '../../src/shared/api/engine'
+import type {
+  AgentInfo,
+  ConversationPrompt,
+  CreateAgentArgs,
+  EngineId
+} from '../../src/shared/api/engine'
 import { MOCK_MODELS } from '../../src/main/engine/mock-data'
 import { check } from './harness'
 
@@ -65,8 +70,23 @@ async function loadManager(): Promise<RestartFixtureModule> {
                 constructor(args, ...rest) {
                   super(args, ...rest)
                   this.fixtureName = args.name
+                  // Like Engine 2, a prime fixture applies the restart's configuration natively,
+                  // unless no resident runs: then only the successor's spawn applies it.
+                  if (args.engine === 'prime') {
+                    this.prepareRestart = async (nextArgs) => ({
+                      args: nextArgs,
+                      applied: args.name !== 'no-resident'
+                    })
+                  }
+                }
+                async start() {
+                  if (this.fixtureName === 'start-fails') throw new Error('The engine did not attach')
+                  return super.start()
                 }
                 async send(command) {
+                  if (command.type === 'get_commands' && this.fixtureName === 'commands-timeout') {
+                    throw new Error('Engine did not answer "get_commands" within 30s')
+                  }
                   const response = await super.send(command)
                   if (command.type !== 'get_state') return response
                   if (this.fixtureName === 'unverifiable-state') {
@@ -440,3 +460,159 @@ await check(
     }
   }
 )
+
+await check(
+  'engine restart: conversation instructions follow the session file the restart resumes',
+  async () => {
+    const test = await fixture()
+    const temporary = await fixture('pi', true)
+    try {
+      const prompt: ConversationPrompt = { mode: 'append', text: 'Answer in French.', updatedAt: 1 }
+      const started = test.manager.get(test.source.agentId)?.sessionFile
+      // The process moves to another session file; only its fresh state says so.
+      await test.manager.command(test.source.agentId, { type: 'clone' })
+      const asked: Array<string | undefined> = []
+      const restarted = await test.manager.restart(test.source.agentId, undefined, (file) => {
+        asked.push(file)
+        return prompt
+      })
+      assert.equal(asked.length, 1)
+      assert.ok(asked[0] && started && asked[0] !== started)
+      assert.equal(asked[0], restarted.sessionFile)
+      assert.deepEqual(restarted.args.conversationPrompt, prompt)
+
+      const chat = await temporary.manager.restart(temporary.source.agentId, undefined, (file) => {
+        asked.push(file)
+        return null
+      })
+      assert.equal(asked[1], undefined)
+      assert.equal(chat.args.conversationPrompt, null)
+    } finally {
+      await test.close()
+      await temporary.close()
+    }
+  }
+)
+
+/** Records each successor a restart reports as applied. */
+function appliedLog(): {
+  applied: Array<Pick<AgentInfo, 'args' | 'sessionFile'>>
+  onApplied: RestartApplied
+} {
+  const applied: Array<Pick<AgentInfo, 'args' | 'sessionFile'>> = []
+  return {
+    applied,
+    onApplied: async (successor) => {
+      applied.push(successor)
+    }
+  }
+}
+
+await check('engine restart: the Engine applies a configuration once its spawn starts', async () => {
+  const test = await fixture()
+  try {
+    const { applied, onApplied } = appliedLog()
+    const crashed = await test.manager.restart(
+      test.source.agentId,
+      { name: 'start-fails' },
+      undefined,
+      onApplied
+    )
+    assert.equal(crashed.status, 'crashed')
+    assert.equal(applied.length, 0)
+    const ready = await test.manager.restart(
+      test.source.agentId,
+      { name: undefined },
+      undefined,
+      onApplied
+    )
+    assert.equal(ready.status, 'ready')
+    assert.equal(applied.length, 1)
+    assert.equal(applied[0]!.sessionFile, ready.sessionFile)
+  } finally {
+    await test.close()
+  }
+})
+
+await check(
+  'engine restart: Engine 2 keeps a natively applied configuration when the re-attach fails',
+  async () => {
+    const test = await fixture('prime')
+    try {
+      const prompt: ConversationPrompt = { mode: 'append', text: 'Answer in French.', updatedAt: 1 }
+      const { applied, onApplied } = appliedLog()
+      const crashed = await test.manager.restart(
+        test.source.agentId,
+        { name: 'start-fails', conversationPrompt: prompt },
+        undefined,
+        onApplied
+      )
+      assert.equal(crashed.status, 'crashed')
+      assert.equal(applied.length, 1)
+      assert.deepEqual(applied[0]!.args.conversationPrompt, prompt)
+      assert.equal(applied[0]!.args.sessionPath, test.source.sessionFile)
+      // A spawn after a failed startup applies nothing natively: only one that starts counts.
+      await test.manager.restart(test.source.agentId, undefined, undefined, onApplied)
+      assert.equal(applied.length, 1)
+      const ready = await test.manager.restart(
+        test.source.agentId,
+        { name: undefined },
+        undefined,
+        onApplied
+      )
+      assert.equal(ready.status, 'ready')
+      assert.equal(applied.length, 2)
+      assert.deepEqual(applied[1]!.args.conversationPrompt, prompt)
+    } finally {
+      await test.close()
+    }
+  }
+)
+
+await check(
+  'engine restart: Engine 2 without a resident applies a configuration once its spawn starts',
+  async () => {
+    const test = await fixture('prime', false, 'no-resident')
+    try {
+      const prompt: ConversationPrompt = { mode: 'append', text: 'Answer in French.', updatedAt: 1 }
+      const { applied, onApplied } = appliedLog()
+      const crashed = await test.manager.restart(
+        test.source.agentId,
+        { name: 'start-fails', conversationPrompt: prompt },
+        undefined,
+        onApplied
+      )
+      assert.equal(crashed.status, 'crashed')
+      assert.equal(applied.length, 0, 'no resident and no successor took the configuration')
+      const ready = await test.manager.restart(
+        test.source.agentId,
+        { name: 'no-resident' },
+        undefined,
+        onApplied
+      )
+      assert.equal(ready.status, 'ready')
+      assert.equal(applied.length, 1)
+      assert.deepEqual(applied[0]!.args.conversationPrompt, prompt)
+      // Reported by the successor that started, not by the preparation before it.
+      const again = await test.manager.restart(test.source.agentId, undefined, undefined, onApplied)
+      assert.equal(again.status, 'ready')
+      assert.equal(applied.length, 2)
+      assert.equal(applied[1]!.sessionFile, again.sessionFile)
+      assert.ok(applied[1]!.sessionFile)
+    } finally {
+      await test.close()
+    }
+  }
+)
+
+await check('engine restart: a command list that times out keeps the resumed session file', async () => {
+  const test = await fixture()
+  try {
+    const restarted = await test.manager.restart(test.source.agentId, { name: 'commands-timeout' })
+    assert.equal(restarted.status, 'ready')
+    assert.ok(restarted.sessionFile)
+    assert.equal(restarted.sessionFile, test.source.sessionFile)
+  } finally {
+    await test.close()
+  }
+})

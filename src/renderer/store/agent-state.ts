@@ -5,6 +5,7 @@ import {
   type EngineStatus
 } from '@shared/api/engine'
 import { SUBAGENT_HOST_COMMANDS } from '@shared/subagents'
+import type { McpLiveStatus } from '@shared/api/mcp'
 import type { SpeedState } from '@shared/api/speed'
 import type {
   AgentMessage,
@@ -233,6 +234,11 @@ export interface AgentState {
   modelChangePending: boolean
   /** Response speed (Fast / Ultrafast); absent when the engine does not report one. */
   speed?: SpeedState
+  /**
+   * MCP servers of the conversation: published by the Engine's bridge, fetched for Engine 2. Absent
+   * until reported, and when the engine has no MCP extension.
+   */
+  mcp?: McpLiveStatus
   sessionName?: string
   stats?: SessionStats
   /** Latest cumulative usage of the streaming assistant response. */
@@ -305,8 +311,9 @@ export function restartedRuntime(agent: AgentState): Partial<AgentState> {
     historyLoaded: false,
     commandsStatus: 'loading',
     modelChangePending: false,
-    // The new engine process reports its own speed once it is ready.
+    // The new engine process reports its own speed and MCP servers once it is ready.
     speed: undefined,
+    mcp: undefined,
     phase: 'idle',
     turnActive: false,
     streaming: null,
