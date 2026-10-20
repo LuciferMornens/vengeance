@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { launchApp, reportShotsDir, ROOT } from '../lib/app.mjs'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
 import { softSteps } from '../lib/steps.mjs'
@@ -19,6 +20,9 @@ const QUEUE_PROMPT = 'Hold this turn for the queue mutation check'
 const PLAIN_MESSAGE = 'Remove this plain follow-up'
 const FIRST_INJECTED = 'Keep the first native delivery metadata'
 const SECOND_INJECTED = 'Remove this labeled native delivery'
+const REMOVE_QUEUED = 'Remove queued message'
+const SETTLED_FRAMES = 4
+const CLICK_EFFECT_MS = 2_500
 const OUTPUT_DIRECTORY = process.env.QA_PRIME_EXECUTABLE
   ? join(
       process.env.QA_REPORT_DIR
@@ -28,14 +32,20 @@ const OUTPUT_DIRECTORY = process.env.QA_PRIME_EXECUTABLE
     )
   : reportShotsDir('engines')
 
-async function until(predicate, label) {
-  const deadline = Date.now() + WAIT_TIMEOUT_MS
+async function poll(predicate, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const result = await predicate()
     if (result) return result
     await new Promise((resolveWait) => setTimeout(resolveWait, POLL_INTERVAL_MS))
   }
-  throw new Error(`Timed out waiting for ${label}`)
+  return undefined
+}
+
+async function until(predicate, label) {
+  const result = await poll(predicate, WAIT_TIMEOUT_MS)
+  if (!result) throw new Error(`Timed out waiting for ${label}`)
+  return result
 }
 
 async function step(label, action) {
@@ -217,26 +227,125 @@ try {
       }
       const queue = await native('get_queue')
       assert.equal(queue.followUp.length, 3)
-      const waitForRenderedQueue = async (previews) => {
-        await until(async () => {
-          const buttons = application.page.getByRole('button', { name: 'Remove queued message' })
-          if ((await buttons.count()) !== previews.length) return false
+      const removeButtons = application.page.getByRole('button', { name: REMOVE_QUEUED })
+      const queueToast = application.page.locator('[data-toaster] [role="alert"]', {
+        hasText: 'Could not update the queue'
+      })
+      // Native replies can precede queue rendering; exiting chips keep stale removal handlers.
+      // The strip opens with a height spring inside the bottom-anchored composer, so its chips move
+      // until it rests. A press and release on different elements make Chromium click their common
+      // ancestor: Playwright reports success and the chip's handler never runs.
+      const waitForSettledQueue = (previews) =>
+        until(async () => {
+          if ((await removeButtons.count()) !== previews.length) return false
           const counts = await Promise.all(
             previews.map((preview) => application.page.getByText(preview, { exact: true }).count())
           )
-          return counts.every((count) => count === 1)
-        }, 'native queue previews rendered')
+          if (!counts.every((count) => count === 1)) return false
+          return application.page.evaluate(
+            async ({ label, frames }) => {
+              const boxes = () =>
+                [...document.querySelectorAll(`button[aria-label="${label}"]`)]
+                  .map((button) => {
+                    let clip = button.parentElement
+                    while (clip && getComputedStyle(clip).overflow === 'visible') {
+                      clip = clip.parentElement
+                    }
+                    const box = button.getBoundingClientRect()
+                    const strip = (clip ?? document.documentElement).getBoundingClientRect()
+                    const inside =
+                      box.top >= strip.top &&
+                      box.bottom <= strip.bottom &&
+                      box.left >= strip.left &&
+                      box.right <= strip.right
+                    return inside ? `${box.x},${box.y},${box.width},${box.height}` : 'clipped'
+                  })
+                  .join(' ')
+              const first = boxes()
+              for (let frame = 0; frame < frames; frame++) {
+                await new Promise(requestAnimationFrame)
+                if (boxes() !== first) return false
+              }
+              return !first.includes('clipped')
+            },
+            { label: REMOVE_QUEUED, frames: SETTLED_FRAMES }
+          )
+        }, 'settled native queue previews')
+      // Records where each press, release and click landed, so a click that never reached the
+      // button (nothing was sent, safe to repeat) is told apart from a request still under way.
+      const tracedClick = async (button) => {
+        const trace = await button.evaluateHandle((target) => {
+          const events = []
+          const record = (event) => {
+            const label = event.target.getAttribute?.('aria-label')
+            const box = target.getBoundingClientRect()
+            events.push({
+              type: event.type,
+              onButton: target.contains(event.target),
+              element: `${event.target.tagName?.toLowerCase()}${label ? `[${label}]` : ''}`,
+              point: `${Math.round(event.clientX)},${Math.round(event.clientY)}`,
+              button: `${Math.round(box.x)},${Math.round(box.y)} ${Math.round(box.width)}x${Math.round(box.height)}`
+            })
+          }
+          const types = ['pointerdown', 'pointerup', 'click']
+          for (const type of types) window.addEventListener(type, record, true)
+          const stop = () => {
+            for (const type of types) window.removeEventListener(type, record, true)
+          }
+          return { events, stop }
+        })
+        try {
+          await button.click()
+          return await trace.evaluate(({ events, stop }) => {
+            stop()
+            return events
+          })
+        } finally {
+          await trace.dispose()
+        }
       }
-      const removeChip = async (text) => {
-        const chip = application.page
+      const removeChip = async (text, previews) => {
+        const before = (await native('get_queue')).followUp
+        const button = application.page
           .locator('span')
           .filter({ hasText: text })
-          .filter({ has: application.page.getByRole('button', { name: 'Remove queued message' }) })
-        await chip.getByRole('button', { name: 'Remove queued message' }).click()
+          .filter({ has: removeButtons })
+          .getByRole('button', { name: REMOVE_QUEUED })
+        for (let attempt = 1; ; attempt++) {
+          await waitForSettledQueue(previews)
+          const events = await tracedClick(button)
+          const effect = await poll(async () => {
+            if (await queueToast.count()) return { refused: await queueToast.first().innerText() }
+            const now = (await native('get_queue')).followUp
+            return !isDeepStrictEqual(now, before) && { applied: true }
+          }, CLICK_EFFECT_MS)
+          if (effect?.refused) {
+            throw new Error(
+              `Removing "${text}" was refused: ${effect.refused.replace(/\s+/g, ' ')}`
+            )
+          }
+          if (effect?.applied) return
+          if (events.some((event) => event.type === 'click' && event.onButton)) {
+            console.log(`    … "${text}" was clicked; native unchanged after ${CLICK_EFFECT_MS} ms`)
+            return
+          }
+          const landed = events
+            .map(
+              (event) =>
+                `${event.type} at ${event.point} on ${event.onButton ? 'the button' : event.element}` +
+                ` (button at ${event.button})`
+            )
+            .join('; ')
+          if (attempt > 1) throw new Error(`Clicks on "${text}" never reached it: ${landed}`)
+          const unchanged =
+            (await button.count()) === 1 &&
+            (await queueToast.count()) === 0 &&
+            isDeepStrictEqual((await native('get_queue')).followUp, before)
+          if (!unchanged) return
+          console.log(`    ↻ the click on "${text}" missed (${landed}); clicking once more`)
+        }
       }
-      // Native replies can precede queue rendering; exiting chips keep stale removal handlers.
-      await waitForRenderedQueue(queue.followUp)
-      await removeChip(PLAIN_MESSAGE)
+      await removeChip(PLAIN_MESSAGE, queue.followUp)
       await until(
         async () => (await native('get_queue')).followUp.length === 2,
         'single atomic deletion'
@@ -262,8 +371,7 @@ try {
       })
       assert.equal(stale.status, 'rejected')
       assert.deepEqual((await native('get_queue')).followUp, remaining.followUp)
-      await waitForRenderedQueue(remaining.followUp)
-      await removeChip(SECOND_INJECTED)
+      await removeChip(SECOND_INJECTED, remaining.followUp)
       await until(
         async () => (await native('get_queue')).followUp.length === 1,
         'labeled preview deletion'
