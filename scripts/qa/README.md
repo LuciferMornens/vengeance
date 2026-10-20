@@ -499,9 +499,10 @@ This needs a macOS desktop. CI uses
 
 ### Official release upgrades
 
-For 0.3.3, both macOS and both Linux architectures qualify official 0.3.2 Engine 2 `.10` to the final
-packaged `.12`. With the same absolute `QA_PACKAGED_EXE` and outside-home/repository `QA_TMP_ROOT`
-exported, run after core qualification and the macOS visibility check:
+Since 0.3.3, both macOS and both Linux architectures qualify official 0.3.2 Engine 2 `.10` to the final
+packaged candidate (`.12` in 0.3.3, `.13` in 0.3.4). With the same absolute `QA_PACKAGED_EXE` and
+outside-home/repository `QA_TMP_ROOT` exported, run after core qualification and the macOS
+visibility check:
 
 ```sh
 QA_REPORT_DIR="$PWD/.shots/qa/release-baseline" \
@@ -532,9 +533,9 @@ integration always tests fresh candidate bootstrap, without baseline provisionin
 The upgrade group runs candidate-transition and resident-upgrade serially against the packaged QA
 candidate and uses the same receipts, deadlines and report layout as core. CI uses
 `$RUNNER_TEMP/release-baseline` and `$RUNNER_TEMP/engine-upgrade`. Windows's native `.10` to `.11`
-transition has retained PR evidence that predates `.12`; this candidate needs fresh qualification.
-Pi's `.2` build is unchanged between these app releases, so the
-historical pi 1.2 to 1.3 transition fixture is not this release's gate.
+transition has retained PR evidence that predates `.12`; each later candidate needs fresh
+qualification. Pi keeps its `v1.3.0` base (`.2` in 0.3.2 and 0.3.3, `.3` in 0.3.4), so the
+historical pi 1.2 to 1.3 transition fixture is not a release gate.
 
 ### Built-app navigation benchmark
 
