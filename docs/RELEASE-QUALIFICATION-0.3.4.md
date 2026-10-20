@@ -1,10 +1,10 @@
 # Vengeance 0.3.4 qualification checkpoint
 
-20 October 2026. **The `v0.3.4` tag run is pending; publication remains gated on it.** This
-checkpoint records local verification of the 0.3.4 changes and the CI of
-[PR #21](https://github.com/LuciferMornens/vengeance/pull/21) at head `677b3e4`, both before the
-version bump. The tag run and the published release's receipts identify the qualified shipping
-bytes and supersede this checkpoint where source or artifacts differ.
+20 October 2026. This checkpoint records local verification of the 0.3.4 changes, the CI of
+[PR #21](https://github.com/LuciferMornens/vengeance/pull/21) at head `677b3e4` before the version
+bump, the release commit's CI and the tag run. The tag run and the published release's receipts
+identify the qualified shipping bytes and supersede this checkpoint where source or artifacts
+differ.
 
 ## Source and scope
 
@@ -86,9 +86,22 @@ turn's events, so on the slow runner one session was checked before its reply ar
 now waits for each session to be idle with its reply and names the session, its last entry and the
 unserved fake turns if one never arrives. The install jobs did not run in that dry run.
 
+That fix merged as `214293e`
+([PR #22](https://github.com/LuciferMornens/vengeance/pull/22)) after its
+[Release dry run 39390689628](https://github.com/LuciferMornens/vengeance/actions/runs/39390689628)
+passed every build, including the `mac-x64` Dock check, and every install job.
+
+## Tag run
+
+`v0.3.4` points at `214293e`. The
+[tag run 39397634593](https://github.com/LuciferMornens/vengeance/actions/runs/39397634593) passed
+Version, the five builds, the deb, rpm and pacman install jobs and the draft job. The draft carried
+the 24 expected files (packages, blockmaps, the four update files and `SHA256SUMS`), its body was
+`docs/RELEASE-0.3.4.md`, and every update file named version 0.3.4. It was published as the latest
+release on 20 October 2026.
+
 ## Not verified
 
-- The `v0.3.4` tag run, the draft and the published release.
 - Visual review of the CI screenshots and the qualification, benchmark and provenance artifacts of
   the runs above; their counts are not recorded here. No benchmark comparison with 0.3.3 is made.
 - An upgrade from the official 0.3.3 package (Engine 2 `.12`): the release upgrade gate stages 0.3.2

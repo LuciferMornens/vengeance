@@ -809,7 +809,11 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   drafts the GitHub release with every package, the update files (the two `latest-mac.yml` merged),
   `SHA256SUMS` and a build provenance attestation; a maintainer reviews and publishes it. Build jobs only
   read the repository. Pull requests that touch engines, patches, the helper, packaging, toolchain pins,
-  the workflow or its QA inputs, and manual runs, are dry runs that stop before publishing.
+  the workflow or its QA inputs, manual runs and a weekly scheduled run are dry runs that stop before
+  publishing. Manual and scheduled dry runs build on clean runners like tag runs. A pull request dry run
+  may instead restore and verify the engine and helper payloads cached under CI's key for the same
+  engine inputs (by CI on `main` or an earlier run of that pull request); its provenance receipt records
+  the payloads as restored, with the cache key, or as built.
 - Each platform is qualified by its own runs. CI and release dry runs are the qualification path for
   macOS and Linux; a Windows result never stands in for them. Record per-platform runs, payload hashes
   and package hashes in the release verification record. Transition and resident-upgrade suites need a

@@ -1,4 +1,6 @@
 // Records the packaged native payloads and release files after the packaged smoke check succeeds.
+// --engines-cache-key names the Actions cache entry a pull request dry run restored its staged
+// engines and helper from; empty or absent, the run built them itself, as every tag run does.
 import asar from '@electron/asar'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -16,6 +18,7 @@ const { values } = parseArgs({
   options: {
     app: { type: 'string' },
     artifacts: { type: 'string' },
+    'engines-cache-key': { type: 'string' },
     output: { type: 'string' },
     revision: { type: 'string' }
   }
@@ -30,7 +33,14 @@ try {
   if (!/^[a-f0-9]{40}$/.test(values.revision ?? '')) {
     throw new Error('--revision requires the full checked-out commit SHA')
   }
-  await recordReceipt(values)
+  const cacheKey = values['engines-cache-key'] || null
+  if (cacheKey && process.env.GITHUB_EVENT_NAME !== 'pull_request') {
+    throw new Error('Only pull request dry runs may restore their native payloads')
+  }
+  if (cacheKey && !new RegExp(`^engines-v\\d+-${hostKey}-[a-f0-9]{64}$`).test(cacheKey)) {
+    throw new Error(`--engines-cache-key ${cacheKey} is not a ${hostKey} engine payload key`)
+  }
+  await recordReceipt({ ...values, cacheKey })
 } catch (error) {
   console.error(`Release receipt failed: ${error instanceof Error ? error.message : String(error)}`)
   process.exitCode = 1
@@ -80,8 +90,12 @@ async function recordReceipt(options) {
     workflow: {
       repository: process.env.GITHUB_REPOSITORY ?? null,
       runId: process.env.GITHUB_RUN_ID ?? null,
-      runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? null
+      runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
+      event: process.env.GITHUB_EVENT_NAME ?? null
     },
+    nativePayloads: options.cacheKey
+      ? { source: 'restored', cacheKey: options.cacheKey }
+      : { source: 'built' },
     engines,
     helper: {
       protocol: helper.protocol,

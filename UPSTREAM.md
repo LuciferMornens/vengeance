@@ -181,13 +181,13 @@ Every platform builds natively on its own host; nothing is cross-compiled. `engi
 version 2 maps each supported platform to its Rust target, and the builders target
 `${process.platform}-${process.arch}`, refusing a host the lock does not list:
 
-| Platform       | Rust target                 | Release runner                             | In `ci.yml` |
-| -------------- | --------------------------- | ------------------------------------------ | ----------- |
-| `win32-x64`    | `x86_64-pc-windows-gnu`     | `windows-2025`                             | Yes         |
-| `darwin-arm64` | `aarch64-apple-darwin`      | `macos-15`                                 | Yes         |
-| `darwin-x64`   | `x86_64-apple-darwin`       | `macos-15-intel`                           | No          |
-| `linux-x64`    | `x86_64-unknown-linux-gnu`  | `ubuntu-24.04`, Ubuntu 22.04 container     | Yes         |
-| `linux-arm64`  | `aarch64-unknown-linux-gnu` | `ubuntu-24.04-arm`, Ubuntu 22.04 container | No          |
+| Platform       | Rust target                 | Release runner                             | In `ci.yml`            |
+| -------------- | --------------------------- | ------------------------------------------ | ---------------------- |
+| `win32-x64`    | `x86_64-pc-windows-gnu`     | `windows-2025`                             | Yes                    |
+| `darwin-arm64` | `aarch64-apple-darwin`      | `macos-15`                                 | Yes                    |
+| `darwin-x64`   | `x86_64-apple-darwin`       | `macos-15-intel`                           | Engines on `main` only |
+| `linux-x64`    | `x86_64-unknown-linux-gnu`  | `ubuntu-24.04`, Ubuntu 22.04 container     | Yes                    |
+| `linux-arm64`  | `aarch64-unknown-linux-gnu` | `ubuntu-24.04-arm`, Ubuntu 22.04 container | Engines on `main` only |
 
 Engine 2's lock entry is `prime/prime-agent`; the staged manifest records the build host's `platform`,
 the resolved `target` and the resolved `entry` (`prime/prime-agent.exe` on Windows). The packaging hooks
@@ -225,12 +225,22 @@ run that built the shipped packages.
 GitHub Actions is the qualification path for macOS and Linux. `.github/workflows/ci.yml` runs on every
 pull request and push to `main`. Its `engines` job builds both engines and the helper for `win32-x64`,
 `darwin-arm64` and `linux-x64` (Linux in the Ubuntu 22.04 container) and caches the staged payloads under
-a key of their inputs. Its `test` job restores exactly that key on the plain runner, verifies it through
-`npm run build`, then runs `npm run checks` and `npm run shots` (Linux under Xvfb) and uploads the
-screenshots. `.github/workflows/release.yml` runs as a dry run on pull requests that touch engines,
-patches, the helper, packaging, toolchain pins or the workflow, and on manual dispatch. Each of the five
-platforms then builds from a clean runner, packages, passes the baked-feed check, the GLIBC gate (Linux)
-and signature, zip and dmg verification (macOS), and runs
+a key of their inputs. On `main`, its `release-engines` job does the same for `darwin-x64` and
+`linux-arm64`, which CI does not test, and no other job waits for it. Its `checks` and `shots` jobs
+restore exactly that key on the plain runner and verify it through `npm run build`. `checks` then runs
+`npm run checks` once per platform; `shots` runs `npm run shots` in two shards per platform (Linux under
+Xvfb) and uploads each shard's screenshots. The required `Checks and shots (<platform>)` jobs pass only
+when every checks and shots job passed. `.github/workflows/release.yml` runs as a dry run on pull
+requests that touch engines, patches, the helper, packaging, toolchain pins or the workflow, on manual
+dispatch and weekly on a schedule. Tag runs and manual and scheduled dry runs build each of the five
+platforms from a clean runner without caches. A pull request dry run may instead restore the engine and
+helper payloads cached under CI's key for the same engine inputs, by CI on `main` or by an earlier run
+for that pull request, and verifies them as CI's checks and shots jobs do; when none is cached it
+builds them clean and caches them for its later pushes and reruns. Its provenance receipt records
+`nativePayloads.source` as `restored` with the cache key, or as `built`. A restored payload shows that
+those inputs built on the same runner and container before, not in this run; tag runs build and qualify
+every shipped payload themselves. Each platform then packages, passes the baked-feed check, the GLIBC
+gate (Linux) and signature, zip and dmg verification (macOS), and runs
 `scripts/qa/engines/platform-qualification.mjs` against the QA app that
 `node scripts/dist-qa.mjs --dir` prints. This runner executes nine suites serially against the packaged
 application: packaged, integration, model isolation, system prompts, restart safety, Stop/compaction,
