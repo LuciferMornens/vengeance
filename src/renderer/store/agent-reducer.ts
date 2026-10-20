@@ -1,4 +1,5 @@
 import { BRIDGE_STATUS_PREFIX } from '@shared/api/engine'
+import { MCP_STATUS_KEY, parseMcpLiveStatus } from '@shared/api/mcp'
 import { isSpeedMode, SPEED_STATUS_KEY, type SpeedOption, type SpeedState } from '@shared/api/speed'
 import {
   SUBAGENT_ASYNC_WIDGET_KEY,
@@ -454,6 +455,8 @@ function applyExtensionUi(state: AgentState, request: RpcExtensionUIRequest): Ag
     case 'setStatus': {
       if (request.statusKey === SPEED_STATUS_KEY)
         return { ...state, speed: parseSpeedStatus(request.statusText) }
+      if (request.statusKey === MCP_STATUS_KEY)
+        return { ...state, mcp: parseMcpLiveStatus(request.statusText) }
       // Bridge replies are consumed by the main process (engine:bridge); subagent slash progress is TUI-only.
       if (
         request.statusKey.startsWith(BRIDGE_STATUS_PREFIX) ||

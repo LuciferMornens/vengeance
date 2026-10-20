@@ -11,6 +11,7 @@ import type {
 import type { SubagentInspectReply, SubagentInspectRequest } from '../subagents'
 import type { SessionLineage } from './sessions'
 import type { LaunchOptions } from './launch'
+import type { McpLiveAction, McpLiveStatus } from './mcp'
 import type { EngineSettingsRequest, EngineSettingsResult } from './settings'
 import type { SpeedMode, SpeedState } from './speed'
 
@@ -85,6 +86,25 @@ export interface BackgroundAgentSelector {
 /** Lifecycle of one session's engine connection. */
 export type EngineStatus = 'starting' | 'ready' | 'crashed' | 'exited' | 'stopping'
 
+/** The longest conversation instructions Vengeance accepts (characters). */
+export const CONVERSATION_PROMPT_MAX_CHARS = 64 * 1024
+
+/**
+ * Instructions the user gave one conversation. Vengeance keeps them per session file and applies
+ * them on every spawn of that conversation, on top of each engine's own prompt assembly: project
+ * context, skills, MCP, environment and other runtime sections always stay.
+ */
+export interface ConversationPrompt {
+  /**
+   * `append`: added to the engine's prompt; a saved APPEND_SYSTEM.md (or launch-time append text)
+   * stays and comes first. `replace`: replaces the engine's foundation, like SYSTEM.md.
+   */
+  mode: 'append' | 'replace'
+  /** Non-empty text, at most `CONVERSATION_PROMPT_MAX_CHARS`. */
+  text: string
+  updatedAt: number
+}
+
 /** Options for creating, attaching, or resuming an engine session. */
 export interface CreateAgentArgs {
   /** Backend for this session; missing values select the default engine. */
@@ -112,6 +132,11 @@ export interface CreateAgentArgs {
   approve?: boolean
   /** Structured launch flags (tools, resources, system prompt, extension flags, env). */
   launch?: LaunchOptions
+  /**
+   * This conversation's own instructions. Main fills it from its store for a resumed session file;
+   * an explicit `null` in a restart patch clears them. Never part of `launch` or workspace defaults.
+   */
+  conversationPrompt?: ConversationPrompt | null
   /** Extra raw CLI args appended last (advanced). */
   extraArgs?: string[]
 }
@@ -210,7 +235,8 @@ export const BRIDGE_COMMANDS = [
   'vengeance-label',
   'vengeance-subagents',
   'vengeance-speed',
-  'vengeance-system-prompt'
+  'vengeance-system-prompt',
+  'vengeance-mcp'
 ] as const
 export type BridgeCommandName = (typeof BRIDGE_COMMANDS)[number]
 
@@ -262,6 +288,8 @@ export type BridgeRequest =
   /** Read the session's response speed, or request `mode` (Engine 2 maps this onto its native service tier). */
   | { op: 'speed'; mode?: SpeedMode }
   | { op: 'system-prompt' }
+  /** The conversation's MCP status, after running `action` on `server` first. */
+  | { op: 'mcp'; action?: McpLiveAction; server?: string }
 
 export type BridgeOp = BridgeRequest['op']
 
@@ -314,7 +342,17 @@ export interface BridgeResultMap {
   label: null
   subagents: SubagentsRpcReply
   speed: SpeedState
-  'system-prompt': { text: string }
+  'system-prompt': {
+    text: string
+    /**
+     * The Engine between turns: sections extensions add when a turn starts (MCP servers, for
+     * example) are missing because no turn ran since it last opened the session (a process start, a
+     * reload or an in-place switch), or what the latest turn was built from changed.
+     */
+    partial?: boolean
+  }
+  /** Null when no MCP extension reports (the Engine without MCP). */
+  mcp: McpLiveStatus | null
 }
 
 export type BridgeResult = BridgeResultMap[BridgeOp]
@@ -364,6 +402,15 @@ export interface EngineInvokeMap {
   ]
   /** Switch an idle thread to another backend, carrying its selected history into a new native file. */
   'engine:switch': [agentId: string, args: CreateAgentArgs, result: AgentInfo]
+  /**
+   * The instructions saved for a session file, or null. An open conversation's are in
+   * `AgentInfo.args.conversationPrompt`; an in-place `switch_session` is refused when either side has some.
+   */
+  'engine:conversation-prompt': [
+    engine: EngineId,
+    sessionPath: string,
+    result: ConversationPrompt | null
+  ]
   'engine:stderr': [agentId: string, result: string]
   'engine:info': [result: EngineLocationInfo]
   /** Run a bridge operation; rejects when the bridge is not loaded (check `AgentInfo.bridge`). */

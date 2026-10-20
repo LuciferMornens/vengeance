@@ -3,7 +3,9 @@
 //
 // Tools: qa_add {a, b} → "sum=<a+b>", qa_env → the QA_MCP_TOKEN it was started with, qa_fail →
 // an isError result. Resources: qa://notes/hello (text). Every start is appended to the file in
-// QA_MCP_LOG (when set) so a suite can count connections and reconnects.
+// QA_MCP_LOG, or in a `--log=<file>` argument (Engine 2's kernel starts servers with a cleared
+// environment), so a suite can count connections and reconnects. With `--hang` it never answers,
+// not even the handshake.
 import { appendFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
@@ -93,8 +95,18 @@ export function handleMcpMessage(message, context = {}) {
   }
 }
 
+const LOG_ARGUMENT = '--log='
+const HANG_ARGUMENT = '--hang'
+
 function runStdio() {
-  if (process.env.QA_MCP_LOG) appendFileSync(process.env.QA_MCP_LOG, `start ${process.pid}\n`)
+  const logArgument = process.argv.find((value) => value.startsWith(LOG_ARGUMENT))
+  const startLog = logArgument ? logArgument.slice(LOG_ARGUMENT.length) : process.env.QA_MCP_LOG
+  if (startLog) appendFileSync(startLog, `start ${process.pid}\n`)
+  process.stdin.on('end', () => process.exit(0))
+  if (process.argv.includes(HANG_ARGUMENT)) {
+    process.stdin.resume()
+    return
+  }
   let buffer = ''
   process.stdin.setEncoding('utf8')
   process.stdin.on('data', (chunk) => {
@@ -108,7 +120,6 @@ function runStdio() {
       if (response) process.stdout.write(`${JSON.stringify(response)}\n`)
     }
   })
-  process.stdin.on('end', () => process.exit(0))
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) runStdio()

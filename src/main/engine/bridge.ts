@@ -43,17 +43,21 @@ const OP_COMMAND: Record<BridgeOp, BridgeCommandName> = {
   label: 'vengeance-label',
   subagents: 'vengeance-subagents',
   speed: 'vengeance-speed',
-  'system-prompt': 'vengeance-system-prompt'
+  'system-prompt': 'vengeance-system-prompt',
+  mcp: 'vengeance-mcp'
 }
 
 /** The bridge waits up to 15 s for pi-subagents' event-bus reply; allow for the prompt round trip on top. */
 const SUBAGENTS_TIMEOUT_MS = 20_000
+/** The bridge waits up to 50 s for an MCP action (a reconnect handshake); allow for the round trip. */
+const MCP_ACTION_TIMEOUT_MS = 55_000
 
 /** Default time allowed per operation (a branch summary runs a model call; reload re-initializes extensions). */
 export function bridgeTimeout(request: BridgeRequest): number {
   if (request.op === 'tree') return request.summarize ? 10 * 60_000 : 60_000
   if (request.op === 'reload') return 3 * 60_000
   if (request.op === 'subagents') return SUBAGENTS_TIMEOUT_MS
+  if (request.op === 'mcp' && request.action) return MCP_ACTION_TIMEOUT_MS
   return 30_000
 }
 
@@ -76,6 +80,8 @@ function payloadOf(request: BridgeRequest, reqId: string): Record<string, unknow
       return { reqId, method: request.method, params: request.params }
     case 'speed':
       return { reqId, mode: request.mode }
+    case 'mcp':
+      return { reqId, action: request.action, server: request.server }
   }
 }
 

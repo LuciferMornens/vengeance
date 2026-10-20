@@ -68,34 +68,69 @@ async function openSession(engine, cwd, name) {
   ).agentId
 }
 
-async function explicitRestart(engine, agentId, beforePid) {
-  await application.test('openSettings', 'sessions')
-  await application.page.getByRole('combobox', { name: 'Settings engine' }).click()
+/** The open conversation's instructions dialog, from its session header. */
+async function instructionsDialog(agentId) {
+  assert.equal(await application.test('activeAgentId'), agentId)
   await application.page
-    .getByRole('option', { name: engine === 'pi' ? 'Engine' : 'Engine 2', exact: true })
+    .locator('[data-session-header]')
+    .getByRole('button', { name: /^Conversation instructions/ })
     .click()
-  const session = await descriptor(agentId)
-  await application.page.getByRole('combobox', { name: 'System prompt session' }).click()
-  await application.page.getByRole('option', { name: session.sessionName, exact: true }).click()
-  await application.page.getByRole('button', { name: 'Restart to apply', exact: true }).click()
   const dialog = application.page.getByRole('dialog', {
-    name: 'Restart to apply saved instructions?'
+    name: 'Conversation instructions',
+    exact: true
   })
-  await dialog.getByRole('button', { name: 'Restart session', exact: true }).click()
+  await dialog.waitFor()
+  return dialog
+}
+
+/** Runs one dialog action that restarts the conversation and waits for its new engine. */
+async function restartFromDialog(engine, agentId, button, label) {
+  const beforePid = (await descriptor(agentId)).pid
+  const dialog = application.page.getByRole('dialog', {
+    name: 'Conversation instructions',
+    exact: true
+  })
+  await dialog.getByRole('button', { name: button, exact: true }).click()
   await dialog.waitFor({ state: 'hidden', timeout: RESTART_TIMEOUT_MS })
-  await waitFor(
+  return waitFor(
     async () => {
       const current = await descriptor(agentId)
-      return current.status === 'ready' && current.pid !== beforePid
+      return current.status === 'ready' && current.pid !== beforePid && current
     },
-    `${engine} explicit instruction restart`,
+    `${engine} ${label}`,
     RESTART_TIMEOUT_MS
   )
-  await application.test('closeSettings')
+}
+
+/** Saved prompt files reach an open conversation only through its explicit restart. */
+async function explicitRestart(engine, agentId) {
+  await instructionsDialog(agentId)
+  await restartFromDialog(engine, agentId, 'Restart', 'explicit instruction restart')
+}
+
+/** Saves this conversation's own instructions; the restart keeps them in its launch arguments. */
+async function applyConversationInstructions(engine, agentId, mode, text) {
+  const dialog = await instructionsDialog(agentId)
+  await dialog
+    .getByRole('radio', { name: mode === 'replace' ? 'Replace foundation' : 'Add to engine prompt' })
+    .click()
+  await dialog.getByRole('textbox', { name: 'Conversation instructions', exact: true }).fill(text)
+  const current = await restartFromDialog(
+    engine,
+    agentId,
+    'Save and restart',
+    `${mode} conversation instructions`
+  )
+  assert.deepEqual(
+    { mode: current.args.conversationPrompt?.mode, text: current.args.conversationPrompt?.text },
+    { mode, text }
+  )
 }
 
 async function checkEngine(engine) {
-  console.log(`  • ${engine}: native prompt, held save, guarded apply, scopes and restore`)
+  console.log(
+    `  • ${engine}: native prompt, held save, guarded apply, conversation instructions, scopes and restore`
+  )
   const server = engine === 'prime' ? fixture.primeServer : fixture.piServer
   const cwd = await fixture.root.folder(`${engine}-workspace`, { 'README.md': '# Prompt QA\n' })
   const beforeFoundation = `QA_${engine}_FOUNDATION_BEFORE`
@@ -150,7 +185,7 @@ async function checkEngine(engine) {
   assert.ok(stillRunning.includes(beforeFoundation))
   assert.ok(!stillRunning.includes(afterFoundation))
 
-  await explicitRestart(engine, agentId, before.pid)
+  await explicitRestart(engine, agentId)
   const applied = await request(server, agentId, `${engine} after explicit restart`)
   assert.ok(applied.includes(afterFoundation))
   assert.ok(applied.includes(afterAppend))
@@ -161,6 +196,25 @@ async function checkEngine(engine) {
     undefined
   )
   assert.ok(refreshed.text.includes(afterFoundation))
+
+  const conversationAppend = `QA_${engine}_CONVERSATION_APPEND`
+  await applyConversationInstructions(engine, agentId, 'append', conversationAppend)
+  const appended = await request(server, agentId, `${engine} conversation instructions`)
+  assert.ok(appended.includes(conversationAppend))
+  assert.ok(appended.includes(afterAppend), 'APPEND_SYSTEM.md stays with added instructions')
+  const conversationFoundation = `QA_${engine}_CONVERSATION_FOUNDATION`
+  await applyConversationInstructions(engine, agentId, 'replace', conversationFoundation)
+  const replaced = await request(server, agentId, `${engine} conversation foundation`)
+  assert.ok(replaced.includes(conversationFoundation))
+  assert.ok(replaced.includes(afterAppend), 'APPEND_SYSTEM.md stays with a replaced foundation')
+  await (await instructionsDialog(agentId)).getByRole('button', { name: 'Remove', exact: true }).click()
+  const removed = await restartFromDialog(
+    engine,
+    agentId,
+    'Remove and restart',
+    'removed conversation instructions'
+  )
+  assert.equal(removed.args.conversationPrompt ?? null, null)
 
   await assert.rejects(
     engineSettings(

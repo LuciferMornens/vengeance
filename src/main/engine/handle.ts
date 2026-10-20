@@ -33,6 +33,16 @@ export interface SendOptions {
   timeoutMs?: number
 }
 
+/** A backend restart's successor args, and whether the backend already applied their configuration. */
+export interface BackendRestart {
+  args: CreateAgentArgs
+  /**
+   * The backend committed the configuration natively, so the session keeps it whatever happens to the
+   * successor. False when nothing was running to apply it to: only the successor's spawn applies it.
+   */
+  applied: boolean
+}
+
 /** One session's engine, speaking Vengeance's common command and event protocol. */
 export interface EngineHandle {
   readonly pid: number | undefined
@@ -54,7 +64,7 @@ export interface EngineHandle {
     nextArgs: CreateAgentArgs,
     executablePath?: string | null,
     patch?: Partial<CreateAgentArgs>
-  ): Promise<CreateAgentArgs | void>
+  ): Promise<BackendRestart | void>
   /** Block side operations while a cross-engine history handoff owns this connection. */
   guardHandoff?(): { assertIdle(): void; release(): void }
   stderr(): string

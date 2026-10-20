@@ -2,9 +2,12 @@ import { randomUUID } from 'node:crypto'
 import type { BridgeRequest, BridgeResult } from '@shared/api/engine'
 import type { AgentMessage, RpcCommand, RpcResponse } from '@shared/engine-types'
 import { bridgeTimeout, callBridge } from '../bridge'
+import { mockAssembledPrompt } from '../conversation-prompt'
 import { Emitter, type EngineHandleEvents } from '../handle'
 import { MockEngineProcess } from '../mock'
 import { MOCK_MODELS, MOCK_TOOLS } from '../mock-data'
+import { primeMcp } from './bridge'
+import { PrimeMcpTimeouts } from './mcp-live'
 import { FACTORY_SPEC_ID, factorySnapshot } from './mock-data'
 import { primeSpeed } from './speed'
 import { speedOffer, speedRoute } from '../../../../resources/bridge/speed-mode-core'
@@ -125,6 +128,7 @@ export class PrimeMockEngineProcess extends MockEngineProcess {
   ])
   private heartbeat: ScheduledJob | null = null
   private readonly schedules = new Map<string, ScheduledJob>()
+  private readonly mcpTimeouts = new PrimeMcpTimeouts()
   private nextJobId = 1
   private lastRefinement: NativeRecord | null = null
 
@@ -240,12 +244,15 @@ export class PrimeMockEngineProcess extends MockEngineProcess {
       }
       case 'get_system_prompt':
         return {
-          systemPrompt: [
-            '# Workspace assistant',
-            'Work toward the session goal, verify changes, and report concrete results.',
-            'Delegate independent reviews to subagents and keep their context focused.',
-            'Use the persistent Python kernel for tools, background work, and factory runs.'
-          ].join('\n\n')
+          systemPrompt: mockAssembledPrompt(
+            [
+              '# Workspace assistant',
+              'Work toward the session goal, verify changes, and report concrete results.',
+              'Delegate independent reviews to subagents and keep their context focused.'
+            ].join('\n\n'),
+            'Use the persistent Python kernel for tools, background work, and factory runs.',
+            this.args.conversationPrompt
+          )
         }
       case 'get_rlm_children':
         return { children: [...this.children.values()], eventSequence: 1 }
@@ -254,7 +261,21 @@ export class PrimeMockEngineProcess extends MockEngineProcess {
       case 'set_rlm_max_depth':
         return this.setMaxDepth(payload)
       case 'get_mcp_connections':
-        return { connections: [], services: [], credentials: [], catalogDiagnostics: [] }
+        return this.mcp.primeConnections()
+      case 'get_mcp_status':
+        return this.mcp.primeStatus()
+      case 'reconnect_mcp_server': {
+        const server = requiredText(payload.server, 'server')
+        this.mcp.act(server, 'reconnect', { settled: true })
+        const status = this.mcp.primeStatus()
+        const servers = Array.isArray(status.servers) ? status.servers : []
+        return { ...status, servers: servers.filter((entry) => record(entry).server === server) }
+      }
+      case 'remove_mcp_connection': {
+        const server = requiredText(payload.server, 'server')
+        this.mcp.act(server, 'logout')
+        return { server, removed: true }
+      }
       case 'get_resource_snapshot':
         return {
           contextFiles: [],
@@ -356,11 +377,25 @@ export class PrimeMockEngineProcess extends MockEngineProcess {
     if (request.op === 'speed') {
       return primeSpeed((type, payload) => this.nativeCommand(type, payload), request.mode)
     }
+    if (request.op === 'mcp') {
+      return primeMcp(
+        request,
+        (type, payload) => this.nativeCommand(type, payload),
+        this.mcpTimeouts
+      )
+    }
+    // Engine 2 assembles its whole prompt when the resident starts, so its view is never partial.
+    if (request.op === 'system-prompt') {
+      return { text: String((await this.nativeCommand('get_system_prompt')).systemPrompt) }
+    }
     return callBridge(this, request, bridgeTimeout(request))
   }
 
   /** Engine 2 has no bridge status; its native `service_tier_changed` event reports the tier. */
   protected override publishSpeed(): void {}
+
+  /** Engine 2 has no bridge status; the app asks for its MCP status. */
+  protected override publishMcp(): void {}
 
   /** Like Engine 2: the requested tier clamped to the current model. */
   private async activeServiceTier(): Promise<string> {

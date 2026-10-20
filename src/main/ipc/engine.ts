@@ -10,6 +10,19 @@ import {
 import { appState, engineOverridePath } from '../app-state'
 import { env } from '../env'
 import { locateEngine } from '../engine/locate'
+import {
+  appliedPrompt,
+  assertInPlaceSwitch,
+  carriedPrompt,
+  ConversationPromptOwners,
+  piSessionReplacement,
+  primeSessionReplacement,
+  savedSessionFile,
+  unwrittenPrompt,
+  withConversationPrompt,
+  type PromptSave,
+  type SessionReplacement
+} from '../engine/conversation-prompt-owner'
 import type { EngineManager } from '../engine/manager'
 import { piConfig } from '../features/settings/pi-modules'
 import { engineBackends, PI_CAPABILITIES } from '../engine/backends'
@@ -30,6 +43,11 @@ import type { EventMap } from '@shared/ipc'
 import { maskAgentInfo, resolveLaunchEnv } from '../features/launch/env-vault'
 import { trustPreflight } from '../features/launch/trust'
 import { PrimeConfigWatcher } from '../features/settings/prime-config-watcher'
+import { savesMcpSwitch, whileEngineSavesMcp } from '../features/settings/engine-mcp-saves'
+import {
+  parseConversationPrompt,
+  type ConversationPromptStore
+} from '../features/sessions/conversation-prompts'
 import { samePath } from '../paths'
 import { broadcast, handle, invokeRegistered, isRegisteredInvokeChannel, onQuit } from './handle'
 
@@ -127,8 +145,22 @@ async function dropStaleTrustPin(
   }
 }
 
+/**
+ * Save or forget a session file's instructions. What the write records already took effect, so a failed
+ * one is logged: only a later reopen of that file differs.
+ */
+async function savePrompt(
+  prompts: ConversationPromptStore,
+  save: PromptSave | undefined
+): Promise<void> {
+  if (!save) return
+  await prompts.set(save.engine, save.sessionFile, save.prompt).catch((error: unknown) => {
+    console.error('[vengeance] conversation instructions could not be saved:', error)
+  })
+}
+
 /** AgentInfo leaves main with launch env values masked (N17). */
-export function registerEngineIpc(manager: EngineManager): void {
+export function registerEngineIpc(manager: EngineManager, prompts: ConversationPromptStore): void {
   const configWatcher = new PrimeConfigWatcher(
     (event) => broadcast('settings:changed', event),
     () => [
@@ -192,26 +224,66 @@ export function registerEngineIpc(manager: EngineManager): void {
     broadcast(channel, { ...payload, engine: 'prime' } as EventMap[Channel])
   }
 
+  const owners = new ConversationPromptOwners(prompts)
+
   handle('engine:create', async (args, agentId) => {
     if (args.engine !== undefined && !isEngineId(args.engine)) {
       throw new Error('Choose a supported engine')
     }
     const engine = normalizeEngineId(args.engine)
     const resolved = resolveLaunchEnv(
-      { ...args, engine },
+      withConversationPrompt({ ...args, engine }, engine, prompts),
       appState.getPrefs(),
       runningEnvs(manager, engine)
     )
     const created = await manager.create(resolved, agentId)
+    owners.started(created, resolved.sessionPath)
     if (created.engine === 'prime') configWatcher.sync()
+    await savePrompt(prompts, carriedPrompt(created, resolved.conversationPrompt, args.sessionPath))
     return maskAgentInfo(created)
   })
-  handle('engine:command', (agentId, command) => manager.command(agentId, command))
+  /**
+   * Run a session command that can move the process to another file. A fork or clone in place keeps the
+   * process, and so its instructions, for the derived file.
+   */
+  const replaceSession = async <Result>(
+    agentId: string,
+    replacement: SessionReplacement,
+    run: () => Promise<Result>
+  ): Promise<Result> => {
+    const before = replacement ? manager.get(agentId) : undefined
+    if (before && replacement?.kind === 'switch') {
+      assertInPlaceSwitch(before, prompts, replacement.target)
+    }
+    try {
+      return await run()
+    } finally {
+      // Also after a failure: the engine may have moved before a follow-up read failed.
+      const after = before ? manager.get(agentId) : undefined
+      if (before && after) {
+        owners.replaced(after)
+        if (replacement?.kind === 'derive') {
+          await savePrompt(
+            prompts,
+            carriedPrompt(after, before.args.conversationPrompt, savedSessionFile(before))
+          )
+        }
+      }
+    }
+  }
+  handle('engine:command', (agentId, command) =>
+    replaceSession(agentId, piSessionReplacement(command), () => manager.command(agentId, command))
+  )
   handle('engine:ui-response', (agentId, response) => manager.respondUi(agentId, response))
   handle('engine:dispose', async (agentId) => {
-    const engine = manager.get(agentId)?.engine
+    const closed = manager.get(agentId)
     await manager.dispose(agentId)
-    if (engine === 'prime') configWatcher.sync()
+    owners.closed(agentId)
+    if (closed?.engine === 'prime') configWatcher.sync()
+    // Mock sessions are not files.
+    if (closed && !env.mock) {
+      await savePrompt(prompts, await unwrittenPrompt(closed, manager.list(), prompts))
+    }
   })
   handle('engine:list', () => manager.list().map(maskAgentInfo))
   handle('engine:restart', async (agentId, requested) => {
@@ -219,7 +291,13 @@ export function registerEngineIpc(manager: EngineManager): void {
     if (current && requested?.engine !== undefined && requested.engine !== current.engine) {
       throw new Error('Choose a different engine when creating a new session')
     }
-    const patch = current ? await dropStaleTrustPin(current, requested) : requested
+    let patch = current ? await dropStaleTrustPin(current, requested) : requested
+    const changesPrompt = !!patch && Object.hasOwn(patch, 'conversationPrompt')
+    if (patch && changesPrompt) {
+      patch = { ...patch, conversationPrompt: parseConversationPrompt(patch.conversationPrompt) }
+      // A change the store cannot save is refused before the restart applies it.
+      if (!current?.args.noSession) prompts.assertReadable()
+    }
     const own = current?.args.launch?.env
     const resolved =
       patch?.launch && current
@@ -229,7 +307,14 @@ export function registerEngineIpc(manager: EngineManager): void {
             [...(own ? [own] : []), ...runningEnvs(manager, current.engine)]
           )
         : patch
-    return maskAgentInfo(await manager.restart(agentId, resolved))
+    const restarted = await manager.restart(
+      agentId,
+      resolved,
+      current && !changesPrompt ? owners.instructionsFor(current) : undefined,
+      (successor) => savePrompt(prompts, appliedPrompt(successor))
+    )
+    owners.started(restarted, restarted.args.sessionPath)
+    return maskAgentInfo(restarted)
   })
   handle('engine:switch', async (agentId, args) => {
     const current = manager.get(agentId)
@@ -244,10 +329,29 @@ export function registerEngineIpc(manager: EngineManager): void {
       const trust = await trustPreflight(engineOverridePath('pi'), current.cwd)
       if (trust.needsDecision) throw new Error('Choose project trust before switching to Engine')
     }
-    const resolved = resolveLaunchEnv(args, appState.getPrefs(), runningEnvs(manager, args.engine))
-    const switched = await manager.switchEngine(agentId, resolved)
+    // The conversation keeps its instructions on the other engine, saved for its new native file.
+    const given = parseConversationPrompt(args.conversationPrompt)
+    const resolved = resolveLaunchEnv(
+      { ...args, conversationPrompt: given },
+      appState.getPrefs(),
+      runningEnvs(manager, args.engine)
+    )
+    const switched = await manager.switchEngine(
+      agentId,
+      resolved,
+      given === undefined ? owners.instructionsFor(current) : undefined
+    )
+    owners.started(switched)
     configWatcher.sync()
+    await savePrompt(prompts, carriedPrompt(switched, switched.args.conversationPrompt, undefined))
     return maskAgentInfo(switched)
+  })
+  handle('engine:conversation-prompt', (engine, sessionPath) => {
+    if (!isEngineId(engine)) throw new Error('Choose a supported engine')
+    if (typeof sessionPath !== 'string' || !isAbsolute(sessionPath)) {
+      throw new Error('Choose a saved session file')
+    }
+    return prompts.get(engine, sessionPath) ?? null
   })
   handle('engine:stderr', (agentId) => manager.stderr(agentId))
   handle('engine:info', () => engineInfo())
@@ -288,7 +392,11 @@ export function registerEngineIpc(manager: EngineManager): void {
       broadcast: broadcastPrimeSettings
     })
   })
-  handle('prime:command', (agentId, type, payload) => manager.nativeCommand(agentId, type, payload))
+  handle('prime:command', (agentId, type, payload) =>
+    replaceSession(agentId, primeSessionReplacement(type, payload), () =>
+      manager.nativeCommand(agentId, type, payload)
+    )
+  )
   handle('engine:traces', async (args) => {
     const actions = [
       'status',
@@ -326,7 +434,15 @@ export function registerEngineIpc(manager: EngineManager): void {
     if (typeof cwd !== 'string' || !isAbsolute(cwd)) throw new Error('Choose a workspace folder')
     cancelPrimeTraces(cwd)
   })
-  handle('engine:bridge', (agentId, request, options) => manager.bridge(agentId, request, options))
+  handle('engine:bridge', (agentId, request, options) => {
+    const bridge = () => manager.bridge(agentId, request, options)
+    if (manager.get(agentId)?.engine !== 'pi' || !savesMcpSwitch(request)) return bridge()
+    // The Engine saves the switch to mcp.json for a change already live in this conversation:
+    // Settings shows it, and open sessions are not offered a restart for it.
+    return whileEngineSavesMcp(bridge).finally(() =>
+      broadcast('settings:changed', { area: 'mcp', engine: 'pi', apply: 'new-sessions' })
+    )
+  })
   handle('engine:subagents-inspect', (agentId, request) =>
     manager.inspectSubagent(agentId, request)
   )

@@ -626,7 +626,10 @@ export interface SettingsEventMap {
     project?: { cwd: string; trusted: boolean }
     /** settings.json was rewritten by an install or update Vengeance ran, which announces its own change. */
     fromRun?: boolean
-    /** An explicit file save is for future sessions; applying to open work is a separate action. */
+    /**
+     * No restart is offered: an explicit file save is for future sessions (applying it to open work
+     * is a separate action), and an engine's own save of a change it made live is already applied.
+     */
     apply?: 'new-sessions'
   }
   /** The models a subscription account offers changed (main hides the rest); pickers re-read their lists. */

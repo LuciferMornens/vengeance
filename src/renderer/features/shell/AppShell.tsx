@@ -15,6 +15,7 @@ import { Button, EmptyState, Sheet, Shimmer } from '../../ui'
 import { Composer } from '../composer'
 import type { OpeningFocus } from '../composer/focus'
 import { SessionHeader, Transcript } from '../chat'
+import { ConversationPromptDialog } from '../chat/ConversationPrompt'
 import { TranscriptBoundary } from '../chat/TranscriptBoundary'
 import { restoreOpenSessions, SessionSidebar } from '../sessions'
 import { agentSessionFile } from '../sessions/model'
@@ -413,6 +414,7 @@ export function AppShell() {
           <SettingsSheet />
         </Suspense>
       </Sheet>
+      <ConversationPromptDialog />
     </div>
   )
 }

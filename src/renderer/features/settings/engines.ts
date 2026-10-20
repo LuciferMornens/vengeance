@@ -177,19 +177,6 @@ export function refreshAgents(engine?: EngineId): void {
   }
 }
 
-/** Ready agents (optionally only those offering `command`), for config actions that run in open sessions. */
-export function readyAgentIds(command?: string, engine: EngineId = 'pi'): string[] {
-  const { order, agents } = useAgents.getState()
-  return order.filter((id) => {
-    const agent = agents[id]
-    return (
-      agent?.info.engine === engine &&
-      agent.status === 'ready' &&
-      (!command || agent.commands.some((c) => c.name === command))
-    )
-  })
-}
-
 /** The open agents a config change concerns (e.g. one folder's after a trust decision) and the launch-args patch to restart them with. */
 export interface RestartScope {
   agentIds: string[]

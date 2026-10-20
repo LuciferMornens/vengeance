@@ -21,8 +21,8 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 
 `engines.lock.json` is the source of truth. Current stable bases are pi `v1.3.0` at
 `71023aec1546d6d677a65669c5665c0927ce0dd0` and Prime `v0.10.0` at
-`763094e1b6a7c17450ee8399b06cda1853847ca5`. The builds identify as `1.3.0+vengeance.2` and
-`0.10.0+vengeance.12`. Never reuse a Vengeance build version for different shipped behavior.
+`763094e1b6a7c17450ee8399b06cda1853847ca5`. The builds identify as `1.3.0+vengeance.3` and
+`0.10.0+vengeance.13`. Never reuse a Vengeance build version for different shipped behavior.
 
 The current stable-release verification and Prime patch decisions are recorded in
 [ENGINE-STABLE-AUDIT-2026-10-18.md](docs/ENGINE-STABLE-AUDIT-2026-10-18.md), with the preceding
@@ -119,7 +119,7 @@ Prime build `.12` adds temporary patch `0023` and a source-built cryptography `5
 packaged Intel macOS runtimes. The current dependency otherwise falls back to a source build on that
 platform. Keep the current cryptography security fixes rather than downgrading to an older release
 with an Intel wheel. The native upstream base and account, session and helper protocol formats are
-unchanged; the lock now lists 23 ordered Prime patches.
+unchanged; at `.12` the lock listed 23 ordered Prime patches.
 
 `prime.runtimeWheels.darwin-x64` in `engines.lock.json` pins source URLs and SHA-256 values for
 cryptography, static OpenSSL `4.0.3`, CPython `3.11.17` and every Python build dependency.
@@ -139,7 +139,7 @@ Source checkouts, upstream developer builds and other platforms retain native de
 
 Rebuild Engine 2 and its helper after changing these inputs. Requalify wheel metadata, signatures,
 architecture, minimum OS, dynamic dependencies and notices, then the actual loaded cryptography and
-OpenSSL versions in an isolated packaged kernel. Repeat the official `.10`-to-`.12` upgrade with
+OpenSSL versions in an isolated packaged kernel. Repeat the official `.10`-to-candidate upgrade with
 genuine old kernel state, no candidate bootstrap overrides, and unchanged baseline package inventory.
 Qualify the native Intel build, kernel and upgrade on Intel hardware; source checks alone do not
 establish those results. Record actual output hashes in the build and release receipts.
@@ -149,6 +149,31 @@ official Intel wheel availability, refresh the source/checksum locks, and rerun 
 `0023` when a supported upstream stable release provides equivalent verified bundled-wheel support,
 or current official Intel wheels make it unnecessary, and packaged bootstrap plus cached-kernel
 upgrade regressions pass without the patch. See the [native patch guide](patches/prime-agent/README.md).
+
+### Live MCP status
+
+pi build `.3` adds patch `0009` and Prime build `.13` adds patch `0024`, so the app can list each MCP
+server of an open conversation with its real state and reconnect one. Neither engine exposed this:
+pi kept MCP state private to its built-in extension, and Prime reported only configured and
+credential states. Both patches are additive: existing commands, `/mcp`, prompts and saved formats
+are unchanged, and the native helper keeps linking Prime's unchanged `mcp_tool_listing`.
+
+- pi `0009`: the built-in MCP extension publishes `mcp:state` on the extension event bus and answers
+  `mcp:request` (state, reconnect, enable, disable, enable or disable for the trusted project alone,
+  sign-out). Each server says where enable and disable save and, when it can, which project
+  `mcp.json` takes an override instead; the conversation panel's switch prefers that override.
+  Vengeance's bridge extension relays them as `/vengeance-mcp`. With the built-in replaced by
+  pi-mcp-adapter, the bridge only relays the adapter's own `pi-mcp-adapter/status/v1` snapshot: the
+  adapter takes no bus requests, so the app sends its `/mcp` and `/mcp-auth` subcommands to the
+  conversation as prompts.
+- Prime `0024`: `get_mcp_status` (read-only, session plane, never starts a kernel) and
+  `reconnect_mcp_server` (session plane) answer from the session's kernel; the kernel's
+  `mcp_status` frame takes an optional `reload` list.
+
+Qualify on every base: the native MCP suites named in each patch guide, `scripts/checks/mcp-status.check.ts`,
+the `mcp-status` shots, `scripts/qa/ext/mcp.qa.mjs` against the real Engine and
+`scripts/qa/engines/mcp-live.qa.mjs` against the real Engine 2. Retire each patch when its upstream
+offers an equivalent host-facing interface and the app moves to it.
 
 ## Platforms
 
@@ -221,8 +246,9 @@ detect the previous main-executable child behavior before the corrected helper p
 Inspect the desktop captures as well as the OS observations; page screenshots cannot prove that
 background activity stays out of the Dock. The main Vengeance app must remain a regular application.
 
-For 0.3.3, the macOS arm64/x64 and Linux arm64/x64 release runners then qualify the official
-same-platform 0.3.2 Engine 2 package (`0.10.0+vengeance.10`) against the final packaged `.12` candidate.
+Since 0.3.3, the macOS arm64/x64 and Linux arm64/x64 release runners then qualify the official
+same-platform 0.3.2 Engine 2 package (`0.10.0+vengeance.10`) against the final packaged candidate
+(`.12` in 0.3.3, `.13` in 0.3.4).
 `scripts/qa/engines/release-baseline.mjs` pins both the public release's `SHA256SUMS` and each archive's
 SHA-256, verifies the complete extracted native inventories and macOS app signature, and emits
 `release-baseline.json` plus `release-baseline-env.json`. It never launches the production app.
@@ -234,9 +260,10 @@ candidate and actually loaded packaged resources. Retain both the loader and sui
 
 This upgrade group follows the nine core suites and macOS visibility gate, before navigation
 benchmarking. Windows's `.10` to `.11` native transition is covered by the retained PR qualification
-report; that historical evidence does not qualify `.12`. The Intel wheel patch changes no Windows
-dependency resolution. pi is `1.3.0+vengeance.2` in both 0.3.2 and 0.3.3. Its historical 1.2 to 1.3
-transition fixture is not used as this release's upgrade gate.
+report; that historical evidence does not qualify `.12` or later builds. The Intel wheel patch
+changes no Windows dependency resolution. pi is `1.3.0+vengeance.2` in 0.3.2 and 0.3.3 and
+`1.3.0+vengeance.3` in 0.3.4, all on the `v1.3.0` base. Its historical 1.2 to 1.3 transition fixture
+is not used as a release upgrade gate.
 
 Each of the five release runners then runs
 `node scripts/perf/first-navigation.mjs --label release-<platform> --runs 3` against the completed
@@ -400,6 +427,8 @@ sign-in testing only with explicit user authorization; report coverage gaps rath
 | Model/reasoning changes and restart notices                         | `scripts/qa/engines/restart-notices.qa.mjs`, `scripts/qa/engines/candidate-controls.qa.mjs`                                                                        |
 | Active-work restart refusal and deferred restart admission          | `scripts/checks/engine-restart.check.ts`, `scripts/qa/engines/restart-safety.qa.mjs`                                                                               |
 | Native prompt inspection, scoped edits and explicit application     | `scripts/qa/settings/system-prompts.qa.mjs`, `scripts/shots/system-prompts.mjs`; helper `system_prompt` tests                                                      |
+| Conversation instructions: composition, store and restart lifecycle | `scripts/checks/conversation-prompt.check.ts`, `scripts/shots/conversation-prompt.mjs`, `scripts/qa/settings/system-prompts.qa.mjs`                                |
+| Live MCP status and per-server reconnect in open conversations      | `scripts/qa/ext/mcp.qa.mjs`, `scripts/qa/engines/mcp-live.qa.mjs`, `scripts/checks/mcp-status.check.ts`; native suites of pi `0009` and Prime `0024`               |
 | Parent/child model isolation and concurrent settings preservation   | `scripts/qa/engines/model-isolation.qa.mjs`; native `model_isolation`, settings persistence and `settings_mcp_save` regressions                                    |
 | Image capabilities, live model switches and tool/image delivery     | `scripts/qa/engines/image-capabilities.qa.mjs`; native model-switch and prompt regressions                                                                         |
 | Response speed, subscription entitlement and native tier transport  | `scripts/qa/engines/speed-mode-engine2.qa.mjs`, `speed-mode.qa.mjs`, `speed-mode-subscriptions.qa.mjs`; native `service_tiers` and `service_tiers_transport` tests |

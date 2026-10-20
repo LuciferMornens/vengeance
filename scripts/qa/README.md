@@ -378,6 +378,15 @@ GPT 6.1 Sol descriptor and a local provider URL override. It checks native sessi
 model switches in both directions, generated prompts, kernel `model.info`, `attach_image` bytes,
 composer warnings, pasted-image transport and vision startup. No real account or paid request is used.
 
+`node scripts/qa/engines/mcp-live.qa.mjs` checks Engine 2's live MCP status with the stdio fixture
+server (`ext/fixtures/qa-mcp-server.mjs`) in the temporary account's `mcpServers`. A file in place of
+the kernel venv's parent holds the prewarmed kernel off, so the composer chip deterministically reports
+configured-only states first. A Python tool call then starts the kernel; the suite checks connected
+with the tool count, Reconnect from the chip and from Settings → MCP (each a new server process), and
+a second conversation's own kernel. That conversation also runs the fixture with `--hang`, a server
+that never answers: it reads as failed with the reason and keeps Reconnect. Engine 2 starts servers
+with a cleared environment, so the fixture also takes its start log as `--log=<file>`.
+
 `node scripts/qa/engines/model-isolation.qa.mjs` checks that sibling defaults and a differently
 configured native child cannot change the parent's GPT 6.1 Sol / Max / Fast request identity.
 It also verifies saved identity/history after restart and preservation of an unfamiliar settings key.
@@ -490,9 +499,10 @@ This needs a macOS desktop. CI uses
 
 ### Official release upgrades
 
-For 0.3.3, both macOS and both Linux architectures qualify official 0.3.2 Engine 2 `.10` to the final
-packaged `.12`. With the same absolute `QA_PACKAGED_EXE` and outside-home/repository `QA_TMP_ROOT`
-exported, run after core qualification and the macOS visibility check:
+Since 0.3.3, both macOS and both Linux architectures qualify official 0.3.2 Engine 2 `.10` to the final
+packaged candidate (`.12` in 0.3.3, `.13` in 0.3.4). With the same absolute `QA_PACKAGED_EXE` and
+outside-home/repository `QA_TMP_ROOT` exported, run after core qualification and the macOS
+visibility check:
 
 ```sh
 QA_REPORT_DIR="$PWD/.shots/qa/release-baseline" \
@@ -523,9 +533,9 @@ integration always tests fresh candidate bootstrap, without baseline provisionin
 The upgrade group runs candidate-transition and resident-upgrade serially against the packaged QA
 candidate and uses the same receipts, deadlines and report layout as core. CI uses
 `$RUNNER_TEMP/release-baseline` and `$RUNNER_TEMP/engine-upgrade`. Windows's native `.10` to `.11`
-transition has retained PR evidence that predates `.12`; this candidate needs fresh qualification.
-Pi's `.2` build is unchanged between these app releases, so the
-historical pi 1.2 to 1.3 transition fixture is not this release's gate.
+transition has retained PR evidence that predates `.12`; each later candidate needs fresh
+qualification. Pi keeps its `v1.3.0` base (`.2` in 0.3.2 and 0.3.3, `.3` in 0.3.4), so the
+historical pi 1.2 to 1.3 transition fixture is not a release gate.
 
 ### Built-app navigation benchmark
 

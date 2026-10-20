@@ -34,6 +34,7 @@ import { invoke } from '../../lib/ipc'
 import { shortcutText } from '../../lib/keybindings'
 import { useAgents } from '../../store/agents'
 import { toast } from '../../ui'
+import { openConversationPrompt } from '../chat/ConversationPrompt'
 import { openSettingsSection, revealSetting } from '../palette/settings-sections'
 import { engineDescriptor, supportsEngineCommand } from '../engines/registry'
 import { openPalette, openShortcutsSheet } from '../palette/store'
@@ -198,6 +199,13 @@ export const BUILTIN_COMMANDS: BuiltinCommand[] = [
     description: 'Duplicate the session at its current position',
     icon: CopyPlus,
     run: action('session.clone', 'Clone')
+  },
+  {
+    name: 'instructions',
+    args: '[text]',
+    description: 'Give this conversation its own instructions',
+    icon: ScrollText,
+    run: (id, args) => openConversationPrompt(id, args || undefined)
   },
   {
     name: 'compact',

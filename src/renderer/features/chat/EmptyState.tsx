@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { motion } from 'motion/react'
 import { Bug, Compass, FlaskConical, Folder, Gauge, History } from 'lucide-react'
+import { normalizeEngineId, type EngineId } from '@shared/api/engine'
 import type { SessionListItem } from '@shared/api/sessions'
 import { rpc } from '../../lib/engine'
 import { basename, formatRelativeTime } from '../../lib/format'
@@ -9,7 +10,7 @@ import { samePath } from '../../lib/paths'
 import { fadeUp, stagger } from '../../lib/motion'
 import { useAgents } from '../../store/agents'
 import { Mark, toast } from '../../ui'
-import { activateAgent } from '../sessions'
+import { activateAgent, openSessionFile } from '../sessions'
 import { findAgentForFile } from '../sessions/actions'
 import { itemTitle } from '../sessions/model'
 
@@ -51,13 +52,16 @@ function suggestionsFor(project: string): Suggestion[] {
 
 const RECENT_LIMIT = 4
 
-/** The workspace's latest sessions with messages (`sessions:list`, the session browser's source). */
-function useRecentSessions(cwd: string): SessionListItem[] {
+/**
+ * The workspace's latest sessions of this engine with messages (`sessions:list`, the session browser's
+ * source): an in-place switch only opens the engine's own session files.
+ */
+function useRecentSessions(cwd: string, engine: EngineId): SessionListItem[] {
   const [sessions, setSessions] = useState<SessionListItem[]>([])
   useEffect(() => {
     let alive = true
     if (!cwd) return
-    invoke('sessions:list', { cwd })
+    invoke('sessions:list', { cwd, engine })
       .then(({ sessions: list }) => {
         if (!alive) return
         const recent = list
@@ -70,18 +74,28 @@ function useRecentSessions(cwd: string): SessionListItem[] {
     return () => {
       alive = false
     }
-  }, [cwd])
+  }, [cwd, engine])
   return sessions
 }
 
 /**
  * One engine per session file: focus the agent that already has it open; otherwise this empty session
- * becomes it (switch_session in place, no extra engine).
+ * becomes it (switch_session in place, no extra engine). Conversation instructions are launch flags of
+ * the process started with them, so when this session or the recent one has its own, the recent session
+ * opens in its own agent instead.
  */
 async function openRecent(agentId: string, session: SessionListItem): Promise<void> {
-  const open = findAgentForFile(session.path)
+  const open = findAgentForFile(session.path, session.engine)
   if (open) return activateAgent(open)
   try {
+    const engine = normalizeEngineId(session.engine)
+    const own =
+      !!useAgents.getState().agents[agentId]?.info.args.conversationPrompt ||
+      !!(await invoke('engine:conversation-prompt', engine, session.path))
+    if (own) {
+      await openSessionFile(session.path, { cwd: session.cwd || undefined, engine })
+      return
+    }
     const result = await rpc(agentId, { type: 'switch_session', sessionPath: session.path })
     if (!result.cancelled) await useAgents.getState().refresh(agentId)
   } catch (error) {
@@ -92,9 +106,10 @@ async function openRecent(agentId: string, session: SessionListItem): Promise<vo
 /** Calm hero for a session without messages: mark, workspace, suggested prompts, recent sessions. */
 export function SessionEmptyState({ agentId }: { agentId: string }) {
   const cwd = useAgents((s) => s.agents[agentId]?.info.cwd ?? '')
+  const engine = useAgents((s) => s.agents[agentId]?.info.engine ?? 'pi')
   const ready = useAgents((s) => s.agents[agentId]?.status === 'ready')
   const project = basename(cwd)
-  const recent = useRecentSessions(cwd)
+  const recent = useRecentSessions(cwd, engine)
   const send = (text: string) => void useAgents.getState().prompt(agentId, text).catch((error: Error) => toast({ level: 'error', title: 'Could not send', description: error.message }))
 
   return (

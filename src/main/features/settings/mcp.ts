@@ -138,7 +138,8 @@ const MOCK_STATUS: Record<string, Omit<McpServerStatus, 'name'>> = {
     tools: ['search_code', 'get_issue', 'create_pull_request', 'list_commits'],
     resources: 3
   },
-  sentry: { state: 'needs-auth', tools: [], error: 'The server requires sign-in.' }
+  sentry: { state: 'needs-auth', tools: [], error: 'The server requires sign-in.' },
+  linear: { state: 'failed', tools: [], error: 'MCP error -32000: Connection closed' }
 }
 
 /** `pi mcp list --json`: connects to every enabled server and reports its state. */

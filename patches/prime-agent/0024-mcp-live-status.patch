@@ -1,0 +1,1434 @@
+diff --git a/crates/pa-core/README.md b/crates/pa-core/README.md
+index 5b3d0d8..72a8308 100644
+--- a/crates/pa-core/README.md
++++ b/crates/pa-core/README.md
+@@ -74,7 +74,7 @@ only: nothing wires it to a user-facing cloud toggle yet.
+ No provider HTTP (pa-ai), no loop policy (pa-agent), no daemon supervision (pa-daemon), no TUI (pa-tui). No update coordination (the pa-cli coordinator owns the FSM; the update-flow seam here is the daemon-free support layer: `update::version` (semver/channel policy), `update::install` (the managed install-root layout), `update::release` (the channel manifest fetch), `update::download` (sha256-verified archive download + staging)). The package manager installs sources and resolves resource paths only. No workspace snapshot upload, transport, or remote materialization (staging and verification live here; the cloud attach surface owns the transport when it ships).
+ 
+ ## Public API
+-`SessionEngine` (message in -> events out), `export_html` (the HTML exporter plus its renderer seam: `tools_section`, `pre_render_custom_tools` + `ToolHtmlRenderer`/`RenderedToolHtml`/`RenderedToolResult`, and `ansi_to_html::ansi_lines_to_html`/`tool_render::trim_rendered_result_lines` for renderer implementers), `ToolRegistry`, kernel manager, settings (`SettingsManager`), packages (`packages::PackageManager` + source types), `platform` (process control, file locking, permissions, shell selection - usable by higher crates, e.g. pa-cli's detached spawn), `session_engine::rlm_host::RlmSubagentHost` (implemented by pa-daemon for supervisor-backed children; the default is no children), `session_engine::semantic_edges` (the TS `semantic-edges.ts` WRITER: `SemanticEdgeRecorder`/`SemanticEdgeIdentity`, `semantic_edge_ledger_path` + `last_committed_request_id`, and the `X-ACP-Model-Request-ID`/`Idempotency-Key` constants — one durable per-session ledger of model-request events, byte-compatible with the TS lines; the fold and any publishing stay downstream), `mcp::McpManager` (the session's host-side MCP manager, exposed as `SessionEngine.mcp_manager`: auth gating for built-in integrations, the `mcpServers` setting seam, and the `mcp.*` host-request handlers - `mcp.config`/`mcp.refresh`/optional `mcp.begin_login` - the kernel's generic MCP client resolves through), `mcp::McpManager::connection_roster` + `mcp::McpConnectionEntry` (the `/mcp` view's roster: every resolved integration with its connected state, display kind, transport, and generic-listable flag), `mcp::McpManager::service_catalog_views` + `service_catalog_diagnostics` (the `/mcp` view's resolved service-catalog cards and their diagnostics, answered from local state - the TS `buildServiceCatalogViews` parity; the picker never round-trips the kernel), `mcp::McpManager::api_key_credential_views` + `mcp::API_KEY_CREDENTIALS`/`McpCredentialView` (the `/mcp` view's api-key credential rows - the stored keys the surface manages alongside the connections, e.g. the web-search key - configured from the shared auth store), `models` (the registry and resolver, plus `models::order_for_picker`: the picker-catalog order the composition root applies to its snapshot), `session_engine::provider_adapter` (`switchable_stream_fn`/`ProviderTarget`: the live provider-target slot a host swaps on `set_model`; the adapter bridges the loop's abort into pa-ai's `StreamOptions::signal` cancellation token, so a turn abort cancels the in-flight HTTP fetch at the transport — closed by `ModelStream::close` and the stream's drop), `session_engine::ipython_state` (the post-compaction `ipython_state` kernel-persistence notice: the `CompactionKernelProbe` view of the kernel provisioner the engine wiring binds via `AgentSession::set_kernel_state_probe`, and the notice row that rides `CompactRun` for the surfaces to broadcast). `session_engine::session_commands` (the `/compact`/`/refine`/`/goal`/`/autonomous` executor: the durable echo/result rows with their persistence order - the echo ahead of the command so its own work sees it - the compaction/refinement/goal/autonomous arms, and the post-execution live-context rebuild that keeps the rows in the agent state; hosts own the wire surface), `session_engine::auto_refine_trigger` (the compact-trigger auto-refine machine on `AgentSession`: the arm/discard/increment accessors and `consume_compact_auto_refine`, the shared gate/review/stamp sequence every scheduling surface applies - TS `_compactAutoRefinePending`/`_lastAutoRefineReviewAt`/`_assistantTurnsSinceAutoRefine` plus `_maybeAutoRefine`'s compact arm, the serialized checkpoint's compact step, and dispose's serialized drain, with the surface parameter carrying the one behavioral difference between a boundary and a disposal). `session_engine::goal_boundary` (the goal arms of the natural turn end on `SessionEngine`: the `--goal` construction seed with its next-turn context row - TS `_pendingNextTurnMessages` on `AgentSession` - the usage accounting, the budget-limit steer mint, the natural continuation mint with its slot rollback, and the terminal-error finish; the transports - the print driver's in-loop hook, the ACP settle loop, the daemon worker's queue - drive the one goal driver through these methods). `SessionEngine::expand_skill_submission` + `AgentSession`'s prompt-path expansion (the `/skill:<name>` submission seam, TS `_expandSkillCommand`: `skills::expand_skill_command` builds the `<skill ...>` block over the shared `pa_types::skill_blocks` parse, the accepted-turn row and the admitted user message agree on the expanded text, and the `skill_use_count` session counter counts at the admission). `workspace_snapshot` (`create_workspace_snapshot`: bounded, secret/nested-repo/submodule/symlink-ancestor-excluding capture of a git worktree into an owner-private staging directory, with the caller-chosen `BaselineMode` (HEAD-tree content verified against HEAD's object ids, or explicit external) and a `ConcurrentMutation` error when the worktree changes under the capture; `verify_workspace_snapshot`: offline manifest/blob/baseline integrity check; the `SnapshotManifest`/`WorkspaceSnapshot`/`SnapshotLimits`/`BaselineMode`/`SnapshotError` types). All subsystem internals `pub(crate)`; the engine is the only facade - subsystems must not import each other directly (the package manager consumes the public settings API only).
++`SessionEngine` (message in -> events out), `export_html` (the HTML exporter plus its renderer seam: `tools_section`, `pre_render_custom_tools` + `ToolHtmlRenderer`/`RenderedToolHtml`/`RenderedToolResult`, and `ansi_to_html::ansi_lines_to_html`/`tool_render::trim_rendered_result_lines` for renderer implementers), `ToolRegistry`, kernel manager, settings (`SettingsManager`), packages (`packages::PackageManager` + source types), `platform` (process control, file locking, permissions, shell selection - usable by higher crates, e.g. pa-cli's detached spawn), `session_engine::rlm_host::RlmSubagentHost` (implemented by pa-daemon for supervisor-backed children; the default is no children), `session_engine::semantic_edges` (the TS `semantic-edges.ts` WRITER: `SemanticEdgeRecorder`/`SemanticEdgeIdentity`, `semantic_edge_ledger_path` + `last_committed_request_id`, and the `X-ACP-Model-Request-ID`/`Idempotency-Key` constants — one durable per-session ledger of model-request events, byte-compatible with the TS lines; the fold and any publishing stay downstream), `mcp::McpManager` (the session's host-side MCP manager, exposed as `SessionEngine.mcp_manager`: auth gating for built-in integrations, the `mcpServers` setting seam, and the `mcp.*` host-request handlers - `mcp.config`/`mcp.refresh`/optional `mcp.begin_login` - the kernel's generic MCP client resolves through), `mcp::McpManager::connection_roster` + `mcp::McpConnectionEntry` (the `/mcp` view's roster: every resolved integration with its connected state, display kind, transport, and generic-listable flag), `session_engine::mcp_status::{McpStatusServers, McpLiveStatus}` + `SessionEngine::{mcp_status, reconnect_mcp_server}` (the live MCP status lane over the session's running kernel: each enabled generic server's tools or error, and the per-server reconnect that closes and relists the kernel connection; never boots a kernel), `mcp::McpManager::service_catalog_views` + `service_catalog_diagnostics` (the `/mcp` view's resolved service-catalog cards and their diagnostics, answered from local state - the TS `buildServiceCatalogViews` parity; the picker never round-trips the kernel), `mcp::McpManager::api_key_credential_views` + `mcp::API_KEY_CREDENTIALS`/`McpCredentialView` (the `/mcp` view's api-key credential rows - the stored keys the surface manages alongside the connections, e.g. the web-search key - configured from the shared auth store), `models` (the registry and resolver, plus `models::order_for_picker`: the picker-catalog order the composition root applies to its snapshot), `session_engine::provider_adapter` (`switchable_stream_fn`/`ProviderTarget`: the live provider-target slot a host swaps on `set_model`; the adapter bridges the loop's abort into pa-ai's `StreamOptions::signal` cancellation token, so a turn abort cancels the in-flight HTTP fetch at the transport — closed by `ModelStream::close` and the stream's drop), `session_engine::ipython_state` (the post-compaction `ipython_state` kernel-persistence notice: the `CompactionKernelProbe` view of the kernel provisioner the engine wiring binds via `AgentSession::set_kernel_state_probe`, and the notice row that rides `CompactRun` for the surfaces to broadcast). `session_engine::session_commands` (the `/compact`/`/refine`/`/goal`/`/autonomous` executor: the durable echo/result rows with their persistence order - the echo ahead of the command so its own work sees it - the compaction/refinement/goal/autonomous arms, and the post-execution live-context rebuild that keeps the rows in the agent state; hosts own the wire surface), `session_engine::auto_refine_trigger` (the compact-trigger auto-refine machine on `AgentSession`: the arm/discard/increment accessors and `consume_compact_auto_refine`, the shared gate/review/stamp sequence every scheduling surface applies - TS `_compactAutoRefinePending`/`_lastAutoRefineReviewAt`/`_assistantTurnsSinceAutoRefine` plus `_maybeAutoRefine`'s compact arm, the serialized checkpoint's compact step, and dispose's serialized drain, with the surface parameter carrying the one behavioral difference between a boundary and a disposal). `session_engine::goal_boundary` (the goal arms of the natural turn end on `SessionEngine`: the `--goal` construction seed with its next-turn context row - TS `_pendingNextTurnMessages` on `AgentSession` - the usage accounting, the budget-limit steer mint, the natural continuation mint with its slot rollback, and the terminal-error finish; the transports - the print driver's in-loop hook, the ACP settle loop, the daemon worker's queue - drive the one goal driver through these methods). `SessionEngine::expand_skill_submission` + `AgentSession`'s prompt-path expansion (the `/skill:<name>` submission seam, TS `_expandSkillCommand`: `skills::expand_skill_command` builds the `<skill ...>` block over the shared `pa_types::skill_blocks` parse, the accepted-turn row and the admitted user message agree on the expanded text, and the `skill_use_count` session counter counts at the admission). `workspace_snapshot` (`create_workspace_snapshot`: bounded, secret/nested-repo/submodule/symlink-ancestor-excluding capture of a git worktree into an owner-private staging directory, with the caller-chosen `BaselineMode` (HEAD-tree content verified against HEAD's object ids, or explicit external) and a `ConcurrentMutation` error when the worktree changes under the capture; `verify_workspace_snapshot`: offline manifest/blob/baseline integrity check; the `SnapshotManifest`/`WorkspaceSnapshot`/`SnapshotLimits`/`BaselineMode`/`SnapshotError` types). All subsystem internals `pub(crate)`; the engine is the only facade - subsystems must not import each other directly (the package manager consumes the public settings API only).
+ 
+ ## Depends on
+ pa-types, pa-ai, pa-agent (one-way).
+diff --git a/crates/pa-core/src/kernel/manager/mod.rs b/crates/pa-core/src/kernel/manager/mod.rs
+index 5d798d9..b6bac12 100644
+--- a/crates/pa-core/src/kernel/manager/mod.rs
++++ b/crates/pa-core/src/kernel/manager/mod.rs
+@@ -46,6 +46,10 @@ const REPAIR_STEP_TIMEOUT_MS: u64 = 30_000;
+ /// inside the bound, and a wedged reply errors instead of hanging the
+ /// caller.
+ const MCP_STATUS_SETTLE_MARGIN_MS: u64 = 5_000;
++/// The settle bound one reloaded server adds to an MCP status listing: the
++/// runtime closes the open connection before listing it again, bounded by
++/// its own close timeout (`mcp.reload`'s 2.5s shutdown bound plus margin).
++const MCP_STATUS_RELOAD_SETTLE_MS: u64 = 3_500;
+ /// Largest legit frame is an attachment display event, base64 capped at
+ /// `MAX_ATTACHMENT_DATA_CHARS`; a longer line is corruption the protocol repair owns.
+ const MAX_PROTOCOL_LINE_BYTES: usize = 32 * 1024 * 1024;
+@@ -860,7 +864,7 @@ impl ReplKernelManager {
+     /// bound it with their own deadline.
+     ///
+     /// The request rides the dedicated MCP status lane (the eager
+-    /// background settle and the connections view are its callers): the
++    /// background settle and the live MCP status view are its callers): the
+     /// done event settles by request id, so the listing NEVER occupies
+     /// the manager's execution queue — a slow or unreachable server
+     /// would otherwise park the user's first python cell behind its
+@@ -873,54 +877,92 @@ impl ReplKernelManager {
+         servers: &[String],
+         per_server_timeout_ms: u64,
+     ) -> Option<Vec<Value>> {
++        self.mcp_status_listing(servers, per_server_timeout_ms, &[])
++            .await
++            .ok()
++    }
++
++    /// [`Self::mcp_tool_listing`] with a reconnect and the failure reason:
++    /// the runtime first reloads (closes) the open connection of every
++    /// `reload` server, so the listing reopens it and reports what the
++    /// server offers now rather than the cached connection's tools — the
++    /// only way a dead-but-open connection surfaces. Each reloaded server
++    /// extends the settle bound by the runtime's close bound; a reload
++    /// queued behind a running call on the same server can still outlast
++    /// it. Rides the same dedicated lane, never the execution queue.
++    ///
++    /// # Errors
++    ///
++    /// Returns an error when the kernel is not running, the request cannot
++    /// be written, the listing does not settle inside its bound, or the
++    /// runtime fails the request.
++    pub async fn mcp_status_listing(
++        &self,
++        servers: &[String],
++        per_server_timeout_ms: u64,
++        reload: &[String],
++    ) -> anyhow::Result<Vec<Value>> {
+         if !self.is_running() {
+-            return None;
++            return Err(anyhow!("Kernel is not running"));
+         }
+-        if servers.is_empty() {
+-            return Some(Vec::new());
++        if servers.is_empty() && reload.is_empty() {
++            return Ok(Vec::new());
+         }
+         let request_id = uuid::Uuid::new_v4().to_string();
+         let (tx, rx) = oneshot::channel();
+         lock(&self.inner.guarded)
+             .mcp_status_waiters
+             .insert(request_id.clone(), tx);
+-        let frame = json!({
++        let mut frame = json!({
+             "type": "mcp_status",
+             "id": request_id,
+             "servers": servers,
+             "timeout_ms": per_server_timeout_ms,
+         });
++        // Only a reconnect carries the field: a plain listing keeps the
++        // frame every runtime version serves.
++        if !reload.is_empty() {
++            frame["reload"] = json!(reload);
++        }
+         if let Err(error) = self.inner.write_line(&frame).await {
+             lock(&self.inner.guarded)
+                 .mcp_status_waiters
+                 .remove(&request_id);
+             self.inner
+                 .append_diagnostic(&format!("mcp tool listing error: {error:#}"));
+-            return None;
++            return Err(error);
+         }
+         // The kernel lists every server concurrently, each bounded by the
+         // per-server timeout, so the settle bound is one timeout plus the
+-        // serve work's margin — a wedged reply never hangs the caller.
+-        let bound_ms = per_server_timeout_ms.saturating_add(MCP_STATUS_SETTLE_MARGIN_MS);
++        // serve work's margin (plus the sequential reloads before it) — a
++        // wedged reply never hangs the caller.
++        let bound_ms = per_server_timeout_ms
++            .saturating_add(MCP_STATUS_SETTLE_MARGIN_MS)
++            .saturating_add(MCP_STATUS_RELOAD_SETTLE_MS.saturating_mul(reload.len() as u64));
+         let Ok(Ok(fields)) = tokio::time::timeout(Duration::from_millis(bound_ms), rx).await else {
+             lock(&self.inner.guarded)
+                 .mcp_status_waiters
+                 .remove(&request_id);
+             self.inner
+                 .append_diagnostic("mcp tool listing did not settle inside the per-server bound");
+-            return None;
++            return Err(anyhow!("MCP status listing did not settle"));
+         };
+         match fields.get("status").and_then(Value::as_str) {
+             Some("ok") => {
+                 let connections = fields.get("connections").and_then(Value::as_array).cloned();
+-                Some(connections.unwrap_or_default())
++                Ok(connections.unwrap_or_default())
+             }
+             status => {
+-                self.inner.append_diagnostic(&format!(
+-                    "mcp tool listing failed: {}",
+-                    status.unwrap_or("unset status")
+-                ));
+-                None
++                // The runtime's error done names the cause ("ExcType:
++                // message"); a runtime without it reports the bare status.
++                let cause = fields
++                    .get("reason")
++                    .and_then(Value::as_str)
++                    .or(status)
++                    .unwrap_or("unset status");
++                self.inner
++                    .append_diagnostic(&format!("mcp tool listing failed: {cause}"));
++                Err(anyhow!("MCP status listing failed: {cause}"))
+             }
+         }
+     }
+diff --git a/crates/pa-core/src/session_engine/engine.rs b/crates/pa-core/src/session_engine/engine.rs
+index 9a9e484..916be68 100644
+--- a/crates/pa-core/src/session_engine/engine.rs
++++ b/crates/pa-core/src/session_engine/engine.rs
+@@ -127,6 +127,10 @@ pub struct SessionEngine {
+     /// loops the graph and keeps a dropped session's kernel process alive
+     /// until the process exits.
+     pub(crate) provisioner: std::sync::Arc<crate::kernel::provisioner::IpythonKernelProvisioner>,
++    /// The generic MCP servers this session enabled: the list the system
++    /// prompt announces and the background settle opens, and the scope of
++    /// the live MCP status lane ([`SessionEngine::mcp_status`]).
++    pub(crate) generic_mcp_servers: Vec<String>,
+ }
+ 
+ /// Skill overrides for built-in integrations the user is not logged into,
+@@ -489,7 +493,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
+             // A spawned child's prompt must read "depth: N (not root)" with
+             // the child-agent reply doctrine, never the root identity.
+             rlm_depth: config.rlm_depth,
+-            generic_mcp_servers,
++            generic_mcp_servers: generic_mcp_servers.clone(),
+             append_system_prompt: Some(resources.append_system_prompt.join("\n\n")),
+             ..Default::default()
+         },
+@@ -776,6 +780,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
+         rlm_usage: wiring.rlm_usage,
+         factory_host,
+         provisioner,
++        generic_mcp_servers,
+     })
+ }
+ 
+diff --git a/crates/pa-core/src/session_engine/mcp_status.rs b/crates/pa-core/src/session_engine/mcp_status.rs
+new file mode 100644
+index 0000000..a5efc8e
+--- /dev/null
++++ b/crates/pa-core/src/session_engine/mcp_status.rs
+@@ -0,0 +1,210 @@
++//! The live MCP status lane: what each of the session's generic MCP
++//! servers offers right now, read from the session's running kernel (the
++//! runtime's `mcp_status` listing), plus the per-server reconnect. The
++//! `/mcp` connections roster derives its state from settings and stored
++//! credentials; only the kernel holds the open connections, so only this
++//! lane can tell a working server from a configured one. Neither call
++//! ever boots an idle kernel.
++
++use serde_json::{json, Value};
++
++use super::engine::SessionEngine;
++use crate::kernel::manager::ReplKernelManager;
++
++/// Which servers a live MCP status listing covers.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub enum McpStatusServers {
++    /// Every generic server the session enabled.
++    Enabled,
++    /// Exactly these names, in order; a name the session did not enable
++    /// reports the not-enabled error without a kernel round-trip.
++    Named(Vec<String>),
++}
++
++/// One live MCP listing of a session's kernel: `servers` carries one
++/// `{server, tools: [{name, description}] | null, error: string | null}`
++/// entry per listed server.
++#[derive(Debug, Clone, PartialEq)]
++pub struct McpLiveStatus {
++    /// `false` when the session has no running kernel: nothing was listed
++    /// and nothing was started.
++    pub kernel_running: bool,
++    pub servers: Vec<Value>,
++}
++
++impl McpLiveStatus {
++    /// The listing of a session without a running kernel.
++    #[must_use]
++    pub fn kernel_not_running() -> Self {
++        Self {
++            kernel_running: false,
++            servers: Vec::new(),
++        }
++    }
++}
++
++fn not_enabled_message(server: &str) -> String {
++    format!("MCP server {server} is not enabled in this session")
++}
++
++impl SessionEngine {
++    /// List MCP servers against this session's running kernel: each
++    /// server's live tools or its error. The runtime opens a server that is
++    /// not open yet, bounded by `per_server_timeout_ms`; an open connection
++    /// reports its cached tools ([`Self::reconnect_mcp_server`] re-checks it).
++    ///
++    /// # Errors
++    ///
++    /// Returns an error when the kernel listing fails or does not settle.
++    pub async fn mcp_status(
++        &self,
++        servers: McpStatusServers,
++        per_server_timeout_ms: u64,
++    ) -> anyhow::Result<McpLiveStatus> {
++        let Some(manager) = self
++            .provisioner
++            .manager()
++            .filter(ReplKernelManager::is_running)
++        else {
++            return Ok(McpLiveStatus::kernel_not_running());
++        };
++        let requested = match servers {
++            McpStatusServers::Enabled => self.generic_mcp_servers.clone(),
++            McpStatusServers::Named(names) => names,
++        };
++        let listed: Vec<String> = requested
++            .iter()
++            .filter(|server| self.generic_mcp_servers.contains(server))
++            .cloned()
++            .collect();
++        // The runtime answers one entry per listed server, in request order.
++        let mut listing = manager
++            .mcp_status_listing(&listed, per_server_timeout_ms, &[])
++            .await?
++            .into_iter();
++        let servers = requested
++            .iter()
++            .filter_map(|server| {
++                if self.generic_mcp_servers.contains(server) {
++                    listing.next()
++                } else {
++                    Some(json!({
++                        "server": server,
++                        "tools": null,
++                        "error": not_enabled_message(server),
++                    }))
++                }
++            })
++            .collect();
++        Ok(McpLiveStatus {
++            kernel_running: true,
++            servers,
++        })
++    }
++
++    /// Reconnect one of the session's generic MCP servers: the kernel
++    /// closes the server's open connection and lists it again, so a dead
++    /// connection reopens or reports why it cannot. The listing carries
++    /// exactly that server's entry. Without a running kernel there is no
++    /// connection to reconnect, whatever the name: the answer is
++    /// [`McpLiveStatus::kernel_not_running`].
++    ///
++    /// # Errors
++    ///
++    /// Returns an error when the kernel is running and `server` is not one
++    /// of the session's enabled generic servers, or the kernel reload or
++    /// listing fails or does not settle.
++    pub async fn reconnect_mcp_server(
++        &self,
++        server: &str,
++        per_server_timeout_ms: u64,
++    ) -> anyhow::Result<McpLiveStatus> {
++        let Some(manager) = self
++            .provisioner
++            .manager()
++            .filter(ReplKernelManager::is_running)
++        else {
++            return Ok(McpLiveStatus::kernel_not_running());
++        };
++        if !self
++            .generic_mcp_servers
++            .iter()
++            .any(|enabled| enabled == server)
++        {
++            return Err(anyhow::anyhow!(not_enabled_message(server)));
++        }
++        let server = [server.to_string()];
++        let servers = manager
++            .mcp_status_listing(&server, per_server_timeout_ms, &server)
++            .await?;
++        Ok(McpLiveStatus {
++            kernel_running: true,
++            servers,
++        })
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use std::sync::Arc;
++
++    use pa_agent::scripted::ScriptedProvider;
++
++    use super::*;
++    use crate::session_engine::engine::{create_session, SessionEngineConfig};
++
++    /// Without a running kernel neither call lists or starts anything, and
++    /// every reconnect answers "no kernel" — a server the session never
++    /// enabled included (only a running kernel's reconnect refuses it).
++    #[tokio::test]
++    async fn a_session_without_a_kernel_lists_nothing_and_starts_none() {
++        let model = pa_agent::types::Model {
++            id: "m".into(),
++            name: "m".into(),
++            api: "test".into(),
++            provider: "test".into(),
++            base_url: "http://localhost".into(),
++            reasoning: false,
++            cost: pa_agent::types::UsageCost::default(),
++            context_window: 1_000,
++            max_tokens: 100,
++            max_tokens_explicit: false,
++        };
++        let provider = Arc::new(ScriptedProvider::new(model.clone()));
++        let tmp = tempfile::tempdir().unwrap();
++        let cwd = tmp.path().join("project");
++        std::fs::create_dir_all(&cwd).unwrap();
++        let engine = create_session(SessionEngineConfig {
++            cwd,
++            agent_dir: tmp.path().join("agent"),
++            model: Some(model),
++            stream_fn: Some(provider.stream_fn()),
++            generic_mcp_servers: vec!["alpha".to_string()],
++            ..Default::default()
++        })
++        .await
++        .unwrap();
++        assert_eq!(engine.generic_mcp_servers, vec!["alpha".to_string()]);
++
++        for servers in [
++            McpStatusServers::Enabled,
++            McpStatusServers::Named(vec!["alpha".to_string(), "ghost".to_string()]),
++        ] {
++            assert_eq!(
++                engine.mcp_status(servers, 1_000).await.unwrap(),
++                McpLiveStatus::kernel_not_running()
++            );
++        }
++        for server in ["alpha", "ghost"] {
++            assert_eq!(
++                engine.reconnect_mcp_server(server, 1_000).await.unwrap(),
++                McpLiveStatus::kernel_not_running(),
++                "{server}"
++            );
++        }
++        assert!(
++            !engine.provisioner.has_running_kernel(),
++            "the status lane must never start a kernel"
++        );
++    }
++}
+diff --git a/crates/pa-core/src/session_engine/mod.rs b/crates/pa-core/src/session_engine/mod.rs
+index a5b8c74..70b2a5b 100644
+--- a/crates/pa-core/src/session_engine/mod.rs
++++ b/crates/pa-core/src/session_engine/mod.rs
+@@ -22,6 +22,7 @@ pub mod headless;
+ pub mod host_requests;
+ pub mod image_model_routing;
+ pub mod ipython_state;
++pub mod mcp_status;
+ pub mod messages;
+ pub mod provider_adapter;
+ pub mod provider_failover;
+diff --git a/crates/pa-core/tests/kernel_mcp_reconnect.rs b/crates/pa-core/tests/kernel_mcp_reconnect.rs
+new file mode 100644
+index 0000000..eeb5dec
+--- /dev/null
++++ b/crates/pa-core/tests/kernel_mcp_reconnect.rs
+@@ -0,0 +1,240 @@
++// Pedantic-gate dispositions as src/lib.rs (large_futures/too_many_lines).
++#![allow(clippy::large_futures, clippy::too_many_lines)]
++
++//! Verifier for the live MCP status lane against a REAL kernel: the lane
++//! never starts a kernel, a plain listing reuses the kernel's open
++//! connection (the cached generation), a name the session never enabled
++//! reports its error without a kernel round-trip, a reconnect closes the
++//! connection and reopens it — the fixture server spawns again — and a
++//! request the runtime fails reports the runtime's reason.
++
++use std::path::{Path, PathBuf};
++use std::sync::Arc;
++
++use pa_agent::scripted::ScriptedProvider;
++use pa_core::session_engine::engine::{create_session, SessionEngineConfig};
++use pa_core::session_engine::mcp_status::{McpLiveStatus, McpStatusServers};
++use serde_json::json;
++
++/// The kernel Python with prime-agent-runtime installed (the interpreter
++/// the session-path provisioner resolves; the fixture server runs on it
++/// too, for its `mcp` package). Skipped (with a note) on machines without
++/// a live install; set `PA_CORE_KERNEL_PYTHON` to point at an explicit
++/// interpreter instead.
++fn kernel_python() -> Option<PathBuf> {
++    if let Some(explicit) = std::env::var_os("PA_CORE_KERNEL_PYTHON") {
++        let explicit = PathBuf::from(explicit);
++        assert!(
++            explicit.exists(),
++            "PA_CORE_KERNEL_PYTHON {} not found",
++            explicit.display()
++        );
++        return Some(explicit);
++    }
++    let candidate = PathBuf::from(std::env::var("HOME").map_or_else(
++        |_| "/home/ubuntu/.prime/agent/kernel-venv/bin/python".to_string(),
++        |home| format!("{home}/.prime/agent/kernel-venv/bin/python"),
++    ));
++    if candidate.exists() {
++        return Some(candidate);
++    }
++    eprintln!(
++        "kernel python {} not found; skipping live MCP reconnect test",
++        candidate.display()
++    );
++    None
++}
++
++/// The stdio MCP fixture: every process start appends one line to the
++/// spawn log (`argv[1]`), then serves one echo tool.
++const RECONNECT_FIXTURE_SERVER: &str = r#"import sys
++from pathlib import Path
++
++with Path(sys.argv[1]).open("a", encoding="utf-8") as spawns:
++    spawns.write("spawn\n")
++
++from mcp.server.mcpserver import MCPServer
++
++server = MCPServer("reconnect-fixture")
++
++
++@server.tool()
++def echo(text: str) -> str:
++    """Echo the text back."""
++    return text
++
++
++server.run()
++"#;
++
++/// How many times the fixture server process started.
++fn spawn_count(spawn_log: &Path) -> usize {
++    std::fs::read_to_string(spawn_log).map_or(0, |log| log.lines().count())
++}
++
++#[tokio::test]
++async fn a_reconnect_reopens_the_kernel_connection_a_listing_reuses() {
++    let Some(kernel_python) = kernel_python() else {
++        return;
++    };
++    let dir = tempfile::tempdir().expect("temp dir");
++    let agent_dir = dir.path().join("agent");
++    let cwd = dir.path().join("project");
++    std::fs::create_dir_all(&agent_dir).expect("agent dir");
++    std::fs::create_dir_all(&cwd).expect("cwd");
++    let spawn_log = dir.path().join("reconnect-fixture-spawns");
++    let server_script = dir.path().join("reconnect_fixture_server.py");
++    std::fs::write(&server_script, RECONNECT_FIXTURE_SERVER).expect("server script");
++    // The user-declared stdio server: the session's one enabled generic
++    // server, resolved by the kernel through the `mcp.config` host request.
++    std::fs::write(
++        agent_dir.join("settings.json"),
++        json!({
++            "mcpServers": {
++                "reconnect-fixture": {
++                    "type": "stdio",
++                    "command": kernel_python.display().to_string(),
++                    "args": [
++                        server_script.display().to_string(),
++                        spawn_log.display().to_string(),
++                    ],
++                },
++            },
++        })
++        .to_string(),
++    )
++    .expect("settings");
++    // Hermeticity: the kernel runs on the same interpreter (no bootstrap)
++    // and no ambient agent dir leaks in. This test binary holds this one
++    // test, so the process env is its own.
++    std::env::set_var("PRIME_AGENT_KERNEL_PYTHON", &kernel_python);
++    std::env::remove_var("PRIME_AGENT_CODING_AGENT_DIR");
++
++    let model: pa_agent::types::Model = serde_json::from_value(json!({
++        "id": "faux-1", "name": "Faux", "api": "test", "provider": "faux",
++        "baseUrl": "http://localhost", "reasoning": false,
++        "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
++        "contextWindow": 200_000, "maxTokens": 4_000
++    }))
++    .expect("faux loop model");
++    let provider = Arc::new(ScriptedProvider::new(model.clone()));
++    let engine = create_session(SessionEngineConfig {
++        cwd,
++        agent_dir,
++        model: Some(model),
++        stream_fn: Some(provider.stream_fn()),
++        tools: Vec::new(),
++        ..Default::default()
++    })
++    .await
++    .expect("create the session");
++    let provisioner = engine
++        .kernel_provisioner_weak()
++        .upgrade()
++        .expect("the session carries its kernel provisioner");
++
++    // No kernel yet: the lane answers without starting one.
++    assert_eq!(
++        engine
++            .mcp_status(McpStatusServers::Enabled, 30_000)
++            .await
++            .expect("status without a kernel"),
++        McpLiveStatus::kernel_not_running()
++    );
++    assert!(
++        !provisioner.has_running_kernel(),
++        "the status lane must never start the kernel"
++    );
++    provisioner
++        .ensure(None, None)
++        .await
++        .expect("boot the kernel");
++
++    let listed = json!({
++        "server": "reconnect-fixture",
++        "tools": [{ "name": "echo", "description": "Echo the text back." }],
++        "error": null,
++    });
++    // The first listing opens the server.
++    assert_eq!(
++        engine
++            .mcp_status(McpStatusServers::Enabled, 30_000)
++            .await
++            .expect("first listing"),
++        McpLiveStatus {
++            kernel_running: true,
++            servers: vec![listed.clone()],
++        }
++    );
++    assert_eq!(spawn_count(&spawn_log), 1, "the listing opens the server");
++
++    // A plain listing reuses the open connection, in request order; the
++    // name the session never enabled reports without reaching the kernel.
++    assert_eq!(
++        engine
++            .mcp_status(
++                McpStatusServers::Named(
++                    vec!["ghost".to_string(), "reconnect-fixture".to_string(),]
++                ),
++                30_000,
++            )
++            .await
++            .expect("cached listing"),
++        McpLiveStatus {
++            kernel_running: true,
++            servers: vec![
++                json!({
++                    "server": "ghost",
++                    "tools": null,
++                    "error": "MCP server ghost is not enabled in this session",
++                }),
++                listed.clone(),
++            ],
++        }
++    );
++    assert_eq!(
++        spawn_count(&spawn_log),
++        1,
++        "a plain listing reuses the open connection"
++    );
++
++    // The reconnect closes the kernel's connection and lists it again: the
++    // server process starts anew and reports the same tools.
++    assert_eq!(
++        engine
++            .reconnect_mcp_server("reconnect-fixture", 30_000)
++            .await
++            .expect("reconnect"),
++        McpLiveStatus {
++            kernel_running: true,
++            servers: vec![listed],
++        }
++    );
++    assert_eq!(
++        spawn_count(&spawn_log),
++        2,
++        "the reconnect reopens the server"
++    );
++    assert_eq!(
++        engine
++            .reconnect_mcp_server("ghost", 30_000)
++            .await
++            .expect_err("a server the session never enabled")
++            .to_string(),
++        "MCP server ghost is not enabled in this session"
++    );
++
++    // A request the runtime fails (its reload name check) carries the
++    // runtime's reason through the lane's done frame.
++    assert_eq!(
++        provisioner
++            .manager()
++            .expect("the running kernel")
++            .mcp_status_listing(&[], 30_000, &[String::new()])
++            .await
++            .expect_err("an empty reload name")
++            .to_string(),
++        "MCP status listing failed: TypeError: server must be a non-empty string"
++    );
++    engine.dispose_kernel().await;
++}
+diff --git a/crates/pa-daemon/README.md b/crates/pa-daemon/README.md
+index 3000ef6..32bfb94 100644
+--- a/crates/pa-daemon/README.md
++++ b/crates/pa-daemon/README.md
+@@ -258,7 +258,7 @@ attached UIs daemon-wide).
+ No agent behavior inside workers beyond hosting a pa-core engine; no UI.
+ 
+ ## Public API
+-Supervisor entrypoint, worker entrypoint, `mcp_login::{WorkerMcpLoginUi, wire_worker_mcp_login}` (the worker's browser+callback login behind `mcp.begin_login`; wired by the agent engine before sessions register host handlers), client connection API for pa-tui/pa-cli, `acp::daemon::{run_daemon_attached_acp_mode, DaemonAcpOptions}` (pa-cli dispatches `--mode acp` through it), `agent_messaging::LinkAgentMessageController` + `rlm_children::{SupervisorChildSessions, ParentIdentity, RlmChildIdentity}` (e2e verifiers construct the worker-side family controller and the children registry; the engine wires the same types), `agent_engine::AgentSessionEngine::dispose_kernel` (the session-end kernel teardown the worker invokes at kill/shutdown/orphan exit — the engine outlives the session, so the pa-core engine-drop teardown cannot run there), the worker's `get_mcp_connections` command (`mcp_connections.rs`: the `/mcp` view's roster from the session's MCP manager overlaid with the session kernel's per-server tool listing, plus the api-key credential rows the same response serves — Rust-native session-plane extension; the TS daemon has no counterpart). Supervision internals `pub(crate)`.
++Supervisor entrypoint, worker entrypoint, `mcp_login::{WorkerMcpLoginUi, wire_worker_mcp_login}` (the worker's browser+callback login behind `mcp.begin_login`; wired by the agent engine before sessions register host handlers), client connection API for pa-tui/pa-cli, `acp::daemon::{run_daemon_attached_acp_mode, DaemonAcpOptions}` (pa-cli dispatches `--mode acp` through it), `agent_messaging::LinkAgentMessageController` + `rlm_children::{SupervisorChildSessions, ParentIdentity, RlmChildIdentity}` (e2e verifiers construct the worker-side family controller and the children registry; the engine wires the same types), `agent_engine::AgentSessionEngine::dispose_kernel` (the session-end kernel teardown the worker invokes at kill/shutdown/orphan exit — the engine outlives the session, so the pa-core engine-drop teardown cannot run there), the worker's `get_mcp_connections` command (`mcp_connections.rs`: the `/mcp` view's roster from the session's MCP manager overlaid with the session kernel's per-server tool listing, plus the api-key credential rows the same response serves — Rust-native session-plane extension; the TS daemon has no counterpart), the worker's `get_mcp_status` and `reconnect_mcp_server` commands (`mcp_status.rs`: the live MCP status lane — each of the session's generic MCP servers with the running kernel's tools or error, and a per-server reconnect that closes and relists the kernel connection; never builds a session or starts a kernel, answering `kernelRunning: false` without one whatever the reconnect's server name; `timeoutMs` (default 10000) is the per-server bound, clamped to 1..=20000 so the settle stays inside the supervisor's 30s route timeout; wrong field types fail the supervisor's typed parse with the generic malformed-command error, while an empty reconnect `server` passes it and gets the worker's "requires a server" error on either path — Rust-native session-plane extension). Supervision internals `pub(crate)`.
+ 
+ 
+ ## Depends on
+diff --git a/crates/pa-daemon/src/agent_engine/lifecycle.rs b/crates/pa-daemon/src/agent_engine/lifecycle.rs
+index fbdfe10..8a7e014 100644
+--- a/crates/pa-daemon/src/agent_engine/lifecycle.rs
++++ b/crates/pa-daemon/src/agent_engine/lifecycle.rs
+@@ -10,6 +10,7 @@ use super::{
+     QuotaParkState, SessionCommandExecution, SessionCommandParams, SessionEngineConfig,
+     SupervisorChildSessions, Value,
+ };
++use pa_core::session_engine::mcp_status::{McpLiveStatus, McpStatusServers};
+ 
+ /// The instruction the floor appends to a bare skill invocation: ask what
+ /// the user wants first, never an imperative to execute.
+@@ -715,6 +716,44 @@ impl AgentSessionEngine {
+             .await
+     }
+ 
++    /// The session kernel's live MCP listing; never builds a new
++    /// session/kernel (an unbuilt session has no kernel to list).
++    ///
++    /// # Errors
++    ///
++    /// Returns an error when the kernel listing fails or does not settle.
++    pub async fn mcp_status(
++        &self,
++        servers: McpStatusServers,
++        per_server_timeout_ms: u64,
++    ) -> anyhow::Result<McpLiveStatus> {
++        let Some(engine) = self.session.lock().await.clone() else {
++            return Ok(McpLiveStatus::kernel_not_running());
++        };
++        engine.mcp_status(servers, per_server_timeout_ms).await
++    }
++
++    /// Reconnect one MCP server on the session's kernel; never builds a
++    /// new session/kernel (an unbuilt session has no kernel to reconnect).
++    ///
++    /// # Errors
++    ///
++    /// Returns an error when the session's kernel is running and the server
++    /// is not one of its enabled generic servers, or the kernel reload or
++    /// listing fails.
++    pub async fn reconnect_mcp_server(
++        &self,
++        server: &str,
++        per_server_timeout_ms: u64,
++    ) -> anyhow::Result<McpLiveStatus> {
++        let Some(engine) = self.session.lock().await.clone() else {
++            return Ok(McpLiveStatus::kernel_not_running());
++        };
++        engine
++            .reconnect_mcp_server(server, per_server_timeout_ms)
++            .await
++    }
++
+     /// Build the core session once (same once-only rule as `session_agent`),
+     /// through the same guarded funnel.
+     pub(crate) fn ensure_core_session(&self, model: &Model) -> anyhow::Result<()> {
+diff --git a/crates/pa-daemon/src/agent_engine/tests/session.rs b/crates/pa-daemon/src/agent_engine/tests/session.rs
+index e74aae2..a84d4d6 100644
+--- a/crates/pa-daemon/src/agent_engine/tests/session.rs
++++ b/crates/pa-daemon/src/agent_engine/tests/session.rs
+@@ -87,6 +87,59 @@ async fn get_commands_enumerates_skills_before_the_first_prompt() {
+     }
+ }
+ 
++/// The live MCP status lane never demand-builds (unlike the `get_commands`
++/// read above): an unbuilt session has no kernel, so both calls answer
++/// "no kernel" and the session stays unbuilt although its model resolves.
++#[tokio::test]
++async fn mcp_status_answers_without_building_the_session() {
++    use pa_core::session_engine::mcp_status::{McpLiveStatus, McpStatusServers};
++    let (engine, _dir) = tokio::task::spawn_blocking(|| {
++        let _faux = FAUX_TEST_LOCK
++            .lock()
++            .unwrap_or_else(std::sync::PoisonError::into_inner);
++        let dir = tempfile::TempDir::new().unwrap();
++        let engine = AgentSessionEngine::new(AgentEngineConfig {
++            cwd: dir.path().to_path_buf(),
++            agent_dir: dir.path().join("agent"),
++            provider: None,
++            model: None,
++            api_key: None,
++            thinking: None,
++            session_dir: None,
++            session_file: None,
++            faux_script: Some(
++                json!({ "engine": "faux", "responses": [{ "text": "ok" }] }).to_string(),
++            ),
++            supervisor_link: None,
++            telemetry_disabled: None,
++            cron_store: None,
++            queued_steering_probe: None,
++        })
++        .unwrap();
++        let engine = std::sync::Arc::new(engine);
++        engine.register_arc();
++        engine.resolve_model().expect("faux model");
++        (engine, dir)
++    })
++    .await
++    .expect("engine build join");
++    assert_eq!(
++        engine
++            .mcp_status(McpStatusServers::Enabled, 1_000)
++            .await
++            .unwrap(),
++        McpLiveStatus::kernel_not_running()
++    );
++    assert_eq!(
++        engine.reconnect_mcp_server("alpha", 1_000).await.unwrap(),
++        McpLiveStatus::kernel_not_running()
++    );
++    assert!(
++        engine.session.lock().await.is_none(),
++        "a status read must never build the session"
++    );
++}
++
+ #[tokio::test]
+ async fn replacement_teardown_retires_the_session_and_the_funnel_adopts_the_branch() {
+     let engine = {
+diff --git a/crates/pa-daemon/src/lib.rs b/crates/pa-daemon/src/lib.rs
+index 05686a3..b64f741 100644
+--- a/crates/pa-daemon/src/lib.rs
++++ b/crates/pa-daemon/src/lib.rs
+@@ -57,6 +57,7 @@ pub mod journal;
+ pub mod lease;
+ pub mod mcp_connections;
+ pub mod mcp_login;
++pub(crate) mod mcp_status;
+ pub(crate) mod messaging;
+ pub mod model_allowlist;
+ pub(crate) mod model_catalog;
+diff --git a/crates/pa-daemon/src/mcp_status.rs b/crates/pa-daemon/src/mcp_status.rs
+new file mode 100644
+index 0000000..f3dc54d
+--- /dev/null
++++ b/crates/pa-daemon/src/mcp_status.rs
+@@ -0,0 +1,239 @@
++//! The worker arms behind the live MCP status lane: `get_mcp_status` (each
++//! of the session's MCP servers as the session kernel sees it right now —
++//! its tools or its error) and `reconnect_mcp_server` (close one server's
++//! kernel connection and list it again). Both read the session's running
++//! kernel only — no session build, no kernel start — so a session without
++//! one answers `kernelRunning: false` with no servers. The `/mcp` roster
++//! (`get_mcp_connections`) stays the config and credential view.
++//!
++//! Through the supervisor, wrong types (a non-array `servers`, a
++//! non-string name, a negative or fractional `timeoutMs`, no `server`)
++//! fail its typed parse as `malformed <command> command`; an empty
++//! `server` passes it and gets "requires a server" on either path.
++
++use pa_core::session_engine::mcp_status::{McpLiveStatus, McpStatusServers};
++use serde_json::{json, Value};
++
++use crate::protocol::{response_failure, response_success, DaemonResponse};
++use crate::worker::Worker;
++
++/// The per-server open bound when the request names none.
++const DEFAULT_PER_SERVER_TIMEOUT_MS: u64 = 10_000;
++/// The largest per-server open bound a request may ask for. The kernel
++/// settles a listing within this bound plus its 5s serve margin plus 3.5s
++/// per reloaded server (28.5s for a reconnect at the cap), which keeps the
++/// worker's answer inside the supervisor's 30s route timeout for these
++/// short control routes.
++const MAX_PER_SERVER_TIMEOUT_MS: u64 = 20_000;
++
++/// The request's per-server bound: `timeoutMs` clamped to `1..=20000`, or
++/// the default when absent.
++fn per_server_timeout_ms(payload: &Value) -> Result<u64, &'static str> {
++    match payload.get("timeoutMs") {
++        None | Some(Value::Null) => Ok(DEFAULT_PER_SERVER_TIMEOUT_MS),
++        Some(value) => value
++            .as_u64()
++            .map(|timeout_ms| timeout_ms.clamp(1, MAX_PER_SERVER_TIMEOUT_MS))
++            .ok_or("timeoutMs must be a non-negative integer"),
++    }
++}
++
++/// The lane's response: `{kernelRunning, servers}`, or the failure.
++fn status_response(command: &str, status: anyhow::Result<McpLiveStatus>) -> DaemonResponse {
++    match status {
++        Ok(status) => response_success(
++            None,
++            command,
++            Some(json!({
++                "kernelRunning": status.kernel_running,
++                "servers": status.servers,
++            })),
++        ),
++        Err(error) => response_failure(None, command, &format!("{error:#}"), None),
++    }
++}
++
++impl Worker {
++    /// `get_mcp_status { servers?, timeoutMs? }`: the named servers (absent:
++    /// every generic server the session enabled), each with its live tools
++    /// or its error; a name the session did not enable reports that error
++    /// without a kernel round-trip.
++    pub(crate) async fn handle_get_mcp_status(&self, payload: &Value) -> DaemonResponse {
++        if let Err(response) = self.require_created("get_mcp_status") {
++            return response;
++        }
++        let servers = match payload.get("servers") {
++            None | Some(Value::Null) => McpStatusServers::Enabled,
++            Some(value) => {
++                let names = value.as_array().and_then(|names| {
++                    names
++                        .iter()
++                        .map(|name| name.as_str().map(str::to_string))
++                        .collect::<Option<Vec<_>>>()
++                });
++                let Some(names) = names else {
++                    return response_failure(
++                        None,
++                        "get_mcp_status",
++                        "servers must be an array of server names",
++                        None,
++                    );
++                };
++                McpStatusServers::Named(names)
++            }
++        };
++        let timeout_ms = match per_server_timeout_ms(payload) {
++            Ok(timeout_ms) => timeout_ms,
++            Err(message) => return response_failure(None, "get_mcp_status", message, None),
++        };
++        let status = match &self.agent_engine {
++            Some(engine) => engine.mcp_status(servers, timeout_ms).await,
++            // The scripted engine hosts no kernel.
++            None => Ok(McpLiveStatus::kernel_not_running()),
++        };
++        status_response("get_mcp_status", status)
++    }
++
++    /// `reconnect_mcp_server { server, timeoutMs? }`: the kernel closes the
++    /// server's open connection and lists it again (exactly that server's
++    /// entry); with a running kernel, a server the session did not enable
++    /// fails the command (without one, every name answers
++    /// `kernelRunning: false`).
++    pub(crate) async fn handle_reconnect_mcp_server(&self, payload: &Value) -> DaemonResponse {
++        if let Err(response) = self.require_created("reconnect_mcp_server") {
++            return response;
++        }
++        let Some(server) = payload
++            .get("server")
++            .and_then(Value::as_str)
++            .filter(|server| !server.is_empty())
++        else {
++            return response_failure(
++                None,
++                "reconnect_mcp_server",
++                "reconnect_mcp_server requires a server",
++                None,
++            );
++        };
++        let timeout_ms = match per_server_timeout_ms(payload) {
++            Ok(timeout_ms) => timeout_ms,
++            Err(message) => return response_failure(None, "reconnect_mcp_server", message, None),
++        };
++        let status = match &self.agent_engine {
++            Some(engine) => engine.reconnect_mcp_server(server, timeout_ms).await,
++            // The scripted engine hosts no kernel.
++            None => Ok(McpLiveStatus::kernel_not_running()),
++        };
++        status_response("reconnect_mcp_server", status)
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use serde_json::json;
++
++    use super::per_server_timeout_ms;
++    use crate::protocol::{response_failure, response_success};
++    use crate::worker::{Worker, WorkerConfig};
++
++    #[test]
++    fn the_per_server_bound_defaults_and_clamps() {
++        for (payload, expected) in [
++            (json!({}), Ok(10_000)),
++            (json!({ "timeoutMs": null }), Ok(10_000)),
++            (json!({ "timeoutMs": 0 }), Ok(1)),
++            (json!({ "timeoutMs": 2_500 }), Ok(2_500)),
++            (json!({ "timeoutMs": 20_000 }), Ok(20_000)),
++            (json!({ "timeoutMs": 60_000 }), Ok(20_000)),
++            (
++                json!({ "timeoutMs": -1 }),
++                Err("timeoutMs must be a non-negative integer"),
++            ),
++            (
++                json!({ "timeoutMs": "fast" }),
++                Err("timeoutMs must be a non-negative integer"),
++            ),
++        ] {
++            assert_eq!(per_server_timeout_ms(&payload), expected, "{payload}");
++        }
++    }
++
++    /// The wire shapes over a session without a kernel host (the scripted
++    /// engine): both commands answer `kernelRunning: false` with no
++    /// servers, and malformed requests fail with their reason (the direct
++    /// worker link's answers; the supervisor's typed parse rejects first).
++    #[tokio::test]
++    async fn the_lane_answers_without_a_kernel_and_rejects_malformed_requests() {
++        let dir = tempfile::TempDir::new().unwrap();
++        let worker = Worker::new(
++            WorkerConfig {
++                socket_path: dir.path().join("worker.sock"),
++                supervisor_socket_path: std::path::PathBuf::new(),
++                token: "token".to_string(),
++                worker_instance_id: String::new(),
++                active_session_id: "mcp-status-session".to_string(),
++                agent_dir: dir.path().join("agent"),
++                recovery_journal_path: dir.path().join("recovery.jsonl"),
++                telemetry_disabled: Some(true),
++                script: Some(json!({ "responses": ["ack"] })),
++            },
++            None,
++        );
++        let created = worker
++            .dispatch(
++                "create",
++                &json!({ "noSession": true, "cwd": dir.path(), "name": "mcp-status" }),
++            )
++            .await;
++        assert!(created.success, "create failed: {created:?}");
++
++        let not_running = json!({ "kernelRunning": false, "servers": [] });
++        for (command, payload) in [
++            ("get_mcp_status", json!({})),
++            (
++                "get_mcp_status",
++                json!({ "servers": ["alpha"], "timeoutMs": 2_000 }),
++            ),
++            ("reconnect_mcp_server", json!({ "server": "alpha" })),
++        ] {
++            assert_eq!(
++                worker.dispatch(command, &payload).await,
++                response_success(None, command, Some(not_running.clone())),
++                "{command} {payload}"
++            );
++        }
++        for (command, payload, error) in [
++            (
++                "get_mcp_status",
++                json!({ "servers": "alpha" }),
++                "servers must be an array of server names",
++            ),
++            (
++                "get_mcp_status",
++                json!({ "servers": ["alpha", 1] }),
++                "servers must be an array of server names",
++            ),
++            (
++                "get_mcp_status",
++                json!({ "timeoutMs": -1 }),
++                "timeoutMs must be a non-negative integer",
++            ),
++            (
++                "reconnect_mcp_server",
++                json!({}),
++                "reconnect_mcp_server requires a server",
++            ),
++            (
++                "reconnect_mcp_server",
++                json!({ "server": "" }),
++                "reconnect_mcp_server requires a server",
++            ),
++        ] {
++            assert_eq!(
++                worker.dispatch(command, &payload).await,
++                response_failure(None, command, error, None),
++                "{command} {payload}"
++            );
++        }
++    }
++}
+diff --git a/crates/pa-daemon/src/protocol.rs b/crates/pa-daemon/src/protocol.rs
+index a4f32c3..0196724 100644
+--- a/crates/pa-daemon/src/protocol.rs
++++ b/crates/pa-daemon/src/protocol.rs
+@@ -164,6 +164,8 @@ pub const KNOWN_COMMAND_TYPES: &[&str] = &[
+     "get_mcp_connections",
+     "set_mcp_static_token",
+     "remove_mcp_connection",
++    "get_mcp_status",
++    "reconnect_mcp_server",
+     "mark_anthropic_warning_shown",
+ ];
+ 
+@@ -725,6 +727,12 @@ pub fn command_active_session_id(command: &DaemonCommand) -> Option<&str> {
+         | DaemonCommand::RemoveMcpConnection {
+             active_session_id, ..
+         }
++        | DaemonCommand::GetMcpStatus {
++            active_session_id, ..
++        }
++        | DaemonCommand::ReconnectMcpServer {
++            active_session_id, ..
++        }
+         | DaemonCommand::ReplaceAcpMcpServers {
+             active_session_id, ..
+         }
+@@ -990,6 +998,8 @@ pub fn command_type_name(command: &DaemonCommand) -> &'static str {
+         DaemonCommand::GetMcpConnections { .. } => "get_mcp_connections",
+         DaemonCommand::SetMcpStaticToken { .. } => "set_mcp_static_token",
+         DaemonCommand::RemoveMcpConnection { .. } => "remove_mcp_connection",
++        DaemonCommand::GetMcpStatus { .. } => "get_mcp_status",
++        DaemonCommand::ReconnectMcpServer { .. } => "reconnect_mcp_server",
+         DaemonCommand::ReplaceAcpMcpServers { .. } => "replace_acp_mcp_servers",
+         DaemonCommand::GetModelCatalog { .. } => "get_model_catalog",
+         DaemonCommand::GetAvailableModels { .. } => "get_available_models",
+@@ -1086,6 +1096,43 @@ mod tests {
+         assert!(default_server_capabilities().contains(&"kernel_bash_activity".to_string()));
+     }
+ 
++    /// The live MCP status lane: both commands address one session (the
++    /// direct peer link may carry them); the listing is a read, the
++    /// reconnect a mutation the update gate fences.
++    #[test]
++    fn mcp_status_commands_are_session_scoped() {
++        for (command, kind, mutating) in [
++            (
++                json!({"type":"get_mcp_status","activeSessionId":"session"}),
++                "get_mcp_status",
++                false,
++            ),
++            (
++                json!({"type":"get_mcp_status","activeSessionId":"session","servers":["alpha"],"timeoutMs":2000}),
++                "get_mcp_status",
++                false,
++            ),
++            (
++                json!({"type":"reconnect_mcp_server","activeSessionId":"session","server":"alpha"}),
++                "reconnect_mcp_server",
++                true,
++            ),
++        ] {
++            let line = json!({"type":"command","id":"c1", "protocol":current_protocol_info(), "command":command}).to_string();
++            let parsed = parse_daemon_command_line(&line).unwrap();
++            assert_eq!(command_type_name(&parsed.command), kind);
++            assert_eq!(command_active_session_id(&parsed.command), Some("session"));
++            assert!(pa_types::daemon::is_session_plane_daemon_command(kind));
++            assert_eq!(pa_types::daemon::is_daemon_mutating_command(kind), mutating);
++        }
++        // A known type with a malformed body: a reconnect without its server.
++        let line = json!({"type":"command","id":"c2", "protocol":current_protocol_info(), "command":{"type":"reconnect_mcp_server","activeSessionId":"session"}}).to_string();
++        assert_eq!(
++            parse_daemon_command_line(&line).unwrap_err().to_string(),
++            "Invalid daemon command: malformed reconnect_mcp_server command"
++        );
++    }
++
+     #[test]
+     fn factory_activity_commands_are_session_scoped() {
+         for (command, action, run_id, spec_id, timeout_ms) in [
+diff --git a/crates/pa-daemon/src/worker/commands.rs b/crates/pa-daemon/src/worker/commands.rs
+index 005ed7c..de5d24a 100644
+--- a/crates/pa-daemon/src/worker/commands.rs
++++ b/crates/pa-daemon/src/worker/commands.rs
+@@ -121,6 +121,8 @@ impl Worker {
+             "get_mcp_connections" => self.handle_get_mcp_connections().await,
+             "set_mcp_static_token" => self.handle_set_mcp_static_token(payload).await,
+             "remove_mcp_connection" => self.handle_remove_mcp_connection(payload).await,
++            "get_mcp_status" => self.handle_get_mcp_status(payload).await,
++            "reconnect_mcp_server" => self.handle_reconnect_mcp_server(payload).await,
+             "get_rlm_children" => self.handle_get_rlm_children().await,
+             "get_context_tree" => self.handle_get_context_tree().await,
+             "get_commands" => self.handle_get_commands().await,
+diff --git a/crates/pa-daemon/tests/command_breadth.rs b/crates/pa-daemon/tests/command_breadth.rs
+index 9befd7a..03b7633 100644
+--- a/crates/pa-daemon/tests/command_breadth.rs
++++ b/crates/pa-daemon/tests/command_breadth.rs
+@@ -516,6 +516,14 @@ const WIRE_FIXTURES: &[(&str, &str)] = &[
+         "get_mcp_connections",
+         r#"{"type": "get_mcp_connections", "activeSessionId": "sess"}"#,
+     ),
++    (
++        "get_mcp_status",
++        r#"{"type": "get_mcp_status", "activeSessionId": "sess", "servers": ["alpha"], "timeoutMs": 2000}"#,
++    ),
++    (
++        "reconnect_mcp_server",
++        r#"{"type": "reconnect_mcp_server", "activeSessionId": "sess", "server": "alpha"}"#,
++    ),
+     (
+         "mark_anthropic_warning_shown",
+         r#"{"type": "mark_anthropic_warning_shown", "activeSessionId": "sess"}"#,
+@@ -544,6 +552,8 @@ fn known_command_types_match_the_ts_list() {
+                     | "get_mcp_connections"
+                     | "set_mcp_static_token"
+                     | "remove_mcp_connection"
++                    | "get_mcp_status"
++                    | "reconnect_mcp_server"
+                     | "list_kernel_bash"
+                     | "tail_kernel_bash"
+                     | "kill_kernel_bash"
+diff --git a/crates/pa-types/src/daemon/command.rs b/crates/pa-types/src/daemon/command.rs
+index 2c8583a..d6bc115 100644
+--- a/crates/pa-types/src/daemon/command.rs
++++ b/crates/pa-types/src/daemon/command.rs
+@@ -665,6 +665,36 @@ pub enum DaemonCommand {
+         #[serde(flatten)]
+         rest: JsonMap,
+     },
++    /// The live per-server MCP state of the session's running kernel:
++    /// each server's tools or its error. Never builds a session or starts
++    /// a kernel.
++    GetMcpStatus {
++        #[serde(default, skip_serializing_if = "Option::is_none")]
++        id: Option<String>,
++        active_session_id: String,
++        /// Exactly these servers; absent lists every generic server the
++        /// session enabled.
++        #[serde(default, skip_serializing_if = "Option::is_none")]
++        servers: Option<Vec<String>>,
++        /// The per-server open bound in milliseconds (default 10000; the
++        /// worker clamps it to 1..=20000, inside the 30s route timeout).
++        #[serde(default, skip_serializing_if = "Option::is_none")]
++        timeout_ms: Option<u64>,
++        #[serde(flatten)]
++        rest: JsonMap,
++    },
++    /// Close one MCP server's kernel connection and list it again.
++    ReconnectMcpServer {
++        #[serde(default, skip_serializing_if = "Option::is_none")]
++        id: Option<String>,
++        active_session_id: String,
++        server: String,
++        /// The per-server open bound, as for `GetMcpStatus`.
++        #[serde(default, skip_serializing_if = "Option::is_none")]
++        timeout_ms: Option<u64>,
++        #[serde(flatten)]
++        rest: JsonMap,
++    },
+     ReplaceAcpMcpServers {
+         #[serde(default, skip_serializing_if = "Option::is_none")]
+         id: Option<String>,
+@@ -1262,4 +1292,47 @@ mod tests {
+     fn mark_anthropic_warning_shown_roundtrip() {
+         rt::<DaemonCommand>(r#"{"type":"mark_anthropic_warning_shown","activeSessionId":"s1"}"#);
+     }
++
++    /// The live MCP status commands parse their typed fields (never the
++    /// flattened rest) and round-trip; a malformed server list is a parse
++    /// failure, not an empty selection.
++    #[test]
++    fn mcp_status_commands_parse_and_roundtrip() {
++        let status = r#"{"type":"get_mcp_status","activeSessionId":"s1","servers":["alpha","beta"],"timeoutMs":2500}"#;
++        assert_eq!(
++            serde_json::from_str::<DaemonCommand>(status).unwrap(),
++            DaemonCommand::GetMcpStatus {
++                id: None,
++                active_session_id: "s1".to_string(),
++                servers: Some(vec!["alpha".to_string(), "beta".to_string()]),
++                timeout_ms: Some(2500),
++                rest: JsonMap::new(),
++            }
++        );
++        rt::<DaemonCommand>(status);
++        rt::<DaemonCommand>(r#"{"type":"get_mcp_status","id":"c1","activeSessionId":"s1"}"#);
++        let reconnect =
++            r#"{"type":"reconnect_mcp_server","activeSessionId":"s1","server":"alpha"}"#;
++        assert_eq!(
++            serde_json::from_str::<DaemonCommand>(reconnect).unwrap(),
++            DaemonCommand::ReconnectMcpServer {
++                id: None,
++                active_session_id: "s1".to_string(),
++                server: "alpha".to_string(),
++                timeout_ms: None,
++                rest: JsonMap::new(),
++            }
++        );
++        rt::<DaemonCommand>(reconnect);
++        for malformed in [
++            r#"{"type":"get_mcp_status","activeSessionId":"s1","servers":"alpha"}"#,
++            r#"{"type":"get_mcp_status","activeSessionId":"s1","timeoutMs":-1}"#,
++            r#"{"type":"reconnect_mcp_server","activeSessionId":"s1"}"#,
++        ] {
++            assert!(
++                serde_json::from_str::<DaemonCommand>(malformed).is_err(),
++                "{malformed}"
++            );
++        }
++    }
+ }
+diff --git a/crates/pa-types/src/daemon/plane.rs b/crates/pa-types/src/daemon/plane.rs
+index b79dd52..89a99b8 100644
+--- a/crates/pa-types/src/daemon/plane.rs
++++ b/crates/pa-types/src/daemon/plane.rs
+@@ -52,6 +52,8 @@ pub fn command_plane(command_type: &str) -> DaemonCommandPlane {
+         | "get_commands"
+         | "get_resource_snapshot"
+         | "get_mcp_connections"
++        | "get_mcp_status"
++        | "reconnect_mcp_server"
+         | "replace_acp_mcp_servers"
+         | "get_model_catalog"
+         | "get_available_models"
+@@ -133,6 +135,7 @@ const READ_ONLY_DAEMON_COMMANDS: &[&str] = &[
+     "get_commands",
+     "get_resource_snapshot",
+     "get_mcp_connections",
++    "get_mcp_status",
+     "get_model_catalog",
+     "get_available_models",
+     "get_queue",
+diff --git a/prime-agent-runtime/src/rlm/repl.md b/prime-agent-runtime/src/rlm/repl.md
+index a448448..5c01a81 100644
+--- a/prime-agent-runtime/src/rlm/repl.md
++++ b/prime-agent-runtime/src/rlm/repl.md
+@@ -33,7 +33,7 @@ event.
+ | `snapshot` | `{"type":"snapshot","id":str,"path":str,"manifest_path":str,"max_bytes"?:int,"max_variable_bytes"?:int,"prune_oversized"?:bool}` |
+ | `restore` | `{"type":"restore","id":str,"path":str}` |
+ | `list_names` | `{"type":"list_names","id":str}` |
+-| `mcp_status` | `{"type":"mcp_status","id":str,"servers":[str,...],"timeout_ms"?:number}` — host-side view query: per-server tool listing (opens each server on demand, bounded by `timeout_ms` per server; default 10s); the `done` frame carries `connections: [{server, tools: [{name, description}] | null, error: str | null}]` |
++| `mcp_status` | `{"type":"mcp_status","id":str,"servers":[str,...],"timeout_ms"?:number,"reload"?:[str,...]}` — host-side view query: per-server tool listing (opens each server on demand, bounded by `timeout_ms` per server; default 10s); `reload` first closes each named server's open connection (`mcp.reload`), so the listing reopens it — the host's reconnect; the `done` frame carries `connections: [{server, tools: [{name, description}] | null, error: str | null}]` |
+ | `bash_activity` | `{"type":"bash_activity","id":str,"action":"list"|"tail"|"kill","activityId"?:str,"lines"?:int}` — out-of-band even during a running cell; tail lines 1–200, response capped at 16 KiB; opaque IDs resolve only against this kernel’s handles |
+ | `shutdown` | `{"type":"shutdown","id"?:str}` |
+ 
+@@ -77,8 +77,9 @@ runtime keeps serving. Closing stdin is equivalent to `shutdown`.
+   request, always after all of that request's other events. A snapshot `done`
+   adds `saved`, `skipped`, `pruned`, `bytes`; a restore `done` adds `restored`,
+   `failed`; a `list_names` `done` adds `names`; a failed snapshot/restore adds
+-  `reason`. Bash activity `done` carries `activities` (list), `tail` (tail),
+-  or `killed` (kill); `status:"error"` with `reason` on unknown IDs.
++  `reason`, as does a failed `mcp_status` (`"ExcType: message"`, after its
++  `error` event). Bash activity `done` carries `activities` (list), `tail`
++  (tail), or `killed` (kill); `status:"error"` with `reason` on unknown IDs.
+   The daemon advertises `kernel_bash_activity`; clients poll `list_kernel_bash`
+   for updates (no push events). Each row contains opaque `id`, `command`,
+   `pid`, `durationMs`, and `status` (`running` or `finished`). Finished rows
+diff --git a/prime-agent-runtime/src/rlm/repl.py b/prime-agent-runtime/src/rlm/repl.py
+index fd76e26..14d0e3f 100644
+--- a/prime-agent-runtime/src/rlm/repl.py
++++ b/prime-agent-runtime/src/rlm/repl.py
+@@ -1308,6 +1308,13 @@ async def _handle_mcp_status(req: dict[str, Any], ns: dict[str, Any]) -> None:
+     timeout_ms = req.get("timeout_ms", 10_000)
+     if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, (int, float)) or timeout_ms <= 0:
+         raise ValueError("mcp_status timeout_ms must be a positive number")
++    reload = req.get("reload", [])
++    if not isinstance(reload, list) or not all(isinstance(name, str) for name in reload):
++        raise ValueError("mcp_status reload requires a list of server names")
++    # A reconnect: close each named server's open connection first, so the
++    # listing below reopens it instead of reporting the cached generation.
++    for name in reload:
++        await mcp_mod.reload(name)
+     connections = await mcp_mod.status(servers, float(timeout_ms))
+     _send({"event": "done", "id": req["id"], "status": "ok", "connections": connections})
+ 
+@@ -1337,9 +1344,11 @@ async def _mcp_status_lane(req: dict[str, Any], ns: dict[str, Any]) -> None:
+     """One dedicated-lane `mcp_status` request.
+ 
+     The failure shape mirrors `_handle_request`'s backstop (one broken
+-    request fails alone, never the lane, never the serve loop); a
+-    shutdown cancellation is silent by design — the host is already
+-    tearing the kernel down and owns the deadline.
++    request fails alone, never the lane, never the serve loop), and the
++    error `done` also carries the `reason` ("ExcType: message"): the host
++    settles the lane on `done` alone. A shutdown cancellation is silent by
++    design — the host is already tearing the kernel down and owns the
++    deadline.
+     """
+     try:
+         await _handle_mcp_status(req, ns)
+@@ -1348,8 +1357,9 @@ async def _mcp_status_lane(req: dict[str, Any], ns: dict[str, Any]) -> None:
+     except BaseException as exc:  # noqa: BLE001 - one broken lane request fails alone
+         rid = req["id"]
+         try:
+-            _send(_error_event(rid, exc))
+-            _send({"event": "done", "id": rid, "status": "error"})
++            error = _error_event(rid, exc)
++            _send(error)
++            _send({"event": "done", "id": rid, "status": "error", "reason": f"{error['ename']}: {error['evalue']}"})
+         except BaseException:
+             pass
+ 
+diff --git a/prime-agent-runtime/test/test_repl.py b/prime-agent-runtime/test/test_repl.py
+index cce4c88..931c15c 100644
+--- a/prime-agent-runtime/test/test_repl.py
++++ b/prime-agent-runtime/test/test_repl.py
+@@ -1582,6 +1582,23 @@ class ReplTest(unittest.TestCase):
+         events = self.repl.execute("ms3", "'alive'")
+         self.assertEqual(one(events, "result")["text"], "'alive'")
+ 
++    def test_mcp_status_requires_a_reload_list(self):
++        self.repl.send({"type": "mcp_status", "id": "ms4", "servers": [], "reload": "fixture-echo"})
++        events = self.repl.until_done("ms4")
++        # The error done carries the reason: the host settles the lane on done alone.
++        self.assertEqual(
++            one(events, "done"),
++            {
++                "event": "done",
++                "id": "ms4",
++                "status": "error",
++                "reason": "ValueError: mcp_status reload requires a list of server names",
++            },
++        )
++        self.assertIn("mcp_status reload", one(events, "error")["evalue"])
++        events = self.repl.execute("ms5", "'alive'")
++        self.assertEqual(one(events, "result")["text"], "'alive'")
++
+     def test_list_names_skips_non_string_keys(self):
+         self.repl.execute("lnk1", "globals()[1] = 1\nbeta = 2")
+         self.repl.send({"type": "list_names", "id": "lnk2"})
+@@ -3019,6 +3036,64 @@ class SnapshotPairConsistencyTest(unittest.TestCase):
+                 dill.load(fh)
+ 
+ 
++class McpStatusReloadTest(unittest.TestCase):
++    """In-process: the `mcp_status` reload flag closes each named server before the listing."""
++
++    def setUp(self):
++        sys.path.insert(0, SRC)
++        self.addCleanup(sys.path.remove, SRC)
++
++    def test_reload_closes_each_named_server_before_the_listing(self):
++        import rlm.mcp as mcp_mod
++        import rlm.repl as repl_module
++
++        calls = []
++        sent = []
++        listing = [{"server": "alpha", "tools": [], "error": None}]
++
++        async def reload(server=None):
++            calls.append(("reload", server))
++
++        async def status(servers, timeout_ms):
++            calls.append(("status", servers, timeout_ms))
++            return listing
++
++        with mock.patch.object(mcp_mod, "reload", reload), mock.patch.object(
++            mcp_mod, "status", status
++        ), mock.patch.object(repl_module, "_send", sent.append):
++            asyncio.run(
++                repl_module._handle_mcp_status(
++                    {"id": "r1", "servers": ["alpha"], "timeout_ms": 2500, "reload": ["alpha", "beta"]}, {}
++                )
++            )
++            # Without the flag the listing runs alone, as before.
++            asyncio.run(repl_module._handle_mcp_status({"id": "r2", "servers": ["alpha"]}, {}))
++        self.assertEqual(
++            calls,
++            [("reload", "alpha"), ("reload", "beta"), ("status", ["alpha"], 2500.0), ("status", ["alpha"], 10000.0)],
++        )
++        self.assertEqual(
++            sent,
++            [
++                {"event": "done", "id": "r1", "status": "ok", "connections": listing},
++                {"event": "done", "id": "r2", "status": "ok", "connections": listing},
++            ],
++        )
++
++    def test_reload_must_be_a_list_of_server_names(self):
++        import rlm.mcp as mcp_mod
++        import rlm.repl as repl_module
++
++        reload = mock.AsyncMock()
++        status = mock.AsyncMock(return_value=[])
++        with mock.patch.object(mcp_mod, "reload", reload), mock.patch.object(mcp_mod, "status", status):
++            for flag in ("alpha", ["alpha", 1], None):
++                with self.assertRaisesRegex(ValueError, "mcp_status reload"):
++                    asyncio.run(repl_module._handle_mcp_status({"id": "r3", "servers": [], "reload": flag}, {}))
++        reload.assert_not_awaited()
++        status.assert_not_awaited()
++
++
+ class ErrorEventCapTest(unittest.TestCase):
+     """The error event's traceback must fit one protocol frame in aggregate."""
+ 

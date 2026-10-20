@@ -152,8 +152,7 @@ const JUMPS: JumpEntry[] = [
     key: 'instructions.builtIn',
     section: 'sessions',
     label: 'System prompt & instructions',
-    description:
-      'Read the native prompt, customize its foundation, or edit global and project guidance.',
+    description: 'Read the native foundation, customize it, or edit global and project guidance.',
     keywords: ['SYSTEM.md', 'APPEND_SYSTEM.md', 'AGENTS.md', 'CLAUDE.md', 'default', 'restore']
   },
   {

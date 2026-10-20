@@ -35,6 +35,9 @@ export function SessionEngineMenu({ agentId }: { agentId: string }) {
   const modelChanging = useAgents((state) => !!state.agents[agentId]?.modelChangePending)
   const temporary = useAgents((state) => !!state.agents[agentId]?.info.args.noSession)
   const hasHistory = useAgents((state) => !!state.agents[agentId]?.entries.length)
+  const hasInstructions = useAgents(
+    (state) => !!state.agents[agentId]?.info.args.conversationPrompt
+  )
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [preparing, setPreparing] = useState(false)
   const targetEngine = engine === 'pi' ? 'prime' : 'pi'
@@ -144,6 +147,7 @@ export function SessionEngineMenu({ agentId }: { agentId: string }) {
           <p>
             Your message history transfers, including tool results and attachments.
             {` ${ENGINE_LABELS[targetEngine]}`} uses its own model, settings and tools.
+            {hasInstructions && ' This conversation’s instructions come along.'}
           </p>
           {engine === 'prime' && (
             <p>

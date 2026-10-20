@@ -79,15 +79,22 @@ function mockTrustResources(cwd: string): TrustResource[] {
   return [at('settings', '.pi/settings.json'), at('extensions', '.pi/extensions', 2), at('mcp', '.pi/mcp.json'), at('skills', '.pi/skills', 3), at('append-system-prompt', '.pi/APPEND_SYSTEM.md')]
 }
 
-export async function trustPreflight(override: string | null, cwd: string): Promise<TrustPreflight> {
-  const [config, trust] = await Promise.all([piConfig(override), piTrust(override)])
-  const agentDir = config.getAgentDir()
+/**
+ * Project trust of `cwd` as decided from the agent dir `agentDir`: Vengeance's own unless given, such as a
+ * spawn's whose launch env names another (`spawnAgentDir`). `engineDefault` is what an Engine with that
+ * agent dir does without `--approve`/`--no-approve`.
+ */
+export async function trustPreflight(override: string | null, cwd: string, agentDir?: string): Promise<TrustPreflight> {
+  const [dir, trust] = await Promise.all([
+    agentDir ?? piConfig(override).then((config) => config.getAgentDir()),
+    piTrust(override)
+  ])
   const mockProject = env.mock && !existsSync(cwd)
   const resources = mockProject ? mockTrustResources(cwd) : findTrustResources(cwd)
   const requiresTrust = mockProject || trust.hasTrustRequiringProjectResources(cwd)
-  const entry = new trust.ProjectTrustStore(agentDir).getEntry(cwd)
+  const entry = new trust.ProjectTrustStore(dir).getEntry(cwd)
   // defaultProjectTrust can only be set in agent-dir settings; never read it from an untrusted project.
-  const defaultTrust = defaultProjectTrust(agentDir)
+  const defaultTrust = defaultProjectTrust(dir)
   const saved = entry?.decision ?? null
   return {
     cwd,

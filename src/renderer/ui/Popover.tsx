@@ -21,14 +21,42 @@ export interface PopoverProps {
   /** Distance from the trigger (default 6px). */
   sideOffset?: number
   className?: string
+  /**
+   * Focus the panel itself when it opens instead of its first control, for panels that open on an icon
+   * button (its tooltip would show at once). Tab still moves into the panel.
+   */
+  focusContent?: boolean
 }
 
-export function Popover({ trigger, children, open, onOpenChange, side = 'bottom', align = 'start', sideOffset = 6, className }: PopoverProps) {
+export function Popover({
+  trigger,
+  children,
+  open,
+  onOpenChange,
+  side = 'bottom',
+  align = 'start',
+  sideOffset = 6,
+  className,
+  focusContent = false
+}: PopoverProps) {
   return (
     <RPopover.Root open={open} onOpenChange={onOpenChange}>
       <RPopover.Trigger asChild>{trigger}</RPopover.Trigger>
       <RPopover.Portal>
-        <RPopover.Content side={side} align={align} sideOffset={sideOffset} collisionPadding={10} className={cn(floatingSurface, 'p-2', className)}>
+        <RPopover.Content
+          side={side}
+          align={align}
+          sideOffset={sideOffset}
+          collisionPadding={10}
+          className={cn(floatingSurface, 'p-2', className)}
+          {...(focusContent && {
+            tabIndex: -1,
+            onOpenAutoFocus: (event: Event) => {
+              event.preventDefault()
+              ;(event.currentTarget as HTMLElement).focus()
+            }
+          })}
+        >
           {children}
         </RPopover.Content>
       </RPopover.Portal>

@@ -9,6 +9,7 @@ import {
   type MockPlayArgs,
   type MockScriptName
 } from '@shared/api/engine'
+import { MCP_STATUS_KEY } from '@shared/api/mcp'
 import { isSpeedMode, SPEED_STATUS_KEY, type SpeedMode, type SpeedState } from '@shared/api/speed'
 import type {
   AssistantMessage,
@@ -20,6 +21,7 @@ import type {
   RpcResponseDataMap,
   UserMessage
 } from '@shared/engine-types'
+import { mockAssembledPrompt } from './conversation-prompt'
 import { Emitter, type EngineHandle, type EngineHandleEvents } from './handle'
 import {
   MOCK_BRIDGE_COMMANDS,
@@ -30,12 +32,17 @@ import {
   MOCK_TOOLS,
   thinkingLevelsFor
 } from './mock-data'
+import { MockMcp } from './mock-mcp'
 import { buildScript, type MockStep } from './mock-scripts'
 import { MockSpeed } from './mock-speed'
 import { MockSubagentRuntime } from './mock-subagents'
 import { mockUiRequests } from './mock-ui'
 import type { HandoffSnapshot } from './switch'
 import { hex8, MockSession, sleep, textOf } from './mock-session'
+import {
+  fromEngineState,
+  isMcpLiveAction
+} from '../../../resources/bridge/mcp-status-core'
 
 const ESC = '\u001b['
 
@@ -63,6 +70,11 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
   private readonly timers = new Set<() => void>()
 
   private run: Run | null = null
+  /**
+   * What this session's latest run built its prompt from (its active tools and MCP servers): like the
+   * bridge, the full prompt is reported only while they still hold.
+   */
+  private promptInputs: string | undefined
   private stderrLog = ''
   /** Dialogs opened by `/mock-ui` outside of a scripted run, by request id. */
   private readonly standaloneDialogs = new Map<
@@ -75,6 +87,8 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
   private readonly subagents = new MockSubagentRuntime((event) => this.emit(event))
   /** The bridge's response speed (`vengeance-speed`). */
   private readonly speed: MockSpeed
+  /** MCP servers of the conversation (`vengeance-mcp`; Engine 2's native MCP commands). */
+  protected readonly mcp = new MockMcp(() => this.publishMcp())
 
   /** `env` is the engine environment the bridge reads (e.g. the default response speed). */
   constructor(
@@ -128,11 +142,13 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
       statusText: `${ESC}2mLSP Inactive${ESC}22m`
     })
     this.publishSpeed()
+    this.publishMcp()
   }
 
   async stop(): Promise<void> {
     if (this._status === 'exited') return
     this.setStatus('stopping')
+    this.mcp.dispose()
     if (this.run) this.run.aborted = true
     this.wakeAll()
     this.setStatus('exited')
@@ -466,9 +482,23 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
         )
       case 'vengeance-reload':
         return null
+      case 'vengeance-mcp': {
+        const action = payload.action
+        if (action !== undefined) {
+          if (!isMcpLiveAction(action)) throw new Error('Vengeance bridge: unknown MCP action')
+          this.mcp.act(String(payload.server), action)
+        }
+        return fromEngineState(this.mcp.engineState()) ?? null
+      }
       case 'vengeance-system-prompt':
         return {
-          text: 'You are a careful coding assistant.\n\n<rules>\nVerify changes and report concrete results.\n</rules>\n\n<project_context>\nPrefer small, reviewable changes.\n</project_context>'
+          text: mockAssembledPrompt(
+            'You are a careful coding assistant.\n\n<rules>\nVerify changes and report concrete results.\n</rules>',
+            '<project_context>\nPrefer small, reviewable changes.\n</project_context>',
+            this.args.conversationPrompt,
+            'addendum'
+          ),
+          ...(this.promptInputs === this.turnInputs() ? {} : { partial: true })
         }
       case 'vengeance-tools':
         if (payload.op === 'set' && Array.isArray(payload.names)) {
@@ -562,6 +592,7 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
   ): Run {
     if (this.runsPlayed === 0 && script === 'showcase') this.seedAbandonedBranch()
     this.runsPlayed += 1
+    this.promptInputs = this.turnInputs()
     const steps = buildScript(script, {
       model: this.model,
       thinkingLevel: this.thinkingLevel,
@@ -729,6 +760,7 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
     this.resumedFile = undefined
     this.sessionName = undefined
     this.runsPlayed = 0
+    this.promptInputs = undefined
     this.resetEntries()
     this.speed.sessionChanged()
     this.publishSpeed()
@@ -762,6 +794,23 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
 
   private speedState(): SpeedState {
     return this.speed.state(this.model, this.branchPath())
+  }
+
+  /** Like the bridge: the active tools and the MCP servers' names and states a run's prompt is built from. */
+  private turnInputs(): string {
+    const servers = fromEngineState(this.mcp.engineState())?.servers
+    return JSON.stringify([this.activeTools, servers?.map(({ name, state }) => [name, state]) ?? null])
+  }
+
+  /** Like the bridge: the built-in MCP extension's state on its hidden status key, whenever it changes. */
+  protected publishMcp(): void {
+    this.emit({
+      type: 'extension_ui_request',
+      id: randomUUID(),
+      method: 'setStatus',
+      statusKey: MCP_STATUS_KEY,
+      statusText: JSON.stringify(fromEngineState(this.mcp.engineState()))
+    })
   }
 
   /** Like the bridge: the session's speed on its hidden status key, whenever it may have changed. */

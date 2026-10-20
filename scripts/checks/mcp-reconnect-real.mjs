@@ -1,4 +1,5 @@
-// Real-engine check of Settings → MCP "Reconnect in open sessions" (npm run e2e:mcp, after npm run build).
+// Real-engine check of Settings → MCP "Reconnect in open sessions in this folder"
+// (npm run e2e:mcp, after npm run build).
 // Uses a TEMP engine config dir (PI_CODING_AGENT_DIR) whose mcp.json declares one trivial stdio MCP server
 // (written below; it logs every start to a file). The BUILT app opens a temp workspace (--no-session), then
 // sends exactly what the MCP section sends to each open session — `/mcp reconnect <server>` through RPC

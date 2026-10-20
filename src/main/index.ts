@@ -8,8 +8,13 @@ import { bridgeExtensionPath } from './engine/bridge'
 import { EngineManager } from './engine/manager'
 import { env } from './env'
 import { maskAgentInfo } from './features/launch/env-vault'
+import { trustPreflight } from './features/launch/trust'
+import {
+  ConversationPromptStore,
+  piConversationPromptSources
+} from './features/sessions/conversation-prompts'
 import { accountModelFilter } from './features/settings/account-models'
-import { prepareAgentDir } from './features/settings/agent-dir'
+import { prepareAgentDir, spawnAgentDir } from './features/settings/agent-dir'
 import { broadcast, handle } from './ipc/handle'
 import { registerIpc } from './ipc'
 import { physicalPath } from './paths'
@@ -179,6 +184,7 @@ if (!singleInstance) {
     openFolder(folder)
   })
 
+  const conversationPrompts = new ConversationPromptStore(app.getPath('userData'))
   const manager = new EngineManager(
     {
       onEvent: (agentId, event) => broadcast('engine:event', { agentId, event }),
@@ -197,7 +203,18 @@ if (!singleInstance) {
           [SPEED_DEFAULT_ENV]: settings?.speedDefault ?? 'standard'
         }
       },
-      offeredModel: accountModelFilter
+      offeredModel: accountModelFilter,
+      piPromptSources: (args) => {
+        // The spawn finds APPEND_SYSTEM.md and project trust in the agent dir its launch env names.
+        // Without the Engine's trust store, only the global APPEND_SYSTEM.md is certain to load.
+        const dir = spawnAgentDir(args.cwd, args.launch?.env)
+        return piConversationPromptSources(conversationPrompts, args, dir, (cwd) =>
+          trustPreflight(engineOverridePath('pi'), cwd, dir).then(
+            (trust) => trust.engineDefault,
+            () => false
+          )
+        )
+      }
     }
   )
 
@@ -255,7 +272,12 @@ if (!singleInstance) {
     session.defaultSession.setPermissionCheckHandler((_contents, permission) =>
       ALLOWED_PERMISSIONS.has(permission)
     )
-    registerIpc({ manager, engineOverridePath })
+    registerIpc({ manager, engineOverridePath, conversationPrompts })
+    conversationPrompts
+      .collectGarbage()
+      .catch((error: unknown) =>
+        console.error('[vengeance] unused conversation instructions could not be removed:', error)
+      )
     handle('app:take-recovery-notice', () => {
       const pending = recoveryNoticePending
       recoveryNoticePending = false

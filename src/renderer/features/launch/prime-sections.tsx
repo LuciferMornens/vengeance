@@ -50,7 +50,7 @@ export function PrimePromptSection(props: SectionProps) {
     <>
       <Group
         title="Replace"
-        description="Instructions that replace the engine’s default system prompt."
+        description="Instructions that replace the engine’s default system prompt and any SYSTEM.md."
       >
         <div className="p-3">
           <Textarea
@@ -64,7 +64,7 @@ export function PrimePromptSection(props: SectionProps) {
       </Group>
       <Group
         title="Append"
-        description="Additional instructions, applied in order after the system prompt."
+        description="Additional instructions, added in order at the end of the system prompt. Any entry here replaces APPEND_SYSTEM.md."
         actions={
           <Button
             size="xs"

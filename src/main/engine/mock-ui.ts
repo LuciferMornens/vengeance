@@ -6,7 +6,8 @@ const E = '\u001b['
 /**
  * Requests for the hidden `/mock-ui <kind>` command (not listed in get_commands), which opens extension UI
  * outside of a run so dialogs and toasts can be screenshotted. Kinds: select, confirm, input, editor, notify,
- * widgets (one widget above and one below the editor), widgets-clear. `dialog` waits for an answer.
+ * widgets (one widget above and one below the editor), widgets-clear, status (two extension status chips),
+ * status-clear. `dialog` waits for an answer.
  */
 export function mockUiRequests(kind: string): { events: RpcExtensionUIRequest[]; dialog: ExtensionUIDialogRequest | null } {
   const base = { type: 'extension_ui_request' as const, id: randomUUID() }
@@ -28,6 +29,27 @@ export function mockUiRequests(kind: string): { events: RpcExtensionUIRequest[];
           widgetKey: 'pi-lens',
           widgetLines: clear ? undefined : [`${E}2mlens${E}22m ${E}32m✓ 0 errors${E}39m  ${E}33m▲ 2 warnings${E}39m  ${E}2m· src/session/store.ts:48 unused import${E}22m`],
           widgetPlacement: 'belowEditor'
+        }
+      ],
+      dialog: null
+    }
+  }
+  if (kind === 'status' || kind === 'status-clear') {
+    const clear = kind === 'status-clear'
+    return {
+      events: [
+        {
+          ...base,
+          method: 'setStatus',
+          statusKey: 'pi-index',
+          statusText: clear ? undefined : `${E}32m●${E}39m Index ready · 1,284 files`
+        },
+        {
+          type: 'extension_ui_request',
+          id: randomUUID(),
+          method: 'setStatus',
+          statusKey: 'rate-guard',
+          statusText: clear ? undefined : `${E}33mAPI 80%${E}39m · slows requests until 14:20 to stay under the hourly limit`
         }
       ],
       dialog: null

@@ -7,6 +7,7 @@ import type {
   EngineRuntimeInfo,
   EngineStatus
 } from '@shared/api/engine'
+import type { PrimeLaunchOptions } from '@shared/api/launch'
 import type {
   RpcCommand,
   RpcExtensionUIResponse,
@@ -17,6 +18,7 @@ import type {
 import {
   Emitter,
   defaultTimeout,
+  type BackendRestart,
   type EngineHandle,
   type EngineHandleEvents,
   type SendOptions
@@ -41,13 +43,15 @@ import {
 } from './normalize'
 import { asRecord, asRecords, PrimeCommandError, stringValue, type PrimeRecord } from './transport'
 import { forkPrimeSession, primeCreatePayload } from './sessions'
-import { primeRestartSelection, restartPrimeSession } from './restart'
+import { PRIME_PROMPT_SOURCE_KEYS, primeRestartSelection, restartPrimeSession } from './restart'
 import { PrimeSpeedControl } from './speed'
 import { samePath } from '../../paths'
 import { locatePrimeEngine } from './locate'
 import { guardPrimeHandoff } from './daemon-activity'
 import { PrimeSessionLineage } from './session-lineage'
 import { callPrimeBridge } from './bridge'
+import { PrimeMcpTimeouts } from './mcp-live'
+import { primeAppendSystemText, primeConfiguredArgs } from '../conversation-prompt'
 
 export interface PrimeEngineProcessOptions {
   args: CreateAgentArgs
@@ -85,17 +89,30 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
   private deferredFrames: PrimeRecord[] = []
   private startup: Promise<void> | undefined
   private stopTask: Promise<void> | undefined
-  private restartTask: Promise<CreateAgentArgs | void> | undefined
+  private restartTask: Promise<BackendRestart> | undefined
   private restarting = false
   private retired = false
   private ownsSession = false
   private args: CreateAgentArgs
+  /** The native configuration this spawn composed, conversation instructions included. */
+  private nativeLaunch: PrimeLaunchOptions | undefined
+  /**
+   * The resident was created by this process from `nativeLaunch`. An attached one keeps the prompt sources
+   * it was created or last patched with, which can differ.
+   */
+  private nativeLaunchSent = false
   private readonly sessionLineage = new PrimeSessionLineage()
   private readonly eventAdapter = new PrimeEventAdapter((event) => this.emit('event', event))
   private readonly bashRunner = new PrimeBashRunner((event) => this.emit('event', event))
   private readonly speedControl = new PrimeSpeedControl((type, payload) =>
     this.nativeCommand(type, payload)
   )
+  private readonly mcpTimeouts = new PrimeMcpTimeouts()
+  /**
+   * The conversation's MCP requests run one at a time: a listing holds each server in the kernel
+   * while it opens it, so a Reconnect during a read would wait that read out within its own bound.
+   */
+  private mcpRequests: Promise<unknown> = Promise.resolve()
 
   constructor(private readonly options: PrimeEngineProcessOptions) {
     super()
@@ -180,6 +197,12 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
       await this.openConnection()
       if (this.stopping) return
       const client = this.requireClient()
+      const configured = primeConfiguredArgs(
+        args,
+        args.conversationPrompt ? await primeAppendSystemText(args.cwd, client.agentDir) : undefined
+      )
+      this.nativeLaunch = configured.launch?.prime
+      if (this.stopping) return
       let recoveringResident: PrimeCommandError | undefined
       this.activeSessionId ??= args.nativeAgentId
       if (!this.activeSessionId && args.sessionPath) {
@@ -195,10 +218,11 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
       if (this.stopping) return
       if (!this.activeSessionId) {
         try {
-          const created = await client.request('create', primeCreatePayload(args), 0)
+          const created = await client.request('create', primeCreatePayload(configured), 0)
           this.activeSessionId = stringValue(created.activeSessionId) ?? stringValue(created.id)
           this.state = created
           this.ownsSession = args.noSession === true
+          this.nativeLaunchSent = true
         } catch (error) {
           if (
             !(error instanceof PrimeCommandError) ||
@@ -263,7 +287,7 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
     nextArgs: CreateAgentArgs,
     executablePath?: string | null,
     patch?: Partial<CreateAgentArgs>
-  ): Promise<CreateAgentArgs | void> {
+  ): Promise<BackendRestart> {
     this.restartTask ??= this.restartSession(nextArgs, executablePath, patch)
     return this.restartTask
   }
@@ -272,7 +296,7 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
     nextArgs: CreateAgentArgs,
     executablePath?: string | null,
     patch?: Partial<CreateAgentArgs>
-  ): Promise<CreateAgentArgs | void> {
+  ): Promise<BackendRestart> {
     if (this.stopping) throw new Error('This Engine 2 session is closing')
     if (this.reconnecting)
       throw new Error('Engine 2 is reconnecting. Try restarting again shortly.')
@@ -299,38 +323,52 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
         if (!resident) {
           this.retired = true
           this.client = undefined
+          // No resident took the configuration; the successor creates one from the session file with it.
           return {
-            ...nextArgs,
-            nativeAgentId: undefined,
-            sessionPath,
-            launch: {
-              ...nextArgs.launch,
-              env: { ...client.launchEnv, ...nextArgs.launch?.env }
-            }
+            args: {
+              ...nextArgs,
+              nativeAgentId: undefined,
+              sessionPath,
+              launch: {
+                ...nextArgs.launch,
+                env: { ...client.launchEnv, ...nextArgs.launch?.env }
+              }
+            },
+            applied: false
           }
         }
         client = resident.client
         this.client = client
         this.activeSessionId = resident.nativeAgentId
+        this.nativeLaunchSent = false
         recoveredConnection = true
       }
       if (!this.activeSessionId) throw new Error('Engine 2 has no active session to restart')
       const state = await this.nativeCommand('get_state')
       const previousArgs = primeRestartSelection(this.args, this.args, state)
       nextArgs = primeRestartSelection(this.args, nextArgs, state, patch)
+      // Compare native configurations, so instructions that were added, changed or removed are patched.
+      // Unless this process created the resident, its prompt sources are unknown: send them whenever a
+      // conversation's instructions are involved.
+      const appendSystemText = nextArgs.conversationPrompt
+        ? await primeAppendSystemText(nextArgs.cwd, client.agentDir)
+        : undefined
+      const promptsKnown =
+        this.nativeLaunchSent || (!this.args.conversationPrompt && !nextArgs.conversationPrompt)
       await restartPrimeSession(
         client,
         this.activeSessionId,
-        previousArgs,
-        nextArgs,
+        { ...previousArgs, launch: { ...previousArgs.launch, prime: this.nativeLaunch } },
+        primeConfiguredArgs(nextArgs, appendSystemText),
         executablePath,
-        patch
+        patch,
+        promptsKnown ? [] : PRIME_PROMPT_SOURCE_KEYS
       )
       this.retired = true
       this.unwire()
       client.close()
       this.client = undefined
-      return nextArgs
+      return { args: nextArgs, applied: true }
     } catch (error) {
       if (!this.stopping && (recoveredConnection || !this.client?.connected)) {
         this.unwire()
@@ -405,12 +443,18 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
   }
 
   async bridge(request: BridgeRequest): Promise<BridgeResult> {
-    return callPrimeBridge(
-      request,
-      this.nativeCommand.bind(this),
-      this.toolState.bind(this),
-      this.speedControl.read.bind(this.speedControl)
-    )
+    const call = () =>
+      callPrimeBridge(
+        request,
+        this.nativeCommand.bind(this),
+        this.toolState.bind(this),
+        this.speedControl.read.bind(this.speedControl),
+        this.mcpTimeouts
+      )
+    if (request.op !== 'mcp') return call()
+    const result = this.mcpRequests.then(call)
+    this.mcpRequests = result.catch(() => undefined)
+    return result
   }
 
   private async execute(
@@ -496,6 +540,7 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
 
   private attach(recoveringResident?: PrimeCommandError): Promise<void> {
     if (this.attachment) return this.attachment
+    this.mcpTimeouts.clear()
     const client = this.requireClient()
     const sessionId = this.activeSessionId
     const pending = attachPrimeResident(

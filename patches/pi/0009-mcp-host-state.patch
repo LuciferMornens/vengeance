@@ -1,0 +1,1028 @@
+diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
+index 5d5eb33..07b99a8 100644
+--- a/packages/coding-agent/docs/mcp.md
++++ b/packages/coding-agent/docs/mcp.md
+@@ -261,6 +261,47 @@ Extensions can add servers for the current session with `pi.registerMcpServer(na
+ 
+ Changes to enabled state or exposure apply only to the current session. A file-configured server with the same name takes precedence, and `/mcp` lists the overridden registration. `pi mcp` shell commands do not load extensions and only see file-configured servers.
+ 
++### Host integration
++
++Extensions that show MCP servers in their own interface, for example the extension of an app that runs Pi in RPC mode, use two channels of the shared event bus, `pi.events`: `mcp:state` and `mcp:request`. Both carry plain data, so hosts declare the types below themselves.
++
++Pi publishes the state on `mcp:state` whenever it changes. Changes made in one turn of the event loop are published once. After the session shuts down, `servers` is empty.
++
++```typescript
++interface McpHostState {
++  version: 1;
++  servers: {
++    name: string;
++    // "starting" until the connection exists
++    state: "disabled" | "starting" | "connecting" | "connected" | "disconnected" | "needs-auth" | "failed" | "closed";
++    scope?: "global" | "project" | "extension";
++    source: string; // the mcp.json (or project override) or extension that defines the server
++    saves?: "global" | "project" | "session"; // where enable and disable save; absent without a scope
++    projectConfig?: string; // where enable-project and disable-project save an override, when they can
++    exposure: "codemode" | "deferred" | "direct" | "hidden";
++    toolCount?: number; // while connected
++    hasResources: boolean;
++    oauth: boolean; // signs in with OAuth: HTTP without an Authorization header or `auth`; from the config, also while disabled
++    error?: string; // last failed action, then the connection error while not connected
++  }[];
++  configErrors: string[];
++}
++```
++
++Hosts emit requests on `mcp:request`:
++
++```typescript
++pi.events.emit("mcp:request", { version: 1, action: "state", reply: (state) => render(state) });
++pi.events.emit("mcp:request", { version: 1, action: "disable", server: "docs", reply: (error) => error && show(error) });
++```
++
++- `state` replies synchronously with the current state.
++- `reconnect` and `logout` act like `/mcp reconnect` and `/mcp logout`, and wait for a server that is still starting, for example right after it was enabled. `enable` and `disable` act like the `/mcp` manager's Enable and Disable, and save where `saves` says: the `global` or `project` `mcp.json` (a project override of a global server is `project`), or the `session` alone for registered servers. `enable-project` and `disable-project` act like its Enable in this project and Disable in this project: for a global server without a project override while the project is trusted, they save an override to the project `mcp.json` that `projectConfig` names, and leave the global `mcp.json` unchanged. Other servers have no `projectConfig`, and these two reply an error for them. All four do nothing when the server already is in that state.
++- Actions reply once done, with an error message or `undefined`. `reconnect` replies the connection failure, like `/mcp reconnect`. For `enable`, connection failures show only in the state.
++- The state an action leaves is published before the action replies, so the last state a host received on `mcp:state` is current when the reply arrives.
++- Before the session starts and after it shuts down, actions reply `MCP is not running.`. An action still running when the session shuts down replies once it stopped. Requests with another `version` reply an error.
++- When another extension replaces the built-in MCP support (see below), the built-in extension still answers: `state` replies no servers, and actions reply `MCP is not running.`. When built-in MCP support is disabled with `-builtin:mcp` or `--no-mcp`, nothing replies, so hosts need a timeout.
++
+ ### Replace the built-in MCP support
+ 
+ An installed extension that registers `/mcp`, such as `pi-mcp-adapter`, replaces the built-in MCP support for sessions. Pi then does not read `mcp.json` or connect its servers in a session, and `/mcp` belongs to the extension. Remove the extension to restore the built-in behavior. To disable built-in MCP support without a replacement, disable `mcp` under Built-in in `pi config`, or set `"extensions": ["-builtin:mcp"]` in [settings](settings.md#resources). `--no-mcp` disables it for one run.
+diff --git a/packages/coding-agent/src/extensions/mcp/config.ts b/packages/coding-agent/src/extensions/mcp/config.ts
+index 3dae93b..8d3036a 100644
+--- a/packages/coding-agent/src/extensions/mcp/config.ts
++++ b/packages/coding-agent/src/extensions/mcp/config.ts
+@@ -71,6 +71,13 @@ export interface LoadedMcpConfig {
+ 	projectConfig?: string;
+ }
+ 
++/** HTTP servers authenticate with OAuth unless the config supplies an `Authorization` header or `auth`. */
++export function isOAuthServer(entry: McpServerEntry): boolean {
++	const { config } = entry;
++	if (!("url" in config) || config.auth) return false;
++	return !Object.keys(config.headers ?? {}).some((header) => header.toLowerCase() === "authorization");
++}
++
+ const OVERRIDE_KEYS = ["enabled", "exposure", "toolExposure"];
+ 
+ /** Whether an entry overrides a server defined elsewhere instead of defining one. */
+diff --git a/packages/coding-agent/src/extensions/mcp/index.ts b/packages/coding-agent/src/extensions/mcp/index.ts
+index 8a97d7f..db16580 100644
+--- a/packages/coding-agent/src/extensions/mcp/index.ts
++++ b/packages/coding-agent/src/extensions/mcp/index.ts
+@@ -24,6 +24,11 @@
+  * reported once. `/mcp` opens a manager to sign in, reconnect, enable or disable servers, and change
+  * their exposure; the last two are saved to the `mcp.json` that defines the server, or apply to the
+  * current session for registered servers.
++ *
++ * Hosts that show the servers without the TUI, such as an extension of an RPC client, use the shared
++ * event bus (`pi.events`): the extension publishes `McpHostState` on `mcp:state` whenever it changes,
++ * and answers `McpHostRequest`s emitted on `mcp:request` to read the state, reconnect, enable,
++ * disable (also for the trusted project alone), or sign out of a server.
+  */
+ 
+ import { join, resolve } from "node:path";
+@@ -44,6 +49,7 @@ import { CODEMODE_TOOL_NAME } from "../codemode/tool.ts";
+ import { TOOL_SEARCH_TOOL_NAME } from "../tool-search/tool.ts";
+ import {
+ 	getMcpToolExposure,
++	isOAuthServer,
+ 	type LoadedMcpConfig,
+ 	loadMcpConfig,
+ 	type McpExposure,
+@@ -90,6 +96,90 @@ export interface McpExtensionOptions {
+ 	startupWaitMs?: number;
+ }
+ 
++/** Channel the extension publishes `McpHostState` on whenever its state changes. */
++export const MCP_STATE_EVENT = "mcp:state";
++/** Channel hosts emit `McpHostRequest` on. */
++export const MCP_REQUEST_EVENT = "mcp:request";
++
++/** A server as hosts see it. */
++export interface McpHostServerState {
++	name: string;
++	/** `disabled` when turned off, `starting` before its connection exists, else the connection state. */
++	state: "disabled" | "starting" | McpServerConnection["state"];
++	scope?: McpServerEntry["scope"];
++	/** Config file or extension path that defines the server: its project override when set, else its source. */
++	source: string;
++	/**
++	 * Where `enable` and `disable` save, like the manager says: the `global` or `project` `mcp.json`
++	 * (`source`; a project override of a global server is `project`), or `session` for registered
++	 * servers, whose changes last for the current session only. Absent when the config gave no scope.
++	 */
++	saves?: "global" | "project" | "session";
++	/**
++	 * For a global server without a project override while the project is trusted: the project
++	 * `mcp.json` that `enable-project` and `disable-project` save an override to, like the manager's
++	 * "Enable in this project" and "Disable in this project".
++	 */
++	projectConfig?: string;
++	exposure: McpExposure;
++	/** Tools the server offers; only while connected. */
++	toolCount?: number;
++	hasResources: boolean;
++	/**
++	 * Whether the server signs in with OAuth: an HTTP server whose config has no `Authorization` header
++	 * and no `auth`. Known from the config, so also while starting or disabled.
++	 */
++	oauth: boolean;
++	/** The message of the last failed action, then the connection error while not connected. */
++	error?: string;
++}
++
++/**
++ * Published on `MCP_STATE_EVENT`. Changes in one turn of the event loop are published once; the
++ * changes of a host action are published before it replies.
++ */
++export interface McpHostState {
++	version: 1;
++	/** `mcp.json` servers first, then registered ones; empty after the session shut down. */
++	servers: McpHostServerState[];
++	configErrors: string[];
++}
++
++/**
++ * Emitted on `MCP_REQUEST_EVENT`. `state` replies synchronously. The actions reply once done, with
++ * an error message or undefined, after the state they left was published. `reconnect` and `logout`
++ * act like the `/mcp` subcommands: they wait for a server that is still starting, and `reconnect`
++ * replies the connection failure. `enable` and `disable` act like the manager, saving where the
++ * server's `saves` says. `enable-project` and `disable-project` save an override to the server's
++ * `projectConfig` instead, and reply an error for servers without one. All four do nothing when the
++ * server already is in that state. For `enable`, connection failures show only in the state.
++ */
++export type McpHostRequest =
++	| { version: 1; action: "state"; reply: (state: McpHostState) => void }
++	| {
++			version: 1;
++			action: "reconnect" | "enable" | "disable" | "enable-project" | "disable-project" | "logout";
++			server: string;
++			reply?: (error: string | undefined) => void;
++	  };
++
++type McpHostAction = Exclude<McpHostRequest["action"], "state">;
++
++const MCP_HOST_ACTIONS: ReadonlySet<unknown> = new Set<McpHostAction>([
++	"reconnect",
++	"enable",
++	"disable",
++	"enable-project",
++	"disable-project",
++	"logout",
++]);
++
++function isHostAction(action: unknown): action is McpHostAction {
++	return MCP_HOST_ACTIONS.has(action);
++}
++
++const MCP_NOT_RUNNING = "MCP is not running.";
++
+ const DEFAULT_STARTUP_WAIT_MS = 10_000;
+ 
+ const RESOURCE_TOOL_NAMES: ReadonlySet<string> = new Set([
+@@ -104,7 +194,7 @@ interface McpServer {
+ 	connection?: McpServerConnection;
+ 	/** For servers extensions registered: the config as registered, to detect re-registrations. */
+ 	registeredConfig?: string;
+-	/** Result of the last `/mcp` action that failed, shown in the manager. */
++	/** Result of the last `/mcp` or host action that failed, shown in the manager and the host state. */
+ 	message?: string;
+ 	/** Identifies the current connection attempt; disabling or replacing it invalidates earlier work. */
+ 	attempt?: symbol;
+@@ -251,6 +341,19 @@ function describeState(server: McpServer, withError = true): string {
+ 	}
+ }
+ 
++/** The message of the last failed action, then the connection error while not connected. */
++function serverError(server: McpServer): string | undefined {
++	const { message, connection } = server;
++	const lines = [message, connection?.state === "connected" ? undefined : connection?.error];
++	return lines.filter((line): line is string => line !== undefined).join("\n") || undefined;
++}
++
++/** Where enabling or disabling the server saves (`McpHostServerState.saves`). */
++function savedIn(entry: McpServerEntry): McpHostServerState["saves"] {
++	if (entry.scope === "extension") return "session";
++	return entry.override ? "project" : entry.scope;
++}
++
+ /** Servers that need the user first. */
+ function attentionRank(server: McpServer): number {
+ 	if (!isEnabled(server)) return 5;
+@@ -295,6 +398,8 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 		const startupWaitMs = options.startupWaitMs ?? DEFAULT_STARTUP_WAIT_MS;
+ 		/** Working directory of the session, for stdio servers. */
+ 		let sessionCwd = process.cwd();
++		/** Context of the current session, for host actions; undefined while no session runs. */
++		let sessionContext: ExtensionContext | undefined;
+ 		let credentials = options.credentials;
+ 		/** The session's model registry, which resolves `auth.provider` tokens. */
+ 		let modelRegistry: ModelRegistry | undefined;
+@@ -328,8 +433,20 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 			return work;
+ 		};
+ 		const listeners = new Set<() => void>();
++		/** Pending publish of the host state; changes made before it runs are published together. */
++		let statePublish: NodeJS.Immediate | undefined;
++		const publishState = () => {
++			clearImmediate(statePublish);
++			statePublish = undefined;
++			try {
++				pi.events.emit(MCP_STATE_EVENT, hostState());
++			} catch {
++				// Hosts must not break MCP, and the bus throws once the extension runtime is stale.
++			}
++		};
+ 		const emitChange = () => {
+ 			for (const listener of listeners) listener();
++			statePublish ??= setImmediate(publishState);
+ 		};
+ 		const subscribe = (listener: () => void) => {
+ 			listeners.add(listener);
+@@ -672,6 +789,13 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 			return undefined;
+ 		};
+ 
++		/**
++		 * The trusted project's `mcp.json` when the server can be turned on or off for the project alone:
++		 * global servers without a project override.
++		 */
++		const projectOverrideConfig = (entry: McpServerEntry): string | undefined =>
++			entry.scope === "global" && !entry.override ? projectConfig : undefined;
++
+ 		/** Sign in, then reconnect. Returns an error message on failure. `cancel` or the session's end stops the sign-in. */
+ 		const signIn = async (
+ 			server: McpServer,
+@@ -827,8 +951,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 						: entry.scope
+ 							? `saved to the ${entry.scope} mcp.json`
+ 							: "saved to mcp.json";
+-			// Global servers without an override can be turned on or off for the trusted project alone.
+-			const inProject = entry.scope === "global" && !entry.override && projectConfig !== undefined;
++			const inProject = projectOverrideConfig(entry) !== undefined;
+ 			const inProjectSaved = "saved to the project mcp.json";
+ 			const items: SelectItem[] = [];
+ 			if (!isEnabled(server)) {
+@@ -861,13 +984,10 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 				...(entry.override ? [`project override: ${entry.override}`] : []),
+ 				`State: ${describeState(server, false)}`,
+ 			];
+-			const error = [server.message, connection?.state === "connected" ? undefined : connection?.error]
+-				.filter((line): line is string => line !== undefined)
+-				.join("\n");
+ 			return {
+ 				title: `MCP server ${name}`,
+ 				details: details.join("\n"),
+-				error: error || undefined,
++				error: serverError(server),
+ 				items,
+ 				selected: items[0]?.value,
+ 				confirmLabel: "select",
+@@ -941,22 +1061,27 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 			);
+ 		};
+ 
+-		/** Keep the subscribed menu usable while a connection opens or closes. */
++		/**
++		 * Keep the subscribed menu usable while a connection opens or closes. The result becomes the
++		 * server's message unless the session ended or a later attempt replaced this one. Resolves to the
++		 * result.
++		 */
+ 		const runInBackground = (
+ 			ctx: ExtensionContext,
+ 			server: McpServer,
+ 			operation: () => Promise<string | undefined>,
+-		) => {
++		): Promise<string | undefined> => {
+ 			const ready = operation();
+ 			const attempt = server.attempt;
+ 			const { signal } = session;
+ 			const finish = (message: string | undefined) => {
+-				if (signal.aborted || server.attempt !== attempt || !servers.includes(server)) return;
++				if (signal.aborted || server.attempt !== attempt || !servers.includes(server)) return message;
+ 				server.message = message;
+ 				ensureDiscoveryActive(ctx);
+ 				emitChange();
++				return message;
+ 			};
+-			void track(ready.then(finish, (error: unknown) => finish(errorMessage(error))));
++			return track(ready.then(finish, (error: unknown) => finish(errorMessage(error))));
+ 		};
+ 
+ 		const runAction = async (ui: McpUi, ctx: ExtensionContext, server: McpServer, action: string) => {
+@@ -968,7 +1093,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 					break;
+ 				case "reconnect":
+ 					// Connection state and error already report failures, including required sign-ins.
+-					runInBackground(ctx, server, async () => {
++					void runInBackground(ctx, server, async () => {
+ 						await reconnect(server);
+ 						return undefined;
+ 					});
+@@ -987,7 +1112,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 				case "enable-project":
+ 				case "disable-project": {
+ 					const enable = action.startsWith("enable");
+-					runInBackground(ctx, server, () => setEnabled(server, enable, action.endsWith("-project")));
++					void runInBackground(ctx, server, () => setEnabled(server, enable, action.endsWith("-project")));
+ 					break;
+ 				}
+ 			}
+@@ -1111,6 +1236,103 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 			ctx.ui.notify(`Signed in to MCP server "${name}" (${server.connection?.tools.length ?? 0} tools).`, "info");
+ 		};
+ 
++		// ---------------------------------------------------------------------------------------
++		// Host channels (`pi.events`), for hosts that show the servers without the TUI
++		// ---------------------------------------------------------------------------------------
++
++		const hostState = (): McpHostState => ({
++			version: 1,
++			servers: servers.map((server): McpHostServerState => {
++				const { entry, connection } = server;
++				const error = serverError(server);
++				const saves = savedIn(entry);
++				const inProject = projectOverrideConfig(entry);
++				return {
++					name: entry.name,
++					state: isEnabled(server) ? (connection?.state ?? "starting") : "disabled",
++					...(entry.scope ? { scope: entry.scope } : {}),
++					source: entry.override ?? entry.source,
++					...(saves ? { saves } : {}),
++					...(inProject ? { projectConfig: inProject } : {}),
++					exposure: exposureOf(entry),
++					...(connection?.state === "connected" ? { toolCount: connection.tools.length } : {}),
++					hasResources: connection?.hasResources ?? false,
++					oauth: isOAuthServer(entry),
++					...(error ? { error } : {}),
++				};
++			}),
++			configErrors: [...configErrors],
++		});
++
++		/** Run a host action like its `/mcp` counterpart. Resolves to an error message, undefined on success. */
++		const runHostAction = async (action: McpHostAction, name: string): Promise<string | undefined> => {
++			const ctx = sessionContext;
++			const { signal } = session;
++			if (!ctx) return MCP_NOT_RUNNING;
++			const server = findServer(name);
++			if (!server) return `No MCP server named "${name}".`;
++			if ((action === "reconnect" || action === "logout") && isEnabled(server) && !server.connection) {
++				// The subcommands act once the startup connections exist. A server also starts when it is
++				// enabled or registered, so wait for its own connection.
++				await server.ready;
++				if (signal.aborted) return MCP_NOT_RUNNING;
++				if (isEnabled(server) && !server.connection) return `MCP server "${name}" is still starting.`;
++			}
++			switch (action) {
++				case "reconnect": {
++					// The reply reports a failure like `/mcp reconnect`; the state shows it as the connection error.
++					const failure = reconnect(server);
++					await runInBackground(ctx, server, async () => {
++						await failure;
++						return undefined;
++					});
++					return failure;
++				}
++				case "logout":
++					if (!usesOAuth(server)) return oauthPick.none;
++					return runInBackground(ctx, server, async () => {
++						await signOut(server);
++						return undefined;
++					});
++				case "enable":
++				case "disable":
++				case "enable-project":
++				case "disable-project": {
++					const enabled = action.startsWith("enable");
++					if (isEnabled(server) === enabled) return undefined;
++					const inProject = action.endsWith("-project");
++					if (inProject && !projectOverrideConfig(server.entry)) {
++						return `MCP server "${name}" cannot be turned ${enabled ? "on" : "off"} for the project alone. Only global servers without a project override can, in a trusted project.`;
++					}
++					return runInBackground(ctx, server, () => setEnabled(server, enabled, inProject));
++				}
++			}
++		};
++
++		pi.events.on(MCP_REQUEST_EVENT, (data) => {
++			// Requests come from other extensions, so their shape is checked here.
++			if (typeof data !== "object" || data === null) return;
++			const { version, action, server, reply } = data as Record<string, unknown>;
++			const respond = (value: McpHostState | string | undefined) => {
++				if (typeof reply !== "function") return;
++				try {
++					reply(value);
++				} catch {
++					// Hosts must not break MCP.
++				}
++			};
++			if (version !== 1) respond(`Unsupported MCP host request version: ${String(version)}.`);
++			else if (action === "state") respond(hostState());
++			else if (isHostAction(action)) {
++				const done = (error: string | undefined) => {
++					// Hosts read the state they keep once the action replies, so its changes are published first.
++					if (statePublish) publishState();
++					respond(error);
++				};
++				void runHostAction(action, String(server)).then(done, (error: unknown) => done(errorMessage(error)));
++			} else respond(`Unknown MCP host request action: ${String(action)}.`);
++		});
++
+ 		pi.on("session_start", (_event, ctx) => {
+ 			const loaded = (options.loadConfig ?? defaultLoadConfig)(ctx);
+ 			configErrors = loaded.errors;
+@@ -1119,6 +1341,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 			warnedUnreachable = false;
+ 			waitedForStartup = false;
+ 			sessionCwd = ctx.cwd;
++			sessionContext = ctx;
+ 			modelRegistry = ctx.modelRegistry;
+ 			session = new AbortController();
+ 			const { signal } = session;
+@@ -1251,9 +1474,13 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 
+ 		pi.on("session_shutdown", async () => {
+ 			session.abort();
++			sessionContext = undefined;
+ 			const closing = connections();
+ 			servers = [];
++			configErrors = [];
+ 			emitChange();
++			// Hosts see the empty state now: by the next turn of the event loop the runtime may be stale.
++			publishState();
+ 			await Promise.all([...backgroundActions, ...closing.map((connection) => connection.close())]);
+ 		});
+ 
+diff --git a/packages/coding-agent/src/extensions/mcp/runtime.ts b/packages/coding-agent/src/extensions/mcp/runtime.ts
+index f13d21b..f11b3d0 100644
+--- a/packages/coding-agent/src/extensions/mcp/runtime.ts
++++ b/packages/coding-agent/src/extensions/mcp/runtime.ts
+@@ -31,7 +31,7 @@ import {
+ import { McpOAuthAuthorizationRequiredError, type OAuthChallenge } from "@earendil-works/pi-mcp/oauth";
+ import { VERSION } from "../../config.ts";
+ import { resolveConfigValueOrThrow, resolveHeadersOrThrow } from "../../core/resolve-config-value.ts";
+-import type { McpServerEntry } from "./config.ts";
++import { isOAuthServer, type McpServerEntry } from "./config.ts";
+ import type { McpServerLog } from "./log.ts";
+ import {
+ 	createMcpAuthProvider,
+@@ -79,13 +79,6 @@ function signInRequiredMessage(entry: McpServerEntry): string {
+ 	return `MCP server "${entry.name}" requires sign-in. Run ${provider ? `/login ${provider}` : "/mcp"} to sign in.`;
+ }
+ 
+-/** HTTP servers authenticate with OAuth unless the config supplies an `Authorization` header or `auth`. */
+-function usesOAuth(entry: McpServerEntry): boolean {
+-	const { config } = entry;
+-	if (!("url" in config) || config.auth) return false;
+-	return !Object.keys(config.headers ?? {}).some((header) => header.toLowerCase() === "authorization");
+-}
+-
+ /** `~` and `~/…` (also `~\…` on Windows) name the home directory, like in a shell. */
+ function expandHome(value: string): string {
+ 	if (value === "~") return homedir();
+@@ -213,7 +206,7 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
+ 
+ 	/** Server URL when the server authenticates with OAuth. */
+ 	get oauthUrl(): string | undefined {
+-		return usesOAuth(this.entry) && "url" in this.entry.config ? this.entry.config.url : undefined;
++		return isOAuthServer(this.entry) && "url" in this.entry.config ? this.entry.config.url : undefined;
+ 	}
+ 
+ 	oauthSettings(): McpOAuthSettings {
+diff --git a/packages/coding-agent/test/suite/agent-session-mcp-host-state.test.ts b/packages/coding-agent/test/suite/agent-session-mcp-host-state.test.ts
+new file mode 100644
+index 0000000..f3ec90d
+--- /dev/null
++++ b/packages/coding-agent/test/suite/agent-session-mcp-host-state.test.ts
+@@ -0,0 +1,527 @@
++import { type JsonRpcRequest, LATEST_PROTOCOL_VERSION } from "@earendil-works/pi-mcp";
++import { createInMemoryTransportPair } from "@earendil-works/pi-mcp/testing";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { InMemoryAuthStorageBackend } from "../../src/core/auth-storage.ts";
++import type { EventBus } from "../../src/core/event-bus.ts";
++import type { ExtensionUIContext } from "../../src/core/extensions/index.ts";
++import { emitSessionShutdownEvent } from "../../src/core/extensions/runner.ts";
++import type { McpServerConfig, McpServerConfigPatch, McpServerEntry } from "../../src/extensions/mcp/config.ts";
++import {
++	createMcpExtension,
++	MCP_REQUEST_EVENT,
++	MCP_STATE_EVENT,
++	type McpExtensionOptions,
++	type McpHostRequest,
++	type McpHostServerState,
++	type McpHostState,
++} from "../../src/extensions/mcp/index.ts";
++import { McpOAuthCredentialStore } from "../../src/extensions/mcp/oauth.ts";
++import { createHarness, createTestUiContext, type Harness } from "./harness.ts";
++import { startOAuthMcpServer } from "./mcp-oauth-server.ts";
++
++const SERVER_TOOLS = [
++	{ name: "search", description: "Search the docs.", inputSchema: { type: "object", properties: {} } },
++	{ name: "fetch", description: "Fetch a page.", inputSchema: { type: "object", properties: {} } },
++];
++
++/** Minimal MCP server over an in-memory transport that offers `SERVER_TOOLS`. */
++function createFakeServer() {
++	const pair = createInMemoryTransportPair();
++	pair.server.onMessage((message) => {
++		if (!("id" in message) || !("method" in message)) return;
++		const request = message as JsonRpcRequest;
++		const result =
++			request.method === "initialize"
++				? {
++						protocolVersion: LATEST_PROTOCOL_VERSION,
++						capabilities: { tools: {} },
++						serverInfo: { name: "fake", version: "1.0.0" },
++					}
++				: request.method === "tools/list"
++					? { tools: SERVER_TOOLS }
++					: {};
++		queueMicrotask(() => void pair.server.send({ jsonrpc: "2.0", id: request.id, result }));
++	});
++	void pair.server.start();
++	return pair.client;
++}
++
++/** MCP server that never answers, so connecting to it lasts until the connection closes. */
++function createHangingServer() {
++	const pair = createInMemoryTransportPair();
++	void pair.server.start();
++	return pair.client;
++}
++
++const CONFIG_PATH = "/config/mcp.json";
++const PROJECT_CONFIG_PATH = "/project/.pi/mcp.json";
++
++/** A stdio server in the global `mcp.json` with directly exposed tools. */
++function stdioEntry(name: string): McpServerEntry {
++	return { name, config: { command: name, exposure: "direct" }, source: CONFIG_PATH, scope: "global" };
++}
++
++type HostAction = Exclude<McpHostRequest["action"], "state">;
++
++describe("AgentSession MCP host state", () => {
++	const cleanups: (() => Promise<void> | void)[] = [];
++
++	afterEach(async () => {
++		while (cleanups.length > 0) await cleanups.pop()?.();
++	});
++
++	/**
++	 * `broken` fails to connect and `hanging` never answers; `saveError` fails config saves. `projectConfig`
++	 * trusts the project, and the host registers the `registered` servers. `extension` overrides options
++	 * of the MCP extension. `start()` starts the session; `saves` records the file of each saved patch.
++	 */
++	async function setup(
++		entries: McpServerEntry[],
++		options: {
++			configErrors?: string[];
++			saveError?: string;
++			projectConfig?: string;
++			registered?: Record<string, McpServerConfig>;
++			extension?: McpExtensionOptions;
++		} = {},
++	) {
++		const { configErrors = [], saveError, projectConfig } = options;
++		let bus: EventBus | undefined;
++		const states: McpHostState[] = [];
++		const patches: [string, McpServerConfigPatch][] = [];
++		const saves: string[] = [];
++		const transports: string[] = [];
++		const harness = await createHarness({
++			initialActiveToolNames: [],
++			extensionFactories: [
++				// The host: every extension's `pi.events` is the same bus.
++				(pi) => {
++					bus = pi.events;
++					pi.events.on(MCP_STATE_EVENT, (state) => states.push(state as McpHostState));
++					for (const [name, config] of Object.entries(options.registered ?? {}))
++						pi.registerMcpServer(name, config);
++				},
++				createMcpExtension({
++					loadConfig: () => ({
++						servers: entries,
++						errors: configErrors,
++						...(projectConfig ? { projectConfig } : {}),
++					}),
++					credentials: new McpOAuthCredentialStore(new InMemoryAuthStorageBackend()),
++					updateConfig: (entry, patch) => {
++						if (saveError) throw new Error(saveError);
++						patches.push([entry.name, patch]);
++						saves.push(entry.override ?? entry.source);
++					},
++					createTransport: (entry) => {
++						transports.push(entry.name);
++						if (entry.name === "broken") throw new Error("spawn failed");
++						return entry.name === "hanging" ? createHangingServer() : createFakeServer();
++					},
++					...options.extension,
++				}),
++			],
++		});
++		cleanups.push(() => harness.cleanup());
++		if (!bus) throw new Error("No event bus");
++		const events = bus;
++		const start = (ui?: Partial<ExtensionUIContext>) =>
++			harness.session.bindExtensions({ uiContext: createTestUiContext(ui) });
++		const request = (action: HostAction, server: string) =>
++			new Promise<string | undefined>((resolve) => {
++				const message: McpHostRequest = { version: 1, action, server, reply: resolve };
++				events.emit(MCP_REQUEST_EVENT, message);
++			});
++		const current = (): McpHostState => {
++			let state: McpHostState | undefined;
++			const message: McpHostRequest = {
++				version: 1,
++				action: "state",
++				reply: (reply) => {
++					state = reply;
++				},
++			};
++			events.emit(MCP_REQUEST_EVENT, message);
++			if (!state) throw new Error("No synchronous reply");
++			return state;
++		};
++		/** The last published state of a server. */
++		const published = (name: string): McpHostServerState | undefined =>
++			states.at(-1)?.servers.find((server) => server.name === name);
++		return { harness, events, states, patches, saves, transports, start, request, current, published };
++	}
++
++	function callableTools(harness: Harness): string[] {
++		return harness.session.getCallableToolNames();
++	}
++
++	async function shutdown(harness: Harness): Promise<void> {
++		await emitSessionShutdownEvent(harness.session.extensionRunner, { type: "session_shutdown", reason: "quit" });
++	}
++
++	it("publishes connected servers and coalesces bursts of changes", async () => {
++		const names = ["a", "b", "c", "d", "e"];
++		const { states, start, published } = await setup(names.map(stdioEntry));
++		await start();
++
++		await vi.waitFor(() => expect(names.map((name) => published(name)?.state)).toEqual(names.map(() => "connected")));
++		expect(states.at(-1)).toEqual({
++			version: 1,
++			servers: names.map((name) => ({
++				name,
++				state: "connected",
++				scope: "global",
++				source: CONFIG_PATH,
++				saves: "global",
++				exposure: "direct",
++				toolCount: SERVER_TOOLS.length,
++				hasResources: false,
++				oauth: false,
++			})),
++			configErrors: [],
++		});
++		// Each server changed at least three times (starting, connecting, connected).
++		expect(states.length).toBeLessThan(names.length);
++		// Nothing is published while nothing changes.
++		const count = states.length;
++		await new Promise((resolve) => setTimeout(resolve, 20));
++		expect(states).toHaveLength(count);
++	});
++
++	it("replies to state requests synchronously and rejects other versions", async () => {
++		const { events, start, current, published } = await setup([stdioEntry("docs")], {
++			configErrors: ["bad.json: oops"],
++		});
++		// Before the session starts there are no servers.
++		expect(current()).toEqual({ version: 1, servers: [], configErrors: [] });
++		await start();
++		await vi.waitFor(() => expect(published("docs")?.state).toBe("connected"));
++
++		expect(current()).toEqual({
++			version: 1,
++			servers: [expect.objectContaining({ name: "docs", state: "connected", toolCount: 2 })],
++			configErrors: ["bad.json: oops"],
++		});
++		const replies: unknown[] = [];
++		events.emit(MCP_REQUEST_EVENT, { version: 2, action: "state", reply: (reply: unknown) => replies.push(reply) });
++		events.emit(MCP_REQUEST_EVENT, { version: 1, action: "restart", reply: (reply: unknown) => replies.push(reply) });
++		// Values that are not requests are ignored.
++		events.emit(MCP_REQUEST_EVENT, "state");
++		events.emit(MCP_REQUEST_EVENT, null);
++		expect(replies).toEqual([
++			"Unsupported MCP host request version: 2.",
++			"Unknown MCP host request action: restart.",
++		]);
++	});
++
++	it("publishes the state an action leaves before it replies", async () => {
++		const { events, states, start, current, published } = await setup([stdioEntry("docs")]);
++		await start();
++		await vi.waitFor(() => expect(published("docs")?.state).toBe("connected"));
++
++		/** The reply, with the last published and the current state when it arrived. */
++		const act = (action: HostAction) =>
++			new Promise<{ error: string | undefined; last: McpHostState | undefined; now: McpHostState }>((resolve) => {
++				const message: McpHostRequest = {
++					version: 1,
++					action,
++					server: "docs",
++					reply: (error) => resolve({ error, last: states.at(-1), now: current() }),
++				};
++				events.emit(MCP_REQUEST_EVENT, message);
++			});
++		for (const [action, state] of [
++			["disable", "disabled"],
++			["enable", "connected"],
++			["reconnect", "connected"],
++		] as const) {
++			const { error, last, now } = await act(action);
++			expect(error).toBeUndefined();
++			expect(last).toEqual(now);
++			expect(last?.servers[0]?.state).toBe(state);
++		}
++	});
++
++	it("disables and enables a server, saving to its mcp.json", async () => {
++		const { harness, patches, transports, start, request, published } = await setup([stdioEntry("docs")]);
++		await start();
++		await vi.waitFor(() => expect(callableTools(harness)).toContain("mcp__docs__search"));
++
++		expect(await request("disable", "docs")).toBeUndefined();
++		expect(patches).toEqual([["docs", { enabled: false }]]);
++		expect(published("docs")).toEqual({
++			name: "docs",
++			state: "disabled",
++			scope: "global",
++			source: CONFIG_PATH,
++			saves: "global",
++			exposure: "direct",
++			hasResources: false,
++			oauth: false,
++		});
++		expect(callableTools(harness)).not.toContain("mcp__docs__search");
++		const visible = harness.session.getAllTools().filter((tool) => tool.exposure !== "hidden");
++		expect(visible.map((tool) => tool.name)).not.toContain("mcp__docs__search");
++		// Disabling a disabled server changes nothing.
++		expect(await request("disable", "docs")).toBeUndefined();
++		expect(patches).toHaveLength(1);
++
++		expect(await request("enable", "docs")).toBeUndefined();
++		expect(patches).toEqual([
++			["docs", { enabled: false }],
++			["docs", { enabled: true }],
++		]);
++		expect(published("docs")?.state).toBe("connected");
++		expect(transports).toEqual(["docs", "docs"]);
++		expect(callableTools(harness)).toContain("mcp__docs__search");
++	});
++
++	it("turns a global server on or off in the trusted project alone", async () => {
++		const project: McpServerEntry = {
++			name: "local",
++			config: { command: "local", exposure: "direct" },
++			source: PROJECT_CONFIG_PATH,
++			scope: "project",
++		};
++		const { harness, patches, saves, start, request, published } = await setup([stdioEntry("docs"), project], {
++			projectConfig: PROJECT_CONFIG_PATH,
++			registered: { plugin: { command: "plugin", exposure: "direct" } },
++		});
++		await start();
++		await vi.waitFor(() => expect(callableTools(harness)).toContain("mcp__docs__search"));
++		await vi.waitFor(() => expect(published("plugin")?.state).toBe("connected"));
++
++		// Only the global server offers the project override; each says where enable and disable save.
++		expect(published("docs")).toEqual(
++			expect.objectContaining({ source: CONFIG_PATH, saves: "global", projectConfig: PROJECT_CONFIG_PATH }),
++		);
++		expect(published("local")).toEqual(expect.objectContaining({ source: PROJECT_CONFIG_PATH, saves: "project" }));
++		expect(published("plugin")).toEqual(expect.objectContaining({ scope: "extension", saves: "session" }));
++		expect(published("local")).not.toHaveProperty("projectConfig");
++		expect(published("plugin")).not.toHaveProperty("projectConfig");
++
++		expect(await request("disable-project", "docs")).toBeUndefined();
++		expect(patches).toEqual([["docs", { enabled: false }]]);
++		expect(saves).toEqual([PROJECT_CONFIG_PATH]);
++		expect(callableTools(harness)).not.toContain("mcp__docs__search");
++		// The override now holds the server's state, so `enable` and `disable` save to it.
++		expect(published("docs")).toEqual(
++			expect.objectContaining({ state: "disabled", scope: "global", source: PROJECT_CONFIG_PATH, saves: "project" }),
++		);
++		expect(published("docs")).not.toHaveProperty("projectConfig");
++		// Disabling a disabled server changes nothing.
++		expect(await request("disable-project", "docs")).toBeUndefined();
++		expect(await request("enable", "docs")).toBeUndefined();
++		expect(patches.at(-1)).toEqual(["docs", { enabled: true }]);
++		expect(saves).toEqual([PROJECT_CONFIG_PATH, PROJECT_CONFIG_PATH]);
++		expect(published("docs")?.state).toBe("connected");
++
++		const refused = (name: string) =>
++			`MCP server "${name}" cannot be turned off for the project alone. Only global servers without a project override can, in a trusted project.`;
++		expect(await request("disable-project", "docs")).toBe(refused("docs"));
++		expect(await request("disable-project", "local")).toBe(refused("local"));
++		expect(await request("disable-project", "plugin")).toBe(refused("plugin"));
++		expect(saves).toHaveLength(2);
++		// A registered server is turned off for the session, without saving.
++		expect(await request("disable", "plugin")).toBeUndefined();
++		expect(saves).toHaveLength(2);
++		expect(published("plugin")?.state).toBe("disabled");
++	});
++
++	it("offers no project override while the project is untrusted", async () => {
++		const { patches, start, request, published } = await setup([stdioEntry("docs")]);
++		await start();
++		await vi.waitFor(() => expect(published("docs")?.state).toBe("connected"));
++
++		expect(published("docs")).toEqual(expect.objectContaining({ saves: "global" }));
++		expect(published("docs")).not.toHaveProperty("projectConfig");
++		expect(await request("disable-project", "docs")).toBe(
++			'MCP server "docs" cannot be turned off for the project alone. Only global servers without a project override can, in a trusted project.',
++		);
++		expect(patches).toEqual([]);
++		expect(published("docs")?.state).toBe("connected");
++	});
++
++	it("reports a failed save in the reply and the state", async () => {
++		const { harness, start, request, published } = await setup([stdioEntry("docs")], { saveError: "read-only" });
++		await start();
++		await vi.waitFor(() => expect(published("docs")?.state).toBe("connected"));
++
++		const failure = `Could not update ${CONFIG_PATH}: read-only`;
++		expect(await request("disable", "docs")).toBe(failure);
++		expect(published("docs")).toEqual(expect.objectContaining({ state: "connected", error: failure }));
++		expect(callableTools(harness)).toContain("mcp__docs__search");
++
++		// The next action that succeeds clears it.
++		expect(await request("reconnect", "docs")).toBeUndefined();
++		expect(published("docs")?.error).toBeUndefined();
++		expect(published("docs")?.state).toBe("connected");
++	});
++
++	it("reconnects a server on a new transport", async () => {
++		const { transports, start, request, published } = await setup([stdioEntry("docs")]);
++		await start();
++
++		// Waits for the startup connection first, like /mcp reconnect.
++		expect(await request("reconnect", "docs")).toBeUndefined();
++		expect(transports).toEqual(["docs", "docs"]);
++		expect(published("docs")?.state).toBe("connected");
++	});
++
++	it("reconnects a server right after it was enabled", async () => {
++		const { transports, start, request, published } = await setup([stdioEntry("docs")]);
++		await start();
++		await vi.waitFor(() => expect(published("docs")?.state).toBe("connected"));
++		expect(await request("disable", "docs")).toBeUndefined();
++
++		// The server has no connection until it started; reconnect waits for it.
++		const enabled = request("enable", "docs");
++		expect(await request("reconnect", "docs")).toBeUndefined();
++		expect(await enabled).toBeUndefined();
++		expect(transports).toEqual(["docs", "docs", "docs"]);
++		expect(published("docs")?.state).toBe("connected");
++	});
++
++	it("replies errors for unknown and ineligible servers", async () => {
++		const { start, request } = await setup([stdioEntry("docs")]);
++		await start();
++
++		expect(await request("reconnect", "nope")).toBe('No MCP server named "nope".');
++		expect(await request("logout", "docs")).toBe(
++			"No enabled MCP server uses OAuth. Only HTTP servers without an Authorization header do.",
++		);
++		await request("disable", "docs");
++		expect(await request("reconnect", "docs")).toBe('MCP server "docs" is disabled.');
++	});
++
++	it("shows failed servers with their error", async () => {
++		const broken: McpServerEntry = { name: "broken", config: { url: "http://broken.invalid" }, source: CONFIG_PATH };
++		const { start, request, current, published } = await setup([broken]);
++		await start();
++
++		const failed: McpHostServerState = {
++			name: "broken",
++			state: "failed",
++			source: CONFIG_PATH,
++			exposure: "codemode",
++			hasResources: false,
++			oauth: true,
++			error: "spawn failed",
++		};
++		await vi.waitFor(() => expect(published("broken")).toEqual(failed));
++		// The reply reports the failure; the state keeps only the connection error.
++		expect(await request("reconnect", "broken")).toBe('MCP server "broken" failed to connect: spawn failed');
++		expect(current().servers).toEqual([failed]);
++	});
++
++	it("knows from the config which servers sign in with OAuth", async () => {
++		const entries: McpServerEntry[] = [
++			{ name: "remote", config: { url: "http://remote.invalid" }, source: CONFIG_PATH },
++			{ name: "off", config: { url: "http://off.invalid", enabled: false }, source: CONFIG_PATH },
++			{
++				name: "keyed",
++				config: { url: "http://keyed.invalid", headers: { authorization: "Bearer key" } },
++				source: CONFIG_PATH,
++			},
++			stdioEntry("local"),
++		];
++		const { states, start, current, published } = await setup(entries);
++		await start();
++
++		const oauth = (state: McpHostState) => state.servers.map((server) => server.oauth);
++		// Also while the servers are starting, and while disabled.
++		expect(oauth(current())).toEqual([true, true, false, false]);
++		await vi.waitFor(() => expect(published("remote")?.state).toBe("connected"));
++		expect(states.map(oauth)).toEqual(states.map(() => [true, true, false, false]));
++	});
++
++	it("signs out of an OAuth server", async () => {
++		const server = await startOAuthMcpServer();
++		cleanups.push(server.close);
++		const backend = new InMemoryAuthStorageBackend();
++		const entry: McpServerEntry = { name: "issues", config: { url: server.url, exposure: "direct" }, source: "test" };
++		const notifications: string[] = [];
++		const { harness, start, request, published } = await setup([entry], {
++			extension: {
++				createTransport: undefined,
++				credentials: new McpOAuthCredentialStore(backend),
++				// The browser follows the authorization redirect to the loopback callback.
++				openUrl: (url) => void fetch(url),
++			},
++		});
++		await start({
++			notify: (message) => notifications.push(message),
++			// The paste prompt waits until the sign-in completes.
++			input: (_title, _placeholder, opts) =>
++				new Promise((resolve) => opts?.signal?.addEventListener("abort", () => resolve(undefined), { once: true })),
++		});
++		await harness.session.prompt("/mcp login issues");
++		expect(notifications.at(-1)).toBe('Signed in to MCP server "issues" (1 tools).');
++		await vi.waitFor(() => expect(published("issues")).toEqual(expect.objectContaining({ state: "connected" })));
++		const stored = () => backend.withLock((current) => ({ result: current ?? "" }));
++		expect(stored()).toContain('"access_token": "access-1"');
++
++		expect(await request("logout", "issues")).toBeUndefined();
++		expect(published("issues")).toEqual(expect.objectContaining({ state: "needs-auth", oauth: true }));
++		expect(stored()).not.toContain("access-1");
++		// Closing the signed-in connection ends its MCP session.
++		await vi.waitFor(() => expect(server.deletes).toEqual(["access-1"]));
++	});
++
++	it("contains replies that throw", async () => {
++		const { events, start, request, published } = await setup([stdioEntry("docs")]);
++		await start();
++		await vi.waitFor(() => expect(published("docs")?.state).toBe("connected"));
++		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
++		cleanups.push(() => consoleError.mockRestore());
++
++		const reply = vi.fn(() => {
++			throw new Error("host failed");
++		});
++		events.emit(MCP_REQUEST_EVENT, { version: 1, action: "state", reply });
++		events.emit(MCP_REQUEST_EVENT, { version: 1, action: "disable", server: "docs", reply });
++		await vi.waitFor(() => expect(reply).toHaveBeenCalledTimes(2));
++		expect(reply.mock.calls[1]).toEqual([undefined]);
++		// Each request replied once, and MCP keeps working.
++		expect(await request("enable", "docs")).toBeUndefined();
++		expect(reply).toHaveBeenCalledTimes(2);
++		expect(published("docs")?.state).toBe("connected");
++		expect(consoleError).not.toHaveBeenCalled();
++	});
++
++	it("replies to an action in flight when the session shuts down", async () => {
++		const hanging: McpServerEntry = {
++			name: "hanging",
++			config: { command: "hanging", enabled: false },
++			source: CONFIG_PATH,
++			scope: "global",
++		};
++		const { harness, states, patches, start, request, published } = await setup([hanging]);
++		await start();
++		const enabled = request("enable", "hanging");
++		await vi.waitFor(() => expect(published("hanging")?.state).toBe("connecting"));
++
++		// Shutdown stops the connection attempt instead of waiting for the server.
++		const started = Date.now();
++		await shutdown(harness);
++		expect(Date.now() - started).toBeLessThan(2_000);
++		// The change was saved, and the reply comes after the empty state.
++		expect(await enabled).toBeUndefined();
++		expect(patches).toEqual([["hanging", { enabled: true }]]);
++		expect(states.at(-1)).toEqual({ version: 1, servers: [], configErrors: [] });
++	});
++
++	it("replies that MCP is not running before the session starts and after it shut down", async () => {
++		const { harness, states, start, request } = await setup([stdioEntry("docs")], {
++			configErrors: ["bad.json: oops"],
++		});
++		expect(await request("reconnect", "docs")).toBe("MCP is not running.");
++		await start();
++		await vi.waitFor(() => expect(states.at(-1)?.servers[0]?.state).toBe("connected"));
++
++		await shutdown(harness);
++
++		expect(states.at(-1)).toEqual({ version: 1, servers: [], configErrors: [] });
++		expect(await request("enable", "docs")).toBe("MCP is not running.");
++	});
++});

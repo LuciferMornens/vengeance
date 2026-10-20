@@ -11,6 +11,7 @@ import {
   INSTRUCTION_FILE,
   watchedConfigFolder
 } from './config-areas'
+import { engineSavedMcp } from './engine-mcp-saves'
 import { lastWrittenText, rememberWrittenText } from './json-file'
 import { hadRecentRun, hasActiveRuns } from './pi-cli'
 
@@ -20,7 +21,7 @@ import { hadRecentRun, hasActiveRuns } from './pi-cli'
  * settings.json — as `settings:changed { external: true }`. Writes Vengeance makes itself are announced
  * by their handlers, so those areas are muted briefly (`noteSelfChange`) and while CLI runs are active.
  * Inside that window, a file Vengeance wrote itself still reports a change when its content differs from
- * that write.
+ * that write. The mcp.json saves of the MCP chip's switches are passed over (engine-mcp-saves.ts).
  * Engine-written credentials (N1) are ignored; see config-areas.ts.
  */
 
@@ -216,6 +217,7 @@ export class ConfigWatcher {
 
   private queue(area: SettingsChangeArea, cwd: string | null, path: string): void {
     if (this.stopped) return
+    if (area === 'mcp' && engineSavedMcp(SELF_MUTE_MS)) return
     const written = lastWrittenText(path)
     const differsFromWrite = written !== undefined && readText(path) !== written
     if (area === 'instructions' && written !== undefined) {

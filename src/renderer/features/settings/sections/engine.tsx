@@ -266,7 +266,7 @@ export function EngineSection() {
         <Row
           settingKey="engine.systemPrompt"
           label="System prompt & instructions"
-          description="Read the built-in foundation and an open session’s prompt. Edit or restore global and project instructions."
+          description="Read the built-in foundation. Edit or restore global and project instructions."
         >
           <Button
             size="sm"

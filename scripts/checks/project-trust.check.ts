@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setProjectTrust, setTrustEntry, trustPreflight } from '../../src/main/features/launch/trust'
@@ -64,6 +64,23 @@ try {
       await setTrustEntry(null, key!, false)
       assert.equal((await trustPreflight(null, child)).saved, false)
       await setTrustEntry(null, key!, null)
+      assert.deepEqual(trustFile(agentDir), {})
+    })
+
+    await check('trustPreflight: a spawn agent dir decides from its own trust.json and default', async () => {
+      const guarded = join(root, 'guarded')
+      mkdirSync(join(guarded, '.pi'), { recursive: true })
+      writeFileSync(join(guarded, '.pi', 'APPEND_SYSTEM.md'), 'Project addition')
+      const spawnDir = join(root, 'spawn-agent')
+      mkdirSync(spawnDir, { recursive: true })
+      await setProjectTrust(null, guarded, true)
+      assert.equal((await trustPreflight(null, guarded)).engineDefault, true)
+      const spawn = await trustPreflight(null, guarded, spawnDir)
+      assert.equal(spawn.saved, null, "Vengeance's decision is not the spawn's")
+      assert.equal(spawn.engineDefault, false)
+      writeFileSync(join(spawnDir, 'settings.json'), JSON.stringify({ defaultProjectTrust: 'always' }))
+      assert.equal((await trustPreflight(null, guarded, spawnDir)).engineDefault, true)
+      await setProjectTrust(null, guarded, null)
       assert.deepEqual(trustFile(agentDir), {})
     })
   }

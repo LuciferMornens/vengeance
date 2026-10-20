@@ -17,6 +17,7 @@ import {
   Terminal,
   Trash2
 } from 'lucide-react'
+import type { McpLiveState } from '@shared/api/mcp'
 import type {
   McpOverview,
   McpServerInfo,
@@ -25,7 +26,6 @@ import type {
   TextTail
 } from '@shared/api/settings'
 import { cn } from '../../../lib/cn'
-import { rpc } from '../../../lib/engine'
 import { invoke, on, settingsInvokeForFolder } from '../ipc'
 import {
   Badge,
@@ -40,78 +40,73 @@ import {
   toast,
   Tooltip
 } from '../../../ui'
-import { readyAgentIds } from '../engines'
 import { Callout, Group, KeyHint, Note, Row, UntrustedProjectCallout } from '../layout'
 import { mcpFailureReason } from '../mcp-error'
 import { ProcessLog, useRuns } from '../process-log'
 import { activeCwd } from '../store'
 import { EXPOSURE_OPTIONS, ServerEditor, type EditorTarget } from './mcp-editor'
+import {
+  MCP_DOT,
+  mcpStateTone,
+  plural,
+  workspaceStateText,
+  type WorkspaceMcpServer
+} from '../../mcp/status'
+import {
+  canReconnectInSessions,
+  connectingInSessions,
+  reconnectInSessions,
+  useWorkspaceMcp
+} from '../../mcp/workspace'
 
 /** MCP servers the engine's built-in MCP adapter connects to (mcp.json global + project), pi docs/mcp.md. */
 
 const LOG_BYTES = 48 * 1024
 
-function StatusDot({ status, enabled }: { status?: McpServerStatus; enabled: boolean }) {
-  if (!enabled) return <span className="size-2 rounded-full bg-fg-4/50" />
-  if (!status) return <span className="size-2 animate-pulse rounded-full bg-fg-4" />
-  const tone =
-    status.state === 'connected'
-      ? 'bg-success'
-      : status.state === 'needs-auth'
-        ? 'bg-warning'
-        : 'bg-danger'
-  return <span className={cn('size-2 rounded-full', tone)} />
+/** What a row shows: the state in the open conversations when one runs the server, else the last test. */
+interface RowStatus {
+  state: McpLiveState
+  text: string
+  /** The full failure, when `text` shows only part of it. */
+  details: string | null
+  live: boolean
 }
 
-function statusText(
-  status: McpServerStatus | undefined,
-  enabled: boolean,
-  loading: boolean
-): string {
-  if (!enabled) return 'Disabled'
-  if (!status) return loading ? 'Connecting…' : 'Unknown'
+function liveRowStatus(entry: WorkspaceMcpServer): RowStatus {
+  const full = entry.server.error?.trim()
+  return {
+    state: entry.server.state,
+    text: workspaceStateText(entry),
+    details: entry.server.state === 'failed' && full && full !== mcpFailureReason(full) ? full : null,
+    live: true
+  }
+}
+
+function testedRowStatus(status: McpServerStatus | undefined, loading: boolean): RowStatus {
+  if (!status) {
+    return { state: loading ? 'connecting' : 'idle', text: loading ? 'Testing…' : 'Not tested', details: null, live: false }
+  }
   if (status.state === 'connected') {
     const resources = status.resources
-      ? ` · ${status.resources} ${status.resources === 1 ? 'resource' : 'resources'}`
+      ? ` · ${plural(status.resources, 'resource')}`
       : status.supportsResources
         ? ' · resources'
         : ''
-    return `${status.tools.length} ${status.tools.length === 1 ? 'tool' : 'tools'}${resources}`
+    return {
+      state: 'connected',
+      text: `Test connected · ${plural(status.tools.length, 'tool')}${resources}`,
+      details: null,
+      live: false
+    }
   }
-  if (status.state === 'needs-auth') return 'Needs sign-in'
-  return status.error ? mcpFailureReason(status.error) : status.state
-}
-
-/** The full error, when the status line shows only a part of it. */
-function failureDetails(status: McpServerStatus | undefined): string | null {
-  if (!status?.error || status.state === 'connected' || status.state === 'needs-auth') return null
-  const full = status.error.trim()
-  return full === mcpFailureReason(full) ? null : full
-}
-
-/**
- * `/mcp reconnect <server>` in every open session that runs the built-in MCP extension. Extension commands
- * sent through `prompt` execute immediately, even while an agent is streaming (rpc-commands.md).
- */
-async function reconnectInSessions(name: string): Promise<void> {
-  const agents = readyAgentIds('mcp')
-  if (agents.length === 0) {
-    toast({
-      level: 'info',
-      title: 'No open sessions use MCP',
-      description: 'New sessions connect with the current configuration.'
-    })
-    return
+  if (status.state === 'needs-auth') return { state: 'needs-auth', text: 'Needs sign-in', details: null, live: false }
+  const full = status.error?.trim()
+  return {
+    state: 'failed',
+    text: full ? `Test failed: ${mcpFailureReason(full)}` : `Test failed: ${status.state}`,
+    details: full && full !== mcpFailureReason(full) ? full : null,
+    live: false
   }
-  const results = await Promise.allSettled(
-    agents.map((id) => rpc(id, { type: 'prompt', message: `/mcp reconnect ${name}` }))
-  )
-  const failed = results.filter((r) => r.status === 'rejected').length
-  toast({
-    level: failed ? 'warning' : 'success',
-    title: `Reconnecting ${name}`,
-    description: `In ${agents.length - failed} of ${agents.length} open ${agents.length === 1 ? 'session' : 'sessions'}`
-  })
 }
 
 // ─── Log ────────────────────────────────────────────────────────────────────
@@ -220,6 +215,7 @@ export function McpSection() {
   const [activeRun, setActiveRun] = useState<string | null>(null)
   const run = useRuns((s) => (activeRun ? s.runs[activeRun] : undefined))
   const closeEditor = useCallback(() => setEditing(null), [])
+  const live = useWorkspaceMcp('pi', activeCwd())
 
   const loadStatus = useCallback(async () => {
     setStatusLoading(true)
@@ -333,9 +329,9 @@ export function McpSection() {
       )
     }
     items.push({
-      label: 'Reconnect in open sessions',
+      label: 'Reconnect in open sessions in this folder',
       icon: <RotateCw />,
-      onSelect: () => void reconnectInSessions(server.name)
+      onSelect: () => void reconnectInSessions(server.name, live.get(server.name))
     })
     if (server.scope === 'global' && overview.projectConfig) {
       items.push({ kind: 'separator' })
@@ -444,10 +440,16 @@ export function McpSection() {
         .map((group) => (
           <Group key={group.title} title={group.title}>
             {group.servers.map((server) => {
-              const s = status[server.name]
+              const liveEntry = server.enabled ? live.get(server.name) : undefined
+              const row: RowStatus = !server.enabled
+                ? { state: 'disabled', text: 'Off', details: null, live: false }
+                : liveEntry
+                  ? liveRowStatus(liveEntry)
+                  : testedRowStatus(status[server.name], statusLoading)
+              const tone = overview.builtinDisabled ? 'disabled' : row.state
               const TransportIcon = server.transport === 'http' ? Globe : Terminal
               const editable = server.scope !== 'extension'
-              const details = server.enabled ? failureDetails(s) : null
+              const details = row.details
               const detailsOpen = !!details && detailsFor === server.name
               return (
                 <Row
@@ -475,12 +477,6 @@ export function McpSection() {
                     >
                       <span className="relative flex size-8 shrink-0 items-center justify-center rounded-card bg-surface-3 text-fg-2 shadow-[var(--highlight),0_0_0_1px_var(--hairline)]">
                         <TransportIcon className="size-4" />
-                        <span className="absolute -right-0.5 -bottom-0.5 flex size-3 items-center justify-center rounded-full bg-surface-2">
-                          <StatusDot
-                            status={s}
-                            enabled={server.enabled && !overview.builtinDisabled}
-                          />
-                        </span>
                       </span>
                       <span>{server.name}</span>
                     </button>
@@ -488,16 +484,15 @@ export function McpSection() {
                   badges={
                     <>
                       <span
+                        data-mcp-row-state={tone}
+                        data-mcp-row-live={row.live || undefined}
                         className={cn(
-                          'line-clamp-2 max-w-[48ch] text-xs break-words',
-                          s?.state === 'needs-auth'
-                            ? 'text-warning'
-                            : s && s.state !== 'connected' && server.enabled
-                              ? 'text-danger'
-                              : 'text-fg-3'
+                          'flex max-w-[52ch] items-center gap-1.5 text-xs break-words',
+                          mcpStateTone(tone)
                         )}
                       >
-                        {statusText(s, server.enabled, statusLoading)}
+                        <span className={cn('size-2 shrink-0 rounded-full', MCP_DOT[tone])} aria-hidden />
+                        <span className="line-clamp-2">{row.text}</span>
                       </span>
                       {details && (
                         <button
@@ -538,6 +533,16 @@ export function McpSection() {
                   }
                 >
                   <div className="flex items-center gap-2">
+                    {canReconnectInSessions(liveEntry) && (
+                      <IconButton
+                        label={`Reconnect ${server.name} in open sessions in this folder`}
+                        size="sm"
+                        disabled={connectingInSessions(liveEntry)}
+                        onClick={() => void reconnectInSessions(server.name, liveEntry)}
+                      >
+                        <RotateCw />
+                      </IconButton>
+                    )}
                     <Select
                       size="sm"
                       className="w-[124px]"

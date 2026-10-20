@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/LuciferMornens/vengeance/releases/latest"><img alt="Version 0.3.3" src="https://img.shields.io/badge/version-0.3.3-FF4D3D?style=flat-square"></a>
+  <a href="https://github.com/LuciferMornens/vengeance/releases/latest"><img alt="Version 0.3.4" src="https://img.shields.io/badge/version-0.3.4-FF4D3D?style=flat-square"></a>
   <a href="https://github.com/LuciferMornens/vengeance/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/LuciferMornens/vengeance/actions/workflows/ci.yml/badge.svg"></a>
   <a href="#download"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-0078D4?style=flat-square"></a>
   <a href="#download"><img alt="macOS arm64 and x64" src="https://img.shields.io/badge/macOS-arm64%20%7C%20x64-000000?style=flat-square"></a>
@@ -157,9 +157,18 @@ either one separately.
 - **Structured settings.** Editors for models, providers and accounts, custom models, agent
   behavior, extensions, packages, resources, MCP servers, sessions and context, and keyboard
   shortcuts, with a Raw JSON editor when you want the file itself.
-- **System prompts.** Inspect the selected engine's default foundation or an open conversation's
-  assembled prompt. Edit global or project instructions with draft and conflict protection, then
-  explicitly apply them to an open conversation when ready.
+- **System prompts.** Inspect the selected engine's default foundation and edit global or project
+  instructions with draft and conflict protection.
+- **Conversation instructions.** Give one conversation its own instructions from its header or
+  `/instructions`: add them to the engine's prompt or replace its foundation, while project context,
+  skills, MCP and the rest of each engine's assembly stay. The same dialog shows the conversation's
+  assembled prompt and restarts it to apply changes.
+- **Live MCP status.** A chip above the composer shows how many of the conversation's MCP servers are
+  connected and how many need attention, and keeps itself up to date. Its panel lists each server
+  with its live state, tool count or error, Reconnect, sign-in and, on the Engine, an on/off switch.
+  In a trusted folder the switch changes that folder alone; elsewhere it says when it saves to the
+  global mcp.json, for every folder. **Settings → MCP** shows the same live state across the folder's
+  open sessions, the worst first, and reconnects a server there.
 - **Extension gallery (Engine).** **Settings → Extensions** browses community packages from the
   public npm registry. Search or browse topics, read what a package adds, and install it for every
   project or only the open one. **Add your own** installs an extension file or package folder. The
@@ -207,7 +216,7 @@ command palette and inspector are shared.
 
 |            | Engine                                                                                      | Engine 2                                                                                                                                               |
 | ---------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Built from | [pi](https://github.com/earendil-works/pi) `v1.3.0`, build `1.3.0+vengeance.2`              | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) `v0.10.0`, build `0.10.0+vengeance.12`                                                 |
+| Built from | [pi](https://github.com/earendil-works/pi) `v1.3.0`, build `1.3.0+vengeance.3`              | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) `v0.10.0`, build `0.10.0+vengeance.13`                                                 |
 | Runs on    | Electron's Node, so no separate Node install                                                | A native executable that includes its Python kernel package, skills and catalogs                                                                       |
 | Sessions   | One process per open session                                                                | Saved resident sessions that survive closing a tab and are listed under **Background sessions**                                                        |
 | Highlights | Extension gallery, extension dialogs and widgets, project-trust dialog, Abliteration models | Native subagents, goals, schedules (heartbeat and cron), side questions, trace inspection and export, native Fast and Ultrafast OpenAI speed transport |
@@ -543,9 +552,9 @@ The app version is defined in [package.json](package.json).
 
 ### Release notes
 
-**Latest: [Vengeance 0.3.3](docs/RELEASE-0.3.3.md)** covers system prompt editing, safer restarts,
-conversation navigation and the macOS background-process fix, with qualification status for this
-version. Published packages are on the
+**Latest: [Vengeance 0.3.4](docs/RELEASE-0.3.4.md)** covers per-conversation instructions, live MCP
+status and the engine builds behind it, with qualification status for this version. Published
+packages are on the
 [GitHub release](https://github.com/LuciferMornens/vengeance/releases/latest).
 
 <details>
@@ -556,6 +565,8 @@ They are evidence, not current installation status or promises that local genera
 exist. Use the lockfile and current guides for maintenance instructions. Reports before 0.3.0 cover
 local Windows x64 builds only.
 
+- [Release 0.3.3](docs/RELEASE-0.3.3.md): system prompt editing, safer restarts and the macOS
+  background-process fix.
 - [Release 0.3.2](docs/RELEASE-0.3.2.md): lower memory use and lighter streaming, long sessions and tabs.
 - [Release 0.3.1](docs/RELEASE-0.3.1.md): app self-update works again; Vengeance License 1.0.
 - [Release 0.3.0](docs/RELEASE-0.3.0.md): first published release, and the first for macOS and

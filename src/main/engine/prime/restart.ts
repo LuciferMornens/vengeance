@@ -55,6 +55,14 @@ const CONFIG_KEYS = [
   'autonomous'
 ] as const
 
+type PrimeConfigKey = (typeof CONFIG_KEYS)[number]
+
+/** The native prompt sources, which a restart can send even when they look unchanged. */
+export const PRIME_PROMPT_SOURCE_KEYS: readonly PrimeConfigKey[] = [
+  'systemPrompt',
+  'appendSystemPrompt'
+]
+
 interface PreparedRestart {
   updateId: string
   rosterPath: string
@@ -97,17 +105,23 @@ export function primeRestartSelection(
   }
 }
 
+/**
+ * Restart the resident group, patching the target with the configuration that changed between the args.
+ * `resend` keys are patched even when unchanged, for a resident whose own values may differ from
+ * `previousArgs`.
+ */
 export function restartPrimeSession(
   source: PrimeDaemonClient,
   nativeAgentId: string,
   previousArgs: CreateAgentArgs,
   nextArgs: CreateAgentArgs,
   executablePath?: string | null,
-  selectionPatch?: Partial<CreateAgentArgs>
+  selectionPatch?: Partial<CreateAgentArgs>,
+  resend: readonly PrimeConfigKey[] = []
 ): Promise<void> {
   const pending = pendingRestarts.get(source.socketPath)
   const environment = restartEnvironment(source, previousArgs, nextArgs)
-  const configPatch = changedConfiguration(previousArgs, nextArgs, selectionPatch)
+  const configPatch = changedConfiguration(previousArgs, nextArgs, selectionPatch, resend)
   if (pending) {
     const sameRuntime =
       pending.executablePath === (executablePath ?? null) &&
@@ -131,7 +145,8 @@ export function restartPrimeSession(
           previousArgs,
           nextArgs,
           executablePath,
-          selectionPatch
+          selectionPatch,
+          resend
         )
       } finally {
         resident.client.close()
@@ -330,10 +345,12 @@ async function performPrimeRestart(
   }
 }
 
-function changedConfiguration(
+/** The native configuration patch a restart applies: changed and `resend` keys, `null` for removed ones. */
+export function changedConfiguration(
   previous: CreateAgentArgs,
   next: CreateAgentArgs,
-  selectionPatch?: Partial<CreateAgentArgs>
+  selectionPatch?: Partial<CreateAgentArgs>,
+  resend: readonly PrimeConfigKey[] = []
 ): PrimeRecord {
   const before: PrimeRecord = {
     provider: previous.provider,
@@ -353,7 +370,7 @@ function changedConfiguration(
       selectionPatch &&
       (key === 'provider' || key === 'model' || key === 'thinking') &&
       Object.hasOwn(selectionPatch, key)
-    if (explicitSelection || !isDeepStrictEqual(before[key], after[key])) {
+    if (explicitSelection || resend.includes(key) || !isDeepStrictEqual(before[key], after[key])) {
       patch[key] = after[key] ?? null
     }
   }
