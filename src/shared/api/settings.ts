@@ -637,8 +637,8 @@ export interface SettingsEventMap {
     fromRun?: boolean
     /**
      * No restart is offered: an explicit file save is for future sessions (applying it to open work
-     * is a separate action), and an engine's own save of a change it made live is already applied (such as
-     * its mark of a sign-in the provider refused to renew).
+     * is a separate action), an engine's own save of a change it made live is already applied, and the
+     * Engine's mark of a sign-in the provider refused to renew is applied to open conversations by main.
      */
     apply?: 'new-sessions'
   }

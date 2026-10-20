@@ -1,6 +1,6 @@
 import { app, BrowserWindow, Menu, session, type RenderProcessGoneDetails } from 'electron'
 import { existsSync, statSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { SPEED_DEFAULT_ENV } from '@shared/api/speed'
 import { appState, engineOverridePath } from './app-state'
@@ -15,6 +15,7 @@ import {
 } from './features/sessions/conversation-prompts'
 import { accountModelFilter } from './features/settings/account-models'
 import { prepareAgentDir, spawnAgentDir } from './features/settings/agent-dir'
+import { rejectedSignInsAt, withoutRejectedSignIns } from './features/settings/stored-credential'
 import { broadcast, handle } from './ipc/handle'
 import { registerIpc } from './ipc'
 import { physicalPath } from './paths'
@@ -203,7 +204,15 @@ if (!singleInstance) {
           [SPEED_DEFAULT_ENV]: settings?.speedDefault ?? 'standard'
         }
       },
-      offeredModel: accountModelFilter,
+      // The sign-ins the provider refused to renew are those of the auth.json the conversation reads: its launch env
+      // may name another agent dir.
+      offeredModel: (args) =>
+        withoutRejectedSignIns(
+          accountModelFilter(),
+          rejectedSignInsAt(join(spawnAgentDir(args.cwd, args.launch?.env), 'auth.json'))
+        ),
+      signInsRefused: (args) =>
+        rejectedSignInsAt(join(spawnAgentDir(args.cwd, args.launch?.env), 'auth.json')).size > 0,
       piPromptSources: (args) => {
         // The spawn finds APPEND_SYSTEM.md and project trust in the agent dir its launch env names.
         // Without the Engine's trust store, only the global APPEND_SYSTEM.md is certain to load.

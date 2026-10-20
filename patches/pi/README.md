@@ -65,22 +65,36 @@ Patch `0010` stops a dead OAuth sign-in from looking signed in. Upstream keeps a
 refresh failed so a retry can succeed, and so it kept counting a provider as available after its
 token endpoint had rejected the refresh token: every request, including extensions' choice of "any
 signed-in provider" (for example an auto-title model), picked it and failed with another token
-request. The built-in OAuth flows (OpenAI, OpenAI Codex, Anthropic, xAI, Kimi Code and Radius) now
-report token endpoint error responses as `OAuthEndpointError`, with the HTTP status and the RFC 6749
-`error` code. Only `invalid_grant` with HTTP 400 or 401 marks the stored credential: it keeps every
-field and gains `refreshRejectedAt` (epoch milliseconds) under the same credential-store lock as the
-refresh. Timeouts, network errors, server errors, cancellation, lock failures and other error codes
-never mark it. A marked credential leaves its provider unconfigured, since a stored credential owns
-its provider and environment keys do not replace it: `checkAuth`, `getAvailable`, the runtime's
-availability snapshot (the RPC `get_available_models`, `/model`, scoped models and extensions'
-`modelRegistry.getAvailable()`) and catalog refreshes skip it, and requests fail at once with
-"Sign-in for <provider> expired ... Sign in again." without calling the token endpoint. The runtime
-updates its snapshot before the first failure reaches the caller. Prompting or selecting a model of
-that provider names the expired sign-in instead of a missing API key. A new login replaces the
-credential, which clears the mark; upstream builds and older Vengeance builds ignore the field.
-GitHub Copilot, Meta and OpenRouter have no RFC 6749 refresh grant and are unchanged. Lazily loaded
-OAuth flows are bundled with their own copy of the error module, so recognition uses a registered
-symbol, not `instanceof`. The native `oauth-refresh-rejection.test.ts` (pi-ai),
+request. A refresh by one of the built-in OAuth flows (OpenAI, OpenAI Codex, Anthropic, xAI, Kimi
+Code and Radius) now reports a token endpoint error response with a JSON body as
+`OAuthEndpointError`, directly or (Anthropic's) as the thrown error's `cause`, with the HTTP status
+and the error code: the RFC 6749 `error` string, or the `code` of the `error` object OpenAI's
+authorization server sends. Some flows raise it from login too, which never marks a credential. Only
+a rejected refresh token marks the stored credential: `invalid_grant`, or OpenAI's
+`refresh_token_expired`, `refresh_token_reused` or `refresh_token_invalidated`, with HTTP 400 or
+401. The credential keeps every field and gains `refreshRejectedAt` (epoch milliseconds) under the
+same credential-store lock as the refresh. Timeouts, network errors, server errors, cancellation,
+lock failures and other error codes never mark it. A marked credential leaves its provider
+unconfigured, since a stored credential owns its provider and environment keys do not replace it:
+`checkAuth`, `getAvailable`, the runtime's availability snapshot (the RPC `get_available_models`,
+`/model`, scoped models and extensions' `modelRegistry.getAvailable()`) and catalog refreshes skip
+it, and requests fail at once with "Sign-in for <provider> expired ... Sign in again." without
+calling the token endpoint. A request that fails on a marked credential waits for a full
+availability pass to apply before the failure reaches the caller, unless the request is aborted
+first, which ends only the wait; the pass replaces any pass in flight and applies every provider's
+model filter, and other OAuth failures leave availability alone. Each process keeps its own
+snapshot, so another running process lists the provider until it re-reads availability or reaches
+the mark itself, and its requests already fail at once. `ModelRegistry.refreshAvailability()` is
+that re-read for extensions (the desktop bridge calls it): it reads every stored credential and
+every provider's available models again, with their filters, and resolves once such a pass applied,
+without reloading models.json or rebuilding providers, so catalog refreshes in flight keep running.
+Prompting or selecting a model of that provider names the expired sign-in instead of a missing API
+key. A new login replaces the credential, which clears the mark; upstream builds and older Vengeance
+builds ignore the field. The interactive `/login` selector, which Vengeance does not show, infers a
+stored credential's type from `isUsingOAuth` and so labels an expired sign-in as a configured API
+key. GitHub Copilot, Meta and OpenRouter have no RFC 6749 refresh grant and are unchanged. Lazily
+loaded OAuth flows are bundled with their own copy of the error module, so recognition uses a
+registered symbol, not `instanceof`. The native `oauth-refresh-rejection.test.ts` (pi-ai),
 `model-runtime-oauth-rejection.test.ts` and the expired sign-in case of
 `suite/agent-session-prompt.test.ts` qualify it, with the existing OAuth flow, `models-runtime`,
 model runtime and model registry suites for the unchanged behavior. Retire it when upstream

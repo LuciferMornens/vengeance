@@ -8,10 +8,12 @@
 #
 # Tag pushes, manual runs and the schedule restore no cache, so every release and the weekly dry run
 # build on clean runners. A pull request dry run may restore the staged engines and helper cached
-# under CI's key (ci.yml) for the same engine inputs, by CI on main or by an earlier run for the same
-# pull request. It then verifies them instead of building, names the restored key in its provenance
-# receipt, and caches a payload it had to build for later pushes and reruns. Packaging, every gate
-# and the native qualification run unchanged.
+# under CI's key (ci.yml): the platform, its builder (runner label and, on Linux, container image
+# digest) and a hash of the engine inputs. A hit verifies them instead of building and names the key
+# in the provenance receipt; a miss builds them on the clean runner. The dry run saves what it built
+# only for the two platforms CI builds on main alone (ci-engines false), for later pushes and
+# reruns; CI saves the other three. Packaging, every gate and the native qualification run
+# unchanged.
 name: Release
 
 on:
@@ -95,52 +97,64 @@ jobs:
   build:
     name: Build (${{ matrix.id }})
     needs: version
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.builder.runner }}
     # Linux builds in Ubuntu 22.04 (pinned by digest, multi-arch): its glibc 2.35 is the oldest the
     # packages support, and the GLIBC gate below proves nothing needs a newer one.
-    container: ${{ matrix.container }}
+    container: ${{ matrix.builder.container }}
     timeout-minutes: 150
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        # platform is the engine build host (engines.lock.json), which names CI's cache entries.
+        # platform is the engine build host (engines.lock.json) and builder the runner label and
+        # container this leg runs on; both are part of CI's cache key. ci-engines marks the
+        # platforms whose entries only CI's engines job saves in a pull request.
         include:
           - id: win-x64
             platform: win32-x64
-            os: windows-2025
-            container: ''
+            builder:
+              runner: windows-2025
+              container: ''
+            ci-engines: true
             rust-target: x86_64-pc-windows-gnu
             native-build-jobs: 4
             unpacked: release/win-unpacked
           - id: mac-arm64
             platform: darwin-arm64
-            os: macos-15
-            container: ''
+            builder:
+              runner: macos-15
+              container: ''
+            ci-engines: true
             rust-target: aarch64-apple-darwin
             native-build-jobs: 3
             unpacked: release/mac-arm64/Vengeance.app
             mac-arch: arm64
           - id: mac-x64
             platform: darwin-x64
-            os: macos-15-intel
-            container: ''
+            builder:
+              runner: macos-15-intel
+              container: ''
+            ci-engines: false
             rust-target: x86_64-apple-darwin
             native-build-jobs: 4
             unpacked: release/mac/Vengeance.app
             mac-arch: x64
           - id: linux-x64
             platform: linux-x64
-            os: ubuntu-24.04
-            container: mirror.gcr.io/library/ubuntu@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
+            builder:
+              runner: ubuntu-24.04
+              container: mirror.gcr.io/library/ubuntu@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
+            ci-engines: true
             rust-target: x86_64-unknown-linux-gnu
             native-build-jobs: 4
             unpacked: release/linux-unpacked
           - id: linux-arm64
             platform: linux-arm64
-            os: ubuntu-24.04-arm
-            container: mirror.gcr.io/library/ubuntu@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
+            builder:
+              runner: ubuntu-24.04-arm
+              container: mirror.gcr.io/library/ubuntu@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
+            ci-engines: false
             rust-target: aarch64-unknown-linux-gnu
             native-build-jobs: 4
             unpacked: release/linux-arm64-unpacked
@@ -174,9 +188,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Pull request dry runs only, with CI's paths and key (ci.yml). A hit is a payload that CI or
-      # an earlier push built from the same inputs on this runner and container. The container
-      # installed zstd above: the archive format is part of the cache version (see ci.yml).
+      # Pull request dry runs only, with CI's paths and key (ci.yml). A hit is a payload built from
+      # the same engine inputs on this runner label and, on Linux, this pinned container image (the
+      # runner image version behind the label may differ): by CI or, for ci-engines false, by an
+      # earlier dry run of this pull request.
+      # The container installed zstd above: the archive format is part of the cache version.
       - name: Restore the staged engines (pull request dry runs)
         id: engines
         if: github.event_name == 'pull_request'
@@ -185,7 +201,7 @@ jobs:
           path: |
             .engine-staging/bundled
             resources/prime-auth/bin
-          key: engines-v1-${{ matrix.platform }}-${{ hashFiles('engines.lock.json', 'patches/**', 'scripts/engines/**', 'scripts/build-prime-auth.mjs', 'resources/prime-auth/**', '!resources/prime-auth/bin/**', 'rust-toolchain.toml', '.node-version') }}
+          key: engines-v2-${{ matrix.platform }}-${{ matrix.builder.runner }}-${{ matrix.builder.container || 'no-container' }}-${{ hashFiles('engines.lock.json', 'patches/**', 'scripts/engines/**', 'scripts/build-prime-auth.mjs', 'resources/prime-auth/**', '!resources/prime-auth/bin/**', 'rust-toolchain.toml', '.node-version') }}
       - name: Trust the mounted checkout (container)
         if: runner.os == 'Linux'
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -239,8 +255,10 @@ jobs:
         run: npm run build:engines
       - name: Build the Engine 2 helper
         run: npm run build:auth
+      # CI's engines job saves the ci-engines platforms in the same pull request scope. A second
+      # writer of one key could reserve it first and leave CI's save with only a warning.
       - name: Save the staged engines (pull request dry runs)
-        if: github.event_name == 'pull_request' && steps.engines.outputs.cache-hit != 'true'
+        if: github.event_name == 'pull_request' && !matrix.ci-engines && steps.engines.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |

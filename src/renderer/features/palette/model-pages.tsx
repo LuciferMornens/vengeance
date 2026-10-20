@@ -6,13 +6,9 @@ import { rpc } from '../../lib/engine'
 import { selectActiveAgent, useAgents } from '../../store/agents'
 import { listRowClass, ListRowContent, Spinner, toast } from '../../ui'
 import type { ListRowClassOptions } from '../../ui/ListRow'
-import {
-  insetCaretClass,
-  ModelRow,
-  ProviderTile,
-  providerLabel,
-  useCatalogProviders
-} from '../chat/ModelPicker'
+import { insetCaretClass, ModelRow, ProviderTile, providerLabel } from '../chat/ModelPicker'
+import { useCatalogProviders } from '../chat/catalog-providers'
+import { toastFailure } from '../chat/failure-toast'
 import { ThinkingMeter } from '../chat/ThinkingControl'
 import { THINKING_INFO, THINKING_LABELS } from '../composer/thinking-pill'
 import { supportsEngineCommand, useEngineCapabilities } from '../engines/registry'
@@ -134,13 +130,7 @@ export function ModelsPage({
                       duration: 2200
                     })
                   )
-                  .catch((error: Error) =>
-                    toast({
-                      level: 'error',
-                      title: 'Could not switch model',
-                      description: error.message
-                    })
-                  )
+                  .catch((error: unknown) => toastFailure('Could not switch model', error))
               }}
             />
           ))}

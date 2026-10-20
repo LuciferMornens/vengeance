@@ -24,7 +24,8 @@ import { rejectedSignIns, rejectedSignInsChange } from './stored-credential'
  * Inside that window, a file Vengeance wrote itself still reports a change when its content differs from
  * that write. The mcp.json saves of the MCP chip's switches are passed over (engine-mcp-saves.ts).
  * Engine-written credentials (N1) are ignored; see config-areas.ts. The Engine's mark of a sign-in the provider refused
- * to renew (stored-credential.ts) is reported as a `live` auth change, which refreshes what the app shows.
+ * to renew (stored-credential.ts) is reported as a `live` auth change, which the app applies to open conversations
+ * without a restart (ipc/settings.ts).
  */
 
 const DEBOUNCE_MS = 350
@@ -51,7 +52,7 @@ interface FolderWatch {
   close(): void
 }
 
-/** A classified file change; `live` when it only records state an engine already applies. */
+/** A classified file change; `live` when it only records state open conversations take on without a restart. */
 interface WatchedChange {
   area: SettingsChangeArea
   live: boolean
@@ -94,7 +95,8 @@ export class ConfigWatcher {
    *   (`npm/`, `git/`), which is not an outside change.
    * @param onChange `fromRun`: settings.json was rewritten by an install or update Vengeance ran (its package list);
    *   that run announces its own change. `live`: the Engine only marked sign-ins the provider refused to renew in
-   *   auth.json; it already stopped using them, so nothing needs a restart.
+   *   auth.json. Only the conversation that found out stopped offering them; without a restart, the app leaves them
+   *   out of the other conversations' model lists and has their bridges re-read the sign-ins.
    */
   constructor(
     private readonly onChange: (

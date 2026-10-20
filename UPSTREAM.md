@@ -180,19 +180,39 @@ offers an equivalent host-facing interface and the app moves to it.
 pi build `.4` adds patch `0010`. Upstream pi keeps an OAuth credential whose refresh failed and kept
 counting its provider as signed in, so after a provider rejected the refresh token every request,
 and every "any signed-in provider" choice such as the conversation title model, picked that provider
-and failed after another token request. With the patch, only an RFC 6749 `invalid_grant` response
-(HTTP 400 or 401) from a built-in flow's token endpoint (OpenAI, OpenAI Codex, Anthropic, xAI, Kimi
-Code, Radius) marks the stored credential with `refreshRejectedAt` (epoch milliseconds); every other
-field is kept. Timeouts, network errors, server errors, cancellation, lock failures and other error
-codes leave it retryable. A marked credential configures nothing: the provider leaves `checkAuth`,
-`getAvailable`, the runtime availability snapshot and RPC `get_available_models`, and requests fail
-at once with "Sign-in for <provider> expired: the provider rejected its refresh token. Sign in
-again." without another token request. The stored credential still owns its provider, so an
+and failed after another token request. With the patch, only a rejected refresh token from a
+built-in flow's token endpoint (OpenAI, OpenAI Codex, Anthropic, xAI, Kimi Code, Radius) marks the
+stored credential with `refreshRejectedAt` (epoch milliseconds): an RFC 6749 `invalid_grant`
+response, or the `refresh_token_expired`, `refresh_token_reused` or `refresh_token_invalidated`
+code of OpenAI's error object, with HTTP 400 or 401. Every other field is kept. Timeouts, network
+errors, server errors, cancellation, lock failures and other error codes leave it retryable. A
+marked credential configures nothing: the provider leaves `checkAuth`, `getAvailable`, the runtime
+availability snapshot and RPC `get_available_models`, and requests fail at once with "Sign-in for
+<provider> expired: the provider rejected its refresh token. Sign in again." without another token
+request. The stored credential still owns its provider, so an
 environment API key does not take over; an explicit request key or `--api-key` still authenticates.
 Prompting or selecting a model of the provider names the expired sign-in. A new login replaces the
 credential and clears the mark. `getProviderAuthStatus` still reports the stored credential
 (`configured`, source `stored`) while `isUsingOAuth` is false, which is how a host tells an expired
 sign-in from a missing one. Builds without the patch ignore the field.
+
+Each Engine process keeps its own availability snapshot, and only the process that reaches the mark
+updates it: a request that fails on a marked credential waits for a full availability pass to apply
+before the failure reaches its caller, unless the request is aborted first, which ends only the
+wait. That pass replaces any pass in flight and applies every provider's model filter. The app
+filters each open Engine conversation's model list and model cycle against the auth.json that
+conversation reads, so the provider's models leave them as soon as that file holds the mark. When
+the app sees a newly added mark in its agent dir's auth.json, the bridge's `/vengeance-sign-ins` has
+each open conversation that reads it call `ModelRegistry.refreshAvailability()`, which patch `0010`
+adds, so its extensions' `modelRegistry.getAvailable()` drops the provider too; a conversation that
+starts, or switches to the Engine, while its own auth.json holds a mark makes the same call once
+ready. It reads every stored credential and every provider's availability again without network
+access, with each provider's model filter, resolves once such a pass applied, and neither reloads
+models.json nor cancels catalog refreshes in flight. `ModelRegistry.refresh` would do both, and a
+provider-scoped refresh rebuilds the other providers' availability without their filters, so GitHub
+Copilot would list models its plan does not offer. The app ignores a failed bridge call, so a base
+that breaks the re-read fails silently: `model-runtime-oauth-rejection.test.ts` checks it through
+`ModelRegistry` on every base.
 
 Engine 2 is unchanged. Prime keeps a credential whose refresh failed, returns no key for that lookup
 so model discovery skips the provider, and tries the token endpoint again on the next lookup;
@@ -201,12 +221,17 @@ nothing is persisted, and only its xAI flow names a revoked authorization in the
 Qualify on every base: the native `oauth-refresh-rejection.test.ts`,
 `model-runtime-oauth-rejection.test.ts` and `suite/agent-session-prompt.test.ts` named in the [pi
 patch guide](patches/pi/README.md), plus the app's refused sign-in check. Then run
-`scripts/qa/auth/refused-sign-in.qa.mjs` against the real Engine: Kimi Code's built-in flow refreshes
-against a local token endpoint (`KIMI_CODE_OAUTH_HOST`) that answers `invalid_grant`, a fixture
-extension picks a title model like session auto-title packages, and the suite checks the mark, the
-title model's fallback, fail-fast requests, Settings and Sign in again. Confirm that each built-in
-OAuth flow still raises `OAuthEndpointError` from its token endpoint. Retire the patch when upstream
-recognizes rejected refresh tokens and stops offering their providers.
+`scripts/qa/auth/refused-sign-in.qa.mjs` against the real Engine: Kimi Code's built-in flow
+refreshes against a local token endpoint (`KIMI_CODE_OAUTH_HOST`) that answers `invalid_grant`, a
+fixture extension picks a title model like session auto-title packages, and the suite checks the
+mark, the title model's fallback, fail-fast requests, Settings and Sign in again, and that a second
+open conversation stops offering the provider through the bridge without a restart. Confirm that
+each built-in OAuth flow's refresh still raises `OAuthEndpointError`, directly or (Anthropic's) as
+the thrown error's `cause`, for every token endpoint error response with a JSON body (xAI's flow
+throws a plain error for a body it cannot parse, which is never a rejection; login may raise it too,
+which never marks a credential), and that OpenAI's flows still read the `code` of its error object.
+Retire the patch when upstream recognizes rejected refresh tokens and stops offering their
+providers.
 
 ## Platforms
 
@@ -257,22 +282,32 @@ run that built the shipped packages.
 
 GitHub Actions is the qualification path for macOS and Linux. `.github/workflows/ci.yml` runs on every
 pull request and push to `main`. Its `engines` job builds both engines and the helper for `win32-x64`,
-`darwin-arm64` and `linux-x64` (Linux in the Ubuntu 22.04 container) and caches the staged payloads under
-a key of their inputs. On `main`, its `release-engines` job does the same for `darwin-x64` and
-`linux-arm64`, which CI does not test, and no other job waits for it. Its `checks` and `shots` jobs
-restore exactly that key on the plain runner and verify it through `npm run build`. `checks` then runs
-`npm run checks` once per platform; `shots` runs `npm run shots` in two shards per platform (Linux under
-Xvfb) and uploads each shard's screenshots. The required `Checks and shots (<platform>)` jobs pass only
-when every checks and shots job passed. `.github/workflows/release.yml` runs as a dry run on pull
+`darwin-arm64` and `linux-x64` (Linux in the Ubuntu 22.04 container) and caches the staged payloads. The
+cache key covers the platform, its builder (the runner label and, on Linux, the pinned container image
+reference with its digest; not the runner image version behind the label) and a hash of the engine
+inputs: `engines.lock.json`, `patches/`,
+`scripts/engines/`, `scripts/build-prime-auth.mjs`, `resources/prime-auth/` except its `bin/`,
+`rust-toolchain.toml` and `.node-version`. The job builds only when no entry has that key, and fails
+unless the entry is cached when it ends, so a lost upload fails it rather than the jobs that restore
+it. On `main`, its `release-engines` job does the same for `darwin-x64` and `linux-arm64`, which CI
+does not test, and no other job waits for it. `scripts/checks/engine-cache-key.check.ts` keeps the
+key, each platform's builder and the jobs that save it consistent across both workflows. CI's
+`checks` and `shots` jobs restore exactly that key on the plain runner and verify it through
+`npm run build`. `checks` then runs `npm run checks` once per platform; `shots` runs `npm run shots`
+in two shards per platform (Linux under Xvfb) and uploads each shard's screenshots. The required
+`Checks and shots (<platform>)` jobs pass only when every checks and shots job passed.
+`.github/workflows/release.yml` runs as a dry run on pull
 requests that touch engines, patches, the helper, packaging, toolchain pins or the workflow, on manual
 dispatch and weekly on a schedule. Tag runs and manual and scheduled dry runs build each of the five
 platforms from a clean runner without caches. A pull request dry run may instead restore the engine and
-helper payloads cached under CI's key for the same engine inputs, by CI on `main` or by an earlier run
-for that pull request, and verifies them as CI's checks and shots jobs do; when none is cached it
-builds them clean and caches them for its later pushes and reruns. Its provenance receipt records
-`nativePayloads.source` as `restored` with the cache key, or as `built`. A restored payload shows that
-those inputs built on the same runner and container before, not in this run; tag runs build and qualify
-every shipped payload themselves. Each platform then packages, passes the baked-feed check, the GLIBC
+helper payloads cached under CI's key, saved by CI on `main` or in that pull request or, for
+`darwin-x64` and `linux-arm64`, by an earlier dry run of that pull request, and verifies them as CI's
+checks and shots jobs do; when none is cached it builds them clean. It saves what it built only for
+`darwin-x64` and `linux-arm64`, which CI's `engines` job does not build in pull requests, so each key
+has one writer per cache scope. Its provenance receipt records `nativePayloads.source` as `restored`
+with the cache key, or as `built`. A restored payload shows that the same engine inputs built before
+on the same runner label and container image, not in this run; tag runs build and qualify every
+shipped payload themselves. Each platform then packages, passes the baked-feed check, the GLIBC
 gate (Linux) and signature, zip and dmg verification (macOS), and runs
 `scripts/qa/engines/platform-qualification.mjs` against the QA app that
 `node scripts/dist-qa.mjs --dir` prints. This runner executes nine suites serially against the packaged
@@ -472,7 +507,7 @@ sign-in testing only with explicit user authorization; report coverage gaps rath
 | Native prompt inspection, scoped edits and explicit application     | `scripts/qa/settings/system-prompts.qa.mjs`, `scripts/shots/system-prompts.mjs`; helper `system_prompt` tests                                                      |
 | Conversation instructions: composition, store and restart lifecycle | `scripts/checks/conversation-prompt.check.ts`, `scripts/shots/conversation-prompt.mjs`, `scripts/qa/settings/system-prompts.qa.mjs`                                |
 | Live MCP status and per-server reconnect in open conversations      | `scripts/qa/ext/mcp.qa.mjs`, `scripts/qa/engines/mcp-live.qa.mjs`, `scripts/checks/mcp-status.check.ts`; native suites of pi `0009` and Prime `0024`               |
-| Rejected OAuth sign-ins: availability and fail-fast requests        | `scripts/qa/auth/refused-sign-in.qa.mjs`, `scripts/checks/refused-sign-in.check.ts`; native suites of pi `0010`                                                    |
+| Rejected OAuth sign-ins: availability and fail-fast requests        | `scripts/qa/auth/refused-sign-in.qa.mjs`, `scripts/checks/refused-sign-in.check.ts`, `refused-sign-in-bridge.check.ts`; native suites of pi `0010`                 |
 | Parent/child model isolation and concurrent settings preservation   | `scripts/qa/engines/model-isolation.qa.mjs`; native `model_isolation`, settings persistence and `settings_mcp_save` regressions                                    |
 | Image capabilities, live model switches and tool/image delivery     | `scripts/qa/engines/image-capabilities.qa.mjs`; native model-switch and prompt regressions                                                                         |
 | Response speed, subscription entitlement and native tier transport  | `scripts/qa/engines/speed-mode-engine2.qa.mjs`, `speed-mode.qa.mjs`, `speed-mode-subscriptions.qa.mjs`; native `service_tiers` and `service_tiers_transport` tests |

@@ -13,6 +13,7 @@ import { Mark, toast } from '../../ui'
 import { activateAgent, openSessionFile } from '../sessions'
 import { findAgentForFile } from '../sessions/actions'
 import { itemTitle } from '../sessions/model'
+import { toastFailure } from './failure-toast'
 
 interface Suggestion {
   icon: ReactNode
@@ -110,7 +111,7 @@ export function SessionEmptyState({ agentId }: { agentId: string }) {
   const ready = useAgents((s) => s.agents[agentId]?.status === 'ready')
   const project = basename(cwd)
   const recent = useRecentSessions(cwd, engine)
-  const send = (text: string) => void useAgents.getState().prompt(agentId, text).catch((error: Error) => toast({ level: 'error', title: 'Could not send', description: error.message }))
+  const send = (text: string) => void useAgents.getState().prompt(agentId, text).catch((error: unknown) => toastFailure('Could not send', error))
 
   return (
     <motion.div

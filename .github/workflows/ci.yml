@@ -1,19 +1,23 @@
 # Pull request and main gates: typecheck, build and workflow lint, then checks and screenshots on
 # Windows, macOS and Linux against engines built the way releases build them.
 #
-# The engines job builds each platform's staged engines and native helper once per input change
-# and saves them to the Actions cache. Every checks and shots job restores exactly that key and
-# only verifies the payload: npm run build:engines and build:auth reuse it without a toolchain.
-# Linux engines build in the Ubuntu 22.04 container, the glibc 2.35 baseline
-# (scripts/engines/native.mjs refuses newer symbols); the Linux tests run on the plain runner,
-# where Xvfb gives Electron a display.
+# The engines job builds each platform's staged engines and native helper and saves them to the
+# Actions cache. The key is the platform, its builder (the runner label and, on Linux, the
+# container image digest) and a hash of the engine inputs; the job builds only when no entry has
+# that key, and fails unless the entry is cached when it ends. Every checks and shots job
+# restores exactly that key and only verifies the payload: npm run build:engines and build:auth
+# reuse it without a toolchain. Linux engines build in the Ubuntu 22.04 container, the glibc 2.35
+# baseline (scripts/engines/native.mjs refuses newer symbols); the Linux tests run on the plain
+# runner, where Xvfb gives Electron a display. Jobs that build run on their matrix builder values;
+# scripts/checks/engine-cache-key.check.ts keeps every job's key and builders equal.
 #
 # Each platform runs npm run checks once and its screenshots in two shards. The required
 # "Checks and shots (<platform>)" jobs only collect those results; needs reports a matrix job as a
 # whole, so each passes only when every checks and shots job passed.
 #
-# Pull request dry runs of release.yml restore payloads under the same key. On main, release-engines
-# also caches the Intel macOS and Linux arm64 payloads, which CI does not test; no job needs it.
+# Pull request dry runs of release.yml restore payloads under the same key and save only the Intel
+# macOS and Linux arm64 payloads, which CI builds only on main: each key has one writer per cache
+# scope. On main, release-engines caches those two; CI does not test them and no job needs it.
 name: CI
 
 on:
@@ -63,28 +67,33 @@ jobs:
 
   engines:
     name: Engines (${{ matrix.platform }})
-    runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container }}
+    runs-on: ${{ matrix.builder.runner }}
+    container: ${{ matrix.builder.container }}
     timeout-minutes: 120
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
+        # builder is where the payload builds, as the cache key records it: release.yml builds
+        # each platform on the same runner label and container.
         include:
           - platform: win32-x64
-            os: windows-2025
-            container: ''
+            builder:
+              runner: windows-2025
+              container: ''
             rust-target: x86_64-pc-windows-gnu
             native-build-jobs: 4
           - platform: darwin-arm64
-            os: macos-15
-            container: ''
+            builder:
+              runner: macos-15
+              container: ''
             rust-target: aarch64-apple-darwin
             native-build-jobs: 3
           - platform: linux-x64
-            os: ubuntu-24.04
-            container: mirror.gcr.io/library/ubuntu@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
+            builder:
+              runner: ubuntu-24.04
+              container: mirror.gcr.io/library/ubuntu@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
             rust-target: x86_64-unknown-linux-gnu
             native-build-jobs: 4
     env:
@@ -111,7 +120,7 @@ jobs:
           path: |
             .engine-staging/bundled
             resources/prime-auth/bin
-          key: engines-v1-${{ matrix.platform }}-${{ hashFiles('engines.lock.json', 'patches/**', 'scripts/engines/**', 'scripts/build-prime-auth.mjs', 'resources/prime-auth/**', '!resources/prime-auth/bin/**', 'rust-toolchain.toml', '.node-version') }}
+          key: engines-v2-${{ matrix.platform }}-${{ matrix.builder.runner }}-${{ matrix.builder.container || 'no-container' }}-${{ hashFiles('engines.lock.json', 'patches/**', 'scripts/engines/**', 'scripts/build-prime-auth.mjs', 'resources/prime-auth/**', '!resources/prime-auth/bin/**', 'rust-toolchain.toml', '.node-version') }}
           lookup-only: true
       - name: Trust the mounted checkout (container)
         if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
@@ -155,14 +164,26 @@ jobs:
             .engine-staging/bundled
             resources/prime-auth/bin
           key: ${{ steps.cache.outputs.cache-primary-key }}
+      # The save only warns when it cannot reserve the key or upload the entry. Failing here instead
+      # makes re-running this job rebuild it, rather than leaving the checks and shots to miss it.
+      - name: Confirm the staged engines are cached
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .engine-staging/bundled
+            resources/prime-auth/bin
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+          lookup-only: true
+          fail-on-cache-miss: true
 
-  # The engines job's steps for the two release platforms CI does not test, on the runners and
-  # container release.yml builds them on. Every pull request can read entries saved from main.
+  # The engines job's steps for the two release platforms CI does not test, on the builders
+  # release.yml uses for them. Every pull request can read entries saved from main.
   release-engines:
     name: Release engines (${{ matrix.platform }})
     if: github.ref == 'refs/heads/main'
-    runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container }}
+    runs-on: ${{ matrix.builder.runner }}
+    container: ${{ matrix.builder.container }}
     timeout-minutes: 120
     permissions:
       contents: read
@@ -171,13 +192,15 @@ jobs:
       matrix:
         include:
           - platform: darwin-x64
-            os: macos-15-intel
-            container: ''
+            builder:
+              runner: macos-15-intel
+              container: ''
             rust-target: x86_64-apple-darwin
             native-build-jobs: 4
           - platform: linux-arm64
-            os: ubuntu-24.04-arm
-            container: mirror.gcr.io/library/ubuntu@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
+            builder:
+              runner: ubuntu-24.04-arm
+              container: mirror.gcr.io/library/ubuntu@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
             rust-target: aarch64-unknown-linux-gnu
             native-build-jobs: 4
     env:
@@ -201,7 +224,7 @@ jobs:
           path: |
             .engine-staging/bundled
             resources/prime-auth/bin
-          key: engines-v1-${{ matrix.platform }}-${{ hashFiles('engines.lock.json', 'patches/**', 'scripts/engines/**', 'scripts/build-prime-auth.mjs', 'resources/prime-auth/**', '!resources/prime-auth/bin/**', 'rust-toolchain.toml', '.node-version') }}
+          key: engines-v2-${{ matrix.platform }}-${{ matrix.builder.runner }}-${{ matrix.builder.container || 'no-container' }}-${{ hashFiles('engines.lock.json', 'patches/**', 'scripts/engines/**', 'scripts/build-prime-auth.mjs', 'resources/prime-auth/**', '!resources/prime-auth/bin/**', 'rust-toolchain.toml', '.node-version') }}
           lookup-only: true
       - name: Trust the mounted checkout (container)
         if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
@@ -235,6 +258,16 @@ jobs:
             .engine-staging/bundled
             resources/prime-auth/bin
           key: ${{ steps.cache.outputs.cache-primary-key }}
+      - name: Confirm the staged engines are cached
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .engine-staging/bundled
+            resources/prime-auth/bin
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+          lookup-only: true
+          fail-on-cache-miss: true
 
   checks:
     name: Checks (${{ matrix.platform }})
@@ -246,13 +279,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # builder names the engines job's builder for the platform, which the cache key includes.
         include:
           - platform: win32-x64
             os: windows-2025
+            builder:
+              runner: windows-2025
+              container: ''
           - platform: darwin-arm64
             os: macos-15
+            builder:
+              runner: macos-15
+              container: ''
           - platform: linux-x64
             os: ubuntu-24.04
+            builder:
+              runner: ubuntu-24.04
+              container: mirror.gcr.io/library/ubuntu@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -268,7 +311,7 @@ jobs:
           path: |
             .engine-staging/bundled
             resources/prime-auth/bin
-          key: engines-v1-${{ matrix.platform }}-${{ hashFiles('engines.lock.json', 'patches/**', 'scripts/engines/**', 'scripts/build-prime-auth.mjs', 'resources/prime-auth/**', '!resources/prime-auth/bin/**', 'rust-toolchain.toml', '.node-version') }}
+          key: engines-v2-${{ matrix.platform }}-${{ matrix.builder.runner }}-${{ matrix.builder.container || 'no-container' }}-${{ hashFiles('engines.lock.json', 'patches/**', 'scripts/engines/**', 'scripts/build-prime-auth.mjs', 'resources/prime-auth/**', '!resources/prime-auth/bin/**', 'rust-toolchain.toml', '.node-version') }}
           fail-on-cache-miss: true
       # prebuild runs build:engines and build:auth, which verify the restored payloads.
       - run: npm run build
@@ -289,10 +332,19 @@ jobs:
         include:
           - platform: win32-x64
             os: windows-2025
+            builder:
+              runner: windows-2025
+              container: ''
           - platform: darwin-arm64
             os: macos-15
+            builder:
+              runner: macos-15
+              container: ''
           - platform: linux-x64
             os: ubuntu-24.04
+            builder:
+              runner: ubuntu-24.04
+              container: mirror.gcr.io/library/ubuntu@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -311,7 +363,7 @@ jobs:
           path: |
             .engine-staging/bundled
             resources/prime-auth/bin
-          key: engines-v1-${{ matrix.platform }}-${{ hashFiles('engines.lock.json', 'patches/**', 'scripts/engines/**', 'scripts/build-prime-auth.mjs', 'resources/prime-auth/**', '!resources/prime-auth/bin/**', 'rust-toolchain.toml', '.node-version') }}
+          key: engines-v2-${{ matrix.platform }}-${{ matrix.builder.runner }}-${{ matrix.builder.container || 'no-container' }}-${{ hashFiles('engines.lock.json', 'patches/**', 'scripts/engines/**', 'scripts/build-prime-auth.mjs', 'resources/prime-auth/**', '!resources/prime-auth/bin/**', 'rust-toolchain.toml', '.node-version') }}
           fail-on-cache-miss: true
       # prebuild runs build:engines and build:auth, which verify the restored payloads.
       - run: npm run build

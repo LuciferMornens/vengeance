@@ -481,6 +481,7 @@ export class MockEngineProcess extends MockSession implements EngineHandle {
           typeof payload.label === 'string' ? payload.label : undefined
         )
       case 'vengeance-reload':
+      case 'vengeance-sign-ins':
         return null
       case 'vengeance-mcp': {
         const action = payload.action

@@ -1,14 +1,15 @@
 import { shell } from 'electron'
 import { realpathSync, statSync } from 'node:fs'
-import { extname } from 'node:path'
+import { extname, join } from 'node:path'
+import type { CreateAgentArgs } from '@shared/api/engine'
 import type { SettingsChangeArea, SettingsEventMap } from '@shared/api/settings'
 import type { IpcContext } from './context'
 import { broadcast, handle, onQuit } from './handle'
 import { appState } from '../app-state'
 import { disposeSdkHost, prewarmSdkHost, releaseSdkHost } from '../engine/sdk-host/client'
-import { isInside } from '../paths'
+import { isInside, samePath } from '../paths'
 import { ACCOUNT_PROVIDER, refreshAccountModels } from '../features/settings/account-models'
-import { agentDir, projectRoot } from '../features/settings/agent-dir'
+import { agentDir, projectRoot, spawnAgentDir } from '../features/settings/agent-dir'
 import { clearExtensionFlagCache } from '../features/launch/flags'
 import { setProjectTrust, trustPreflight } from '../features/launch/trust'
 import { ConfigWatcher } from '../features/settings/config-watcher'
@@ -62,6 +63,7 @@ import {
   validateRawSettings,
   writeRawSettings
 } from '../features/settings/settings-store'
+import { rejectedSignInsAt } from '../features/settings/stored-credential'
 import { installedThemeNames } from '../features/settings/themes'
 import { listTrust, updateTrustEntry } from '../features/settings/trust'
 
@@ -122,17 +124,26 @@ export function registerSettingsIpc(context: IpcContext): void {
     noteProviderConfigChange(area)
     if (area === 'models' || area === 'auth') refillModelCatalog(override())
   }
+  /** A conversation reads the auth.json the watcher watches: its launch env may name another agent dir. */
+  const readsWatchedAuth = (args: CreateAgentArgs) =>
+    samePath(spawnAgentDir(args.cwd, args.launch?.env), agentDir())
   const watcher = new ConfigWatcher(
     (area, projectCwd, fromRun, live) => {
       noteChange(area)
       // Engines rewrite auth.json when they refresh a token: a cheap local check, no fetch unless the list is stale.
       if (area === 'auth') checkAccountModels(false)
+      // The Engine marked sign-ins the provider refused to renew, and only the conversation that found out stopped
+      // offering them. No restart: the other conversations' model lists leave them out in main (`offeredModel`), and
+      // their bridges re-read the sign-ins for what extensions pick.
+      if (live) {
+        if (rejectedSignInsAt(join(agentDir(), 'auth.json')).size > 0)
+          void context.manager.refreshSignIns(readsWatchedAuth)
+      }
       const event = {
         area,
         external: true,
         engine: 'pi' as const,
         ...(fromRun ? { fromRun } : {}),
-        // The Engine marked a sign-in the provider refused: it already stopped using it.
         ...(live ? { apply: 'new-sessions' as const } : {})
       }
       if (!projectCwd) {

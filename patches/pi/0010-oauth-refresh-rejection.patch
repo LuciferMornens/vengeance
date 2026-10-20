@@ -1,22 +1,22 @@
 diff --git a/packages/ai/README.md b/packages/ai/README.md
-index 7daa0ce..9eb07b7 100644
+index 7daa0ce..98a943f 100644
 --- a/packages/ai/README.md
 +++ b/packages/ai/README.md
 @@ -1719,6 +1719,8 @@ Several providers support OAuth authentication instead of static API keys:
  
  Each of these providers carries an `OAuthAuth` on `provider.auth.oauth` with three operations: `login(interaction)` uses the provider-neutral `AuthInteraction.prompt()`/`notify()` protocol and returns a credential, `refresh(credential, signal)` refreshes expiring credentials when applicable, and `toAuth(credential)` derives request auth (GitHub Copilot's per-account base URL comes from here). Provider login interactions and refresh calls always carry a concrete abort signal. Refresh is automatic: `models.getAuth(providerId)` and request paths refresh expired tokens under a credential-store lock, so concurrent requests and processes cannot double-refresh. OpenRouter's OAuth flow instead returns a permanent API key, so its refresh operation is a no-op.
  
-+A failed refresh keeps the stored credential for a retry. When the token endpoint definitively rejects the refresh token (an `invalid_grant` error response with HTTP 400 or 401), the credential is kept with `refreshRejectedAt` (epoch milliseconds) and no longer authenticates: `checkAuth()` and `getAvailable()` treat the provider as unconfigured, and `getAuth()` rejects with code `"oauth"` without another token request until a new login replaces the credential. Timeouts, network and server errors never mark a credential. Flows report token endpoint error responses by throwing `OAuthEndpointError` with the HTTP status and the response's `error` code; `isOAuthRefreshRejected(credential)` tells whether a stored credential is marked.
++A failed refresh keeps the stored credential for a retry. When the token endpoint definitively rejects the refresh token (an `invalid_grant` error response, or OpenAI's `refresh_token_expired`, `refresh_token_reused` or `refresh_token_invalidated`, with HTTP 400 or 401), the credential is kept with `refreshRejectedAt` (epoch milliseconds) and no longer authenticates: `checkAuth()` and `getAvailable()` treat the provider as unconfigured, and `getAuth()` rejects with code `"oauth"` without another token request until a new login replaces the credential. Timeouts, network and server errors never mark a credential. A refresh reports a token endpoint error response with a JSON body by throwing `OAuthEndpointError`, directly or as the thrown error's `cause`, with the HTTP status and the response's error code (the `error` string, or for flows that read the body with `oauthErrorCode()` also the `code` of an `error` object, as OpenAI's authorization server sends it); `isOAuthRefreshRejected(credential)` tells whether a stored credential is marked.
 +
  ```typescript
  import { createModels } from '@earendil-works/pi-ai';
  import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
 diff --git a/packages/ai/src/auth/oauth-error.ts b/packages/ai/src/auth/oauth-error.ts
 new file mode 100644
-index 0000000..4bcad85
+index 0000000..10dbb97
 --- /dev/null
 +++ b/packages/ai/src/auth/oauth-error.ts
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,88 @@
 +import type { Credential } from "./types.ts";
 +
 +// Bundles emit each lazily loaded OAuth flow with its own copy of this module, so errors are
@@ -25,7 +25,8 @@ index 0000000..4bcad85
 +
 +/**
 + * Error response from an OAuth 2.0 endpoint (RFC 6749 section 5.2). `oauthError` is the
-+ * response's `error` code when its body is a JSON object with one.
++ * response's error code when its body is a JSON object with one: the `error` string, or for
++ * flows that read it with {@link oauthErrorCode} also the `code` of an `error` object.
 + */
 +export class OAuthEndpointError extends Error {
 +	readonly status: number;
@@ -39,7 +40,10 @@ index 0000000..4bcad85
 +	}
 +}
 +
-+/** The `error` code of an OAuth error response body, given as text or as parsed JSON. */
++/**
++ * The error code of an OAuth error response body, given as text or as parsed JSON: the RFC 6749
++ * `error` string, or the `code` of an `error` object as OpenAI's authorization server sends it.
++ */
 +export function oauthErrorCode(body: unknown): string | undefined {
 +	let data = body;
 +	if (typeof body === "string") {
@@ -50,7 +54,10 @@ index 0000000..4bcad85
 +		}
 +	}
 +	if (typeof data !== "object" || data === null || Array.isArray(data)) return undefined;
-+	const code = (data as { error?: unknown }).error;
++	const error = (data as { error?: unknown }).error;
++	if (typeof error === "string") return error;
++	if (typeof error !== "object" || error === null) return undefined;
++	const code = (error as { code?: unknown }).code;
 +	return typeof code === "string" ? code : undefined;
 +}
 +
@@ -61,17 +68,30 @@ index 0000000..4bcad85
 +// Wrappers add context around an endpoint error; a few levels of `cause` cover every flow.
 +const MAX_CAUSE_DEPTH = 4;
 +
++// RFC 6749's code, then the codes OpenAI's authorization server answers a dead refresh token with.
++const REFRESH_TOKEN_REJECTIONS = new Set([
++	"invalid_grant",
++	"refresh_token_expired",
++	"refresh_token_reused",
++	"refresh_token_invalidated",
++]);
++
 +/**
 + * Whether a refresh failed because the authorization server definitively rejected the refresh
-+ * token: an RFC 6749 `invalid_grant` error response with HTTP 400, or 401 as some servers send it.
-+ * Timeouts, network failures, server errors, cancellation and other error codes do not qualify, so
-+ * the credential stays usable for a retry. A flow may wrap the endpoint error as `cause`.
++ * token: an RFC 6749 `invalid_grant` error response, or OpenAI's `refresh_token_expired`,
++ * `refresh_token_reused` or `refresh_token_invalidated`, with HTTP 400 or 401. Timeouts, network
++ * failures, server errors, cancellation and other error codes do not qualify, so the credential
++ * stays usable for a retry. A flow may wrap the endpoint error as `cause`.
 + */
 +export function isRefreshTokenRejection(error: unknown): boolean {
 +	let current = error;
 +	for (let depth = 0; current instanceof Error && depth <= MAX_CAUSE_DEPTH; depth++) {
 +		if (isOAuthEndpointError(current)) {
-+			return current.oauthError === "invalid_grant" && (current.status === 400 || current.status === 401);
++			return (
++				current.oauthError !== undefined &&
++				REFRESH_TOKEN_REJECTIONS.has(current.oauthError) &&
++				(current.status === 400 || current.status === 401)
++			);
 +		}
 +		current = current.cause;
 +	}
@@ -123,14 +143,14 @@ index b3d8499..c8a06d0 100644
  
  	let data: { access_token: string; refresh_token: string; expires_in: number; scope?: string };
 diff --git a/packages/ai/src/auth/oauth/kimi-coding.ts b/packages/ai/src/auth/oauth/kimi-coding.ts
-index 6c5bd49..815cddb 100644
+index 6c5bd49..3aa222c 100644
 --- a/packages/ai/src/auth/oauth/kimi-coding.ts
 +++ b/packages/ai/src/auth/oauth/kimi-coding.ts
 @@ -8,6 +8,7 @@
  
  import { getProviderEnvValue } from "../../utils/provider-env.ts";
  import { sleep } from "../../utils/sleep.ts";
-+import { OAuthEndpointError } from "../oauth-error.ts";
++import { OAuthEndpointError, oauthErrorCode } from "../oauth-error.ts";
  import type { OAuthAuth, OAuthCredential, ProviderAuthInteraction } from "../types.ts";
  import { pollOAuthDeviceCodeFlow } from "./device-code.ts";
  
@@ -147,6 +167,19 @@ index 6c5bd49..815cddb 100644
  		}
  
  		if (isRetryableRefreshFailure(response) && attempt < REFRESH_MAX_RETRIES) {
+@@ -258,7 +263,11 @@ async function refreshToken(oauthHost: string, refreshTokenValue: string, signal
+ 		}
+ 
+ 		const text = JSON.stringify(json);
+-		throw new Error(`Kimi Code token refresh failed with status ${response.status}${text ? `: ${text}` : ""}`);
++		throw new OAuthEndpointError(
++			`Kimi Code token refresh failed with status ${response.status}${text ? `: ${text}` : ""}`,
++			response.status,
++			oauthErrorCode(json),
++		);
+ 	}
+ 
+ 	throw lastError ?? new Error("Kimi Code token refresh failed");
 diff --git a/packages/ai/src/auth/oauth/openai-chatgpt.ts b/packages/ai/src/auth/oauth/openai-chatgpt.ts
 index 65e0371..ed54017 100644
 --- a/packages/ai/src/auth/oauth/openai-chatgpt.ts
@@ -257,7 +290,7 @@ index bf999c3..4eb0a93 100644
  
  function parseDeviceCode(body: JsonObject): XaiDeviceCode {
 diff --git a/packages/ai/src/auth/resolve.ts b/packages/ai/src/auth/resolve.ts
-index dfeb030..004c0eb 100644
+index dfeb030..0ab6eb8 100644
 --- a/packages/ai/src/auth/resolve.ts
 +++ b/packages/ai/src/auth/resolve.ts
 @@ -1,6 +1,8 @@
@@ -291,7 +324,7 @@ index dfeb030..004c0eb 100644
   * the result before the lock is released. `needsRefresh` is re-checked under
   * the lock, so concurrent callers and processes refresh only once.
   *
-+ * When the token endpoint rejects the refresh token (`invalid_grant`), the
++ * When the token endpoint rejects the refresh token (see `isRefreshTokenRejection`), the
 + * credential is kept with `refreshRejectedAt` set and the call rejects; until a
 + * new login replaces it, later calls reject without another token request.
 + *
@@ -348,7 +381,7 @@ index dfeb030..004c0eb 100644
  	const expiresSoon = (credential: OAuthCredential) => Date.now() + minimumValidityMs >= credential.expires;
  	let credential = stored;
 diff --git a/packages/ai/src/auth/types.ts b/packages/ai/src/auth/types.ts
-index 60fe4ff..c9de742 100644
+index 60fe4ff..cb566af 100644
 --- a/packages/ai/src/auth/types.ts
 +++ b/packages/ai/src/auth/types.ts
 @@ -31,6 +31,11 @@ export interface OAuthCredentials {
@@ -356,19 +389,20 @@ index 60fe4ff..c9de742 100644
  export interface OAuthCredential extends OAuthCredentials {
  	type: "oauth";
 +	/**
-+	 * When the provider's token endpoint rejected `refresh` (RFC 6749 `invalid_grant`), in epoch
++	 * When the provider's token endpoint rejected `refresh` (see `isRefreshTokenRejection`), in epoch
 +	 * milliseconds. The credential is kept but authenticates nothing; a new login replaces it.
 +	 */
 +	refreshRejectedAt?: number;
  }
  
  /** One type-tagged credential per provider — the shape of today's auth.json. */
-@@ -233,6 +238,8 @@ export interface OAuthAuth {
+@@ -233,6 +238,9 @@ export interface OAuthAuth {
  	/**
  	 * Exchange the refresh token. Network call; throws on failure
  	 * (invalid_grant etc.). `Models` runs this under the store lock.
-+	 * Token endpoint error responses throw `OAuthEndpointError`, so a
-+	 * rejected refresh token (`invalid_grant`) marks the credential.
++	 * An error response with a JSON body throws `OAuthEndpointError`, directly or as
++	 * the thrown error's `cause`, so a rejected refresh token (see
++	 * `isRefreshTokenRejection`) marks the credential.
  	 */
  	refresh(credential: OAuthCredential, signal: AbortSignal): Promise<OAuthCredential>;
  
@@ -433,10 +467,10 @@ index 7c9be11..c2bbf58 100644
  		if (!apiKey) return undefined;
 diff --git a/packages/ai/test/oauth-refresh-rejection.test.ts b/packages/ai/test/oauth-refresh-rejection.test.ts
 new file mode 100644
-index 0000000..5a2b8b3
+index 0000000..dd6a513
 --- /dev/null
 +++ b/packages/ai/test/oauth-refresh-rejection.test.ts
-@@ -0,0 +1,255 @@
+@@ -0,0 +1,322 @@
 +import { afterEach, describe, expect, it, vi } from "vitest";
 +import { InMemoryCredentialStore } from "../src/auth/credential-store.ts";
 +import { anthropicOAuth } from "../src/auth/oauth/anthropic.ts";
@@ -447,7 +481,7 @@ index 0000000..5a2b8b3
 +import { xaiOAuth } from "../src/auth/oauth/xai.ts";
 +import { isOAuthRefreshRejected, isRefreshTokenRejection, OAuthEndpointError } from "../src/auth/oauth-error.ts";
 +import type { ApiKeyAuth, CredentialStore, OAuthAuth, OAuthCredential } from "../src/auth/types.ts";
-+import { createModels, type Provider } from "../src/models.ts";
++import { createModels, type Provider, type RefreshModelsContext } from "../src/models.ts";
 +import type { Api, Model } from "../src/types.ts";
 +
 +const neverAbortedSignal = new AbortController().signal;
@@ -467,12 +501,18 @@ index 0000000..5a2b8b3
 +	};
 +}
 +
-+function testProvider(id: string, oauth: OAuthAuth, apiKey?: ApiKeyAuth): Provider {
++function testProvider(
++	id: string,
++	oauth: OAuthAuth,
++	apiKey?: ApiKeyAuth,
++	refreshModels?: Provider["refreshModels"],
++): Provider {
 +	const models = [testModel(id)];
 +	return {
 +		id,
 +		name: id,
 +		auth: { oauth, ...(apiKey ? { apiKey } : {}) },
++		...(refreshModels ? { refreshModels } : {}),
 +		getModels: () => models,
 +		stream: () => {
 +			throw new Error("unused");
@@ -507,13 +547,23 @@ index 0000000..5a2b8b3
 +	);
 +}
 +
-+async function setup(refresh: OAuthAuth["refresh"], apiKey?: ApiKeyAuth) {
++async function setup(
++	refresh: OAuthAuth["refresh"],
++	apiKey?: ApiKeyAuth,
++	refreshModels?: Provider["refreshModels"],
++	stored: OAuthCredential = expired,
++) {
 +	const credentials = new InMemoryCredentialStore();
-+	await credentials.modify("p1", async () => expired);
++	await credentials.modify("p1", async () => stored);
 +	const refreshMock = vi.fn(refresh);
 +	const models = createModels({ credentials });
-+	models.setProvider(testProvider("p1", testOAuth(refreshMock), apiKey));
++	models.setProvider(testProvider("p1", testOAuth(refreshMock), apiKey, refreshModels));
 +	return { credentials, models, refresh: refreshMock };
++}
++
++/** The `allowNetwork` of each catalog refresh phase a provider ran. */
++function catalogPhases(refreshModels: { mock: { calls: [RefreshModelsContext][] } }): boolean[] {
++	return refreshModels.mock.calls.map(([context]) => context.allowNetwork);
 +}
 +
 +describe("OAuth refresh token rejection", () => {
@@ -541,9 +591,14 @@ index 0000000..5a2b8b3
 +	});
 +
 +	it("excludes a rejected provider from auth checks, availability and catalog refresh", async () => {
-+		const { credentials, models, refresh } = await setup(async () => {
-+			throw invalidGrant(401);
-+		});
++		const refreshModels = vi.fn(async (_context: RefreshModelsContext) => {});
++		const { credentials, models, refresh } = await setup(
++			async () => {
++				throw invalidGrant(401);
++			},
++			undefined,
++			refreshModels,
++		);
 +		expect(await models.checkAuth("p1")).toEqual({ source: "OAuth", type: "oauth" });
 +		expect((await models.getAvailable()).map((model) => model.provider)).toEqual(["p1"]);
 +
@@ -553,9 +608,31 @@ index 0000000..5a2b8b3
 +		expect(await models.checkAuth("p1")).toBeUndefined();
 +		expect(await models.getAvailable()).toEqual([]);
 +		expect(await models.getAllAvailable()).toEqual([]);
++		refreshModels.mockClear();
 +		const result = await models.refresh({ providers: ["p1"] });
 +		expect(result.errors.size).toBe(0);
++		// Only the cache restore runs: the rejected credential reaches neither a token request nor the network phase.
++		expect(catalogPhases(refreshModels)).toEqual([false]);
 +		expect(refresh).toHaveBeenCalledOnce();
++	});
++
++	it("keeps a rejected credential that has not expired yet out of networked catalog refreshes", async () => {
++		const refreshModels = vi.fn(async (_context: RefreshModelsContext) => {});
++		const unexpired: OAuthCredential = { ...expired, expires: Date.now() + 3_600_000, refreshRejectedAt: 1 };
++		const { models, refresh } = await setup(
++			async () => {
++				throw new Error("unused");
++			},
++			undefined,
++			refreshModels,
++			unexpired,
++		);
++
++		const result = await models.refresh({ providers: ["p1"] });
++		expect(result.errors.size).toBe(0);
++		expect(catalogPhases(refreshModels)).toEqual([false]);
++		expect(await models.checkAuth("p1")).toBeUndefined();
++		expect(refresh).not.toHaveBeenCalled();
 +	});
 +
 +	it("keeps the stored credential owning its provider instead of falling back to the environment", async () => {
@@ -681,15 +758,39 @@ index 0000000..5a2b8b3
 +		expect(isRefreshTokenRejection(failure)).toBe(true);
 +	});
 +
-+	it("OpenAI keeps server errors and non-RFC bodies retryable", async () => {
++	const openaiFlows = flows.filter(([name]) => name.startsWith("OpenAI"));
++
++	it.each(openaiFlows)("%s marks the refresh token codes of OpenAI's error object", async (_name, refresh) => {
++		for (const code of ["refresh_token_expired", "refresh_token_reused", "refresh_token_invalidated"]) {
++			respond(401, {
++				error: {
++					message: "Your refresh token can no longer be used.",
++					type: "invalid_request_error",
++					param: null,
++					code,
++				},
++			});
++			const failure = await refresh().catch((error: unknown) => error);
++			expect(failure).toMatchObject({ status: 401, oauthError: code });
++			expect(isRefreshTokenRejection(failure)).toBe(true);
++		}
++	});
++
++	it.each(openaiFlows)("%s keeps server errors and other error objects retryable", async (_name, refresh) => {
 +		respond(503, { error: "temporarily_unavailable" });
-+		expect(
-+			isRefreshTokenRejection(await openaiChatGPTOAuth.refresh(expired, neverAbortedSignal).catch((e) => e)),
-+		).toBe(false);
++		expect(isRefreshTokenRejection(await refresh().catch((error: unknown) => error))).toBe(false);
 +		respond(401, { error: { message: "Could not validate your token", type: "invalid_request_error" } });
-+		expect(isRefreshTokenRejection(await openaiCodexOAuth.refresh(expired, neverAbortedSignal).catch((e) => e))).toBe(
-+			false,
-+		);
++		expect(isRefreshTokenRejection(await refresh().catch((error: unknown) => error))).toBe(false);
++		respond(400, { error: { message: "Bad request", type: "invalid_request_error", code: "invalid_request" } });
++		expect(isRefreshTokenRejection(await refresh().catch((error: unknown) => error))).toBe(false);
++	});
++
++	it("Kimi Code reports other token endpoint errors with their status and code", async () => {
++		respond(400, { error: "invalid_request", error_description: "Missing refresh token" });
++		const failure = await kimiCodingOAuth.refresh(expired, neverAbortedSignal).catch((error: unknown) => error);
++		expect(failure).toBeInstanceOf(OAuthEndpointError);
++		expect(failure).toMatchObject({ status: 400, oauthError: "invalid_request" });
++		expect(isRefreshTokenRejection(failure)).toBe(false);
 +	});
 +});
 diff --git a/packages/coding-agent/docs/providers.md b/packages/coding-agent/docs/providers.md
@@ -757,8 +858,29 @@ index 9782cda..3afd65f 100644
  export function formatNoApiKeyFoundMessage(provider: string): string {
  	const providerDisplay = provider === UNKNOWN_PROVIDER ? "the selected model" : provider;
  	return `No API key found for ${providerDisplay}.\n\n${getProviderLoginHelp()}`;
+diff --git a/packages/coding-agent/src/core/model-registry.ts b/packages/coding-agent/src/core/model-registry.ts
+index ffd3175..f4f5fba 100644
+--- a/packages/coding-agent/src/core/model-registry.ts
++++ b/packages/coding-agent/src/core/model-registry.ts
+@@ -57,6 +57,16 @@ export class ModelRegistry {
+ 		return this.runtime.refresh(options);
+ 	}
+ 
++	/**
++	 * Re-read every stored credential and every provider's available models, with each provider's
++	 * model filter, without reloading models.json or rebuilding providers, so catalog refreshes in
++	 * flight keep running. A sign-in another process changed, such as a refresh token it found
++	 * rejected, then shows in `getAvailable()`.
++	 */
++	async refreshAvailability(options?: AuthOperationOptions): Promise<void> {
++		await this.runtime.refreshAvailability(options);
++	}
++
+ 	getError(): string | undefined {
+ 		return this.runtime.getError();
+ 	}
 diff --git a/packages/coding-agent/src/core/model-runtime.ts b/packages/coding-agent/src/core/model-runtime.ts
-index 7c1dc82..5d905cb 100644
+index 7c1dc82..466b9d2 100644
 --- a/packages/coding-agent/src/core/model-runtime.ts
 +++ b/packages/coding-agent/src/core/model-runtime.ts
 @@ -29,6 +29,7 @@ import {
@@ -769,7 +891,109 @@ index 7c1dc82..5d905cb 100644
  	type LoginOptions,
  	lazyStream,
  	type Message,
-@@ -552,14 +553,23 @@ export class ModelRuntime implements Models {
+@@ -191,6 +192,8 @@ export class ModelRuntime implements Models {
+ 		auth: new Map(),
+ 	};
+ 	private availabilityRefreshSeq = 0;
++	/** The newest full availability pass; an older one in flight no longer applies its result. */
++	private latestAvailabilityPass: Promise<boolean> | undefined;
+ 	private availabilityErrorSeq = 0;
+ 	private readonly providerAvailabilitySeq = new Map<string, number>();
+ 	private availabilityError: string | undefined;
+@@ -339,7 +342,8 @@ export class ModelRuntime implements Models {
+ 		};
+ 	}
+ 
+-	private async runAvailabilityRefresh(seq: number, errorSeq: number, signal: AbortSignal): Promise<void> {
++	/** Resolves false when a newer pass replaced this one before it applied. */
++	private async runAvailabilityRefresh(seq: number, errorSeq: number, signal: AbortSignal): Promise<boolean> {
+ 		const providers = this.models.getProviders();
+ 		const [available, checks, credentials] = await Promise.all([
+ 			this.models.getAvailable(undefined, { signal }),
+@@ -353,7 +357,7 @@ export class ModelRuntime implements Models {
+ 			),
+ 			this.credentials.list({ signal }),
+ 		]);
+-		if (seq !== this.availabilityRefreshSeq) return;
++		if (seq !== this.availabilityRefreshSeq) return false;
+ 		const auth = new Map(checks);
+ 		const configuredProviders = new Set(
+ 			checks
+@@ -368,21 +372,54 @@ export class ModelRuntime implements Models {
+ 			auth,
+ 		};
+ 		if (errorSeq === this.availabilityErrorSeq) this.availabilityError = undefined;
++		return true;
+ 	}
+ 
+-	private queueAvailabilityRefresh(signal?: AbortSignal): Promise<void> {
++	private queueAvailabilityRefresh(signal?: AbortSignal): Promise<boolean> {
+ 		const seq = ++this.availabilityRefreshSeq;
+ 		for (const [providerId, providerSeq] of this.providerAvailabilitySeq) {
+ 			this.providerAvailabilitySeq.set(providerId, providerSeq + 1);
+ 		}
+ 		const errorSeq = ++this.availabilityErrorSeq;
+ 		const effectiveSignal = operationSignal(signal);
+-		return this.runAvailabilityRefresh(seq, errorSeq, effectiveSignal).catch((error) => {
++		const pass = this.runAvailabilityRefresh(seq, errorSeq, effectiveSignal).catch((error) => {
+ 			if (errorSeq === this.availabilityErrorSeq && !effectiveSignal.aborted) {
+ 				this.availabilityError = error instanceof Error ? error.message : String(error);
+ 			}
+ 			throw error;
+ 		});
++		this.latestAvailabilityPass = pass;
++		return pass;
++	}
++
++	/**
++	 * Queue a full availability pass and wait until a full pass queued since applies its result. A pass
++	 * queued later replaces this one before it applies, so follow the newest. A provider-scoped pass
++	 * replaces it too and applies nothing for the other providers, so queue another. A followed pass that
++	 * another caller queued may fail on that caller's abort, and a pass this call queued may fail after a
++	 * newer one replaced it; neither fails this call, which follows the newest. It fails when the pass it
++	 * queued last fails while still the newest, and stops waiting at once when `signal` aborts.
++	 */
++	private async applyAvailabilityRefresh(signal?: AbortSignal): Promise<void> {
++		let own = this.queueAvailabilityRefresh(signal);
++		let pass = own;
++		for (;;) {
++			let applied: boolean;
++			try {
++				applied = await raceWithAbortSignal(pass, signal);
++			} catch (error) {
++				signal?.throwIfAborted();
++				if (pass === own && pass === this.latestAvailabilityPass) throw error;
++				applied = false;
++			}
++			if (applied) return;
++			const latest = this.latestAvailabilityPass;
++			if (latest && latest !== pass) pass = latest;
++			else {
++				own = this.queueAvailabilityRefresh(signal);
++				pass = own;
++			}
++		}
+ 	}
+ 
+ 	private async refreshProviderAvailability(providerId: string, signal: AbortSignal): Promise<void> {
+@@ -486,6 +523,16 @@ export class ModelRuntime implements Models {
+ 		return this.models.checkAuth(providerId, options);
+ 	}
+ 
++	/**
++	 * Re-read every stored credential and every provider's availability, with each provider's model
++	 * filter, without reloading models.json or rebuilding providers. Resolves once a full pass queued
++	 * since applied, so a sign-in another process changed shows in the snapshot; rejects when the pass it
++	 * queued last fails while still the newest, or when `options.signal` aborts.
++	 */
++	async refreshAvailability(options?: AuthOperationOptions): Promise<void> {
++		await this.applyAvailabilityRefresh(options?.signal);
++	}
++
+ 	async getAvailable(providerId?: string, options?: AuthOperationOptions): Promise<readonly Model<Api>[]> {
+ 		if (providerId) {
+ 			const errorSeq = ++this.availabilityErrorSeq;
+@@ -552,14 +599,25 @@ export class ModelRuntime implements Models {
  		return this.snapshot.configuredProviders.has(providerId);
  	}
  
@@ -787,33 +1011,43 @@ index 7c1dc82..5d905cb 100644
 -		if (typeof providerOrModel === "string") return this.models.getAuth(providerOrModel, overrides);
 -		const resolution = await this.models.getAuth(providerOrModel, overrides);
 +		if (typeof providerOrModel === "string") {
-+			return this.resolveAuth(providerOrModel, () => this.models.getAuth(providerOrModel, overrides));
++			return this.resolveAuth(providerOrModel, overrides.signal, () =>
++				this.models.getAuth(providerOrModel, overrides),
++			);
 +		}
-+		const resolution = await this.resolveAuth(providerOrModel.provider, () =>
++		const resolution = await this.resolveAuth(providerOrModel.provider, overrides.signal, () =>
 +			this.models.getAuth(providerOrModel, overrides),
 +		);
  		if (!resolution) return undefined;
  		const configuredHeaders = resolveConfiguredModelHeaders(
  			providerOrModel,
-@@ -576,6 +586,26 @@ export class ModelRuntime implements Models {
+@@ -576,6 +634,34 @@ export class ModelRuntime implements Models {
  		};
  	}
  
 +	/**
-+	 * An OAuth failure can come from a refresh token the provider just rejected, which marks the
-+	 * stored credential. Availability is updated before the failure reaches the caller, so model
-+	 * choices made after it skip the provider.
++	 * An OAuth failure can come from a refresh token the provider rejected, which marks the stored
++	 * credential. A full availability pass then applies before the failure reaches the caller, so model
++	 * choices made after it skip the provider. It replaces any pass in flight, which may have read the
++	 * credential before the mark, and applies every provider's model filter whatever the current
++	 * snapshot holds. The request's abort ends its wait, not the pass, which still applies for later
++	 * choices. Other OAuth failures change no credential and leave availability, including a pass in
++	 * flight, alone.
 +	 */
 +	private async resolveAuth(
 +		providerId: string,
++		signal: AbortSignal | undefined,
 +		resolve: () => Promise<AuthResult | undefined>,
 +	): Promise<AuthResult | undefined> {
 +		try {
 +			return await resolve();
 +		} catch (error) {
 +			if (error instanceof ModelsError && error.code === "oauth" && this.hasConfiguredAuth(providerId)) {
-+				// Recorded as the availability error when it fails; the caller still gets the original failure.
-+				await this.refreshProviderAvailability(providerId, operationSignal()).catch(() => {});
++				const applied = this.hasRejectedOAuthCredential(providerId).then((rejected) =>
++					rejected ? this.applyAvailabilityRefresh() : undefined,
++				);
++				// A failed pass is recorded as the availability error; the caller still gets the original failure.
++				await raceWithAbortSignal(applied, signal).catch(() => {});
 +			}
 +			throw error;
 +		}
@@ -824,15 +1058,16 @@ index 7c1dc82..5d905cb 100644
  		let markStarted: (() => void) | undefined;
 diff --git a/packages/coding-agent/test/model-runtime-oauth-rejection.test.ts b/packages/coding-agent/test/model-runtime-oauth-rejection.test.ts
 new file mode 100644
-index 0000000..31f873a
+index 0000000..09d5c87
 --- /dev/null
 +++ b/packages/coding-agent/test/model-runtime-oauth-rejection.test.ts
-@@ -0,0 +1,180 @@
+@@ -0,0 +1,570 @@
 +import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 +import { tmpdir } from "node:os";
 +import { join } from "node:path";
 +import {
 +	type Context,
++	type CredentialStore,
 +	type Model,
 +	type OAuthAuth,
 +	type OAuthCredential,
@@ -841,6 +1076,7 @@ index 0000000..31f873a
 +} from "@earendil-works/pi-ai";
 +import { afterEach, describe, expect, it, vi } from "vitest";
 +import { AuthStorage } from "../src/core/auth-storage.ts";
++import { ModelRegistry } from "../src/core/model-registry.ts";
 +import { ModelRuntime } from "../src/core/model-runtime.ts";
 +
 +const context: Context = { messages: [{ role: "user", content: "title this", timestamp: 0 }] };
@@ -891,6 +1127,13 @@ index 0000000..31f873a
 +	};
 +}
 +
++const keyAuth: Provider["auth"] = {
++	apiKey: {
++		name: "API key",
++		resolve: async ({ credential }) => (credential?.key ? { auth: { apiKey: credential.key } } : undefined),
++	},
++};
++
 +const deadSignIn: OAuthCredential = {
 +	type: "oauth",
 +	access: "old",
@@ -898,6 +1141,67 @@ index 0000000..31f873a
 +	expires: 0,
 +	accountId: "account",
 +};
++
++/** "keyed" with a model its credential does not offer, the way GitHub Copilot filters its plan's models. */
++function filteredKeyed(): Provider<"openai-completions"> {
++	return {
++		...provider("keyed", keyAuth),
++		getModels: () => [model("keyed"), { ...model("keyed"), id: "keyed-hidden" }],
++		filterModels: (models) => models.filter((entry) => entry.id !== "keyed-hidden"),
++	};
++}
++
++/**
++ * `store`, whose `list` waits while held. Only a full availability pass lists credentials, so a held
++ * pass stays in flight until `release`, or fails on `fail`; `listed(count)` resolves once `count` listings
++ * are waiting. A newer hold takes over the listings that start after it, and outlasts the end of an older one.
++ */
++function holdableList(store: CredentialStore) {
++	let gate: Promise<void> | undefined;
++	let listed = 0;
++	let waiting: Array<{ count: number; resolve: () => void }> = [];
++	const credentials: CredentialStore = {
++		read: (providerId, options) => store.read(providerId, options),
++		modify: (providerId, fn, options) => store.modify(providerId, fn, options),
++		delete: (providerId, options) => store.delete(providerId, options),
++		list: async (options) => {
++			const held = gate;
++			if (held) {
++				listed++;
++				for (const entry of waiting.filter((entry) => entry.count <= listed)) entry.resolve();
++				await held;
++			}
++			return store.list(options);
++		},
++	};
++	const hold = () => {
++		let release = () => {};
++		let reject: (error: Error) => void = () => {};
++		const own = new Promise<void>((resolve, fail) => {
++			release = resolve;
++			reject = fail;
++		});
++		gate = own;
++		listed = 0;
++		waiting = [];
++		return {
++			listed: (count: number) =>
++				new Promise<void>((resolve) => {
++					if (listed >= count) resolve();
++					else waiting.push({ count, resolve });
++				}),
++			release: () => {
++				if (gate === own) gate = undefined;
++				release();
++			},
++			fail: (error: Error) => {
++				if (gate === own) gate = undefined;
++				reject(error);
++			},
++		};
++	};
++	return { credentials, hold };
++}
 +
 +const directories: string[] = [];
 +
@@ -914,22 +1218,36 @@ index 0000000..31f873a
 +	const create = async () => {
 +		const runtime = await ModelRuntime.create({ authPath, modelsPath: null, allowModelNetwork: false });
 +		runtime.registerNativeProvider(provider("subscription", { oauth: signIn(refreshMock) }));
-+		runtime.registerNativeProvider(
-+			provider("keyed", {
-+				apiKey: {
-+					name: "API key",
-+					resolve: async ({ credential }) => (credential?.key ? { auth: { apiKey: credential.key } } : undefined),
-+				},
-+			}),
-+		);
++		runtime.registerNativeProvider(provider("keyed", keyAuth));
 +		await runtime.refresh({ allowNetwork: false });
 +		return runtime;
 +	};
 +	return { runtime: await create(), create, authPath, refresh: refreshMock };
 +}
 +
++/**
++ * Register `providers` and wait for the refreshes each registration starts in the background. With a
++ * models.json on disk they finish in any order, and one that queues its availability pass last leaves
++ * the snapshot unfiltered until that pass lands.
++ */
++async function registerSettled(runtime: ModelRuntime, ...providers: Provider[]): Promise<void> {
++	const refreshes: Promise<unknown>[] = [];
++	const refresh = vi.spyOn(runtime, "refresh").mockImplementation((options) => {
++		const pending = ModelRuntime.prototype.refresh.call(runtime, options);
++		refreshes.push(pending);
++		return pending;
++	});
++	for (const entry of providers) runtime.registerNativeProvider(entry);
++	refresh.mockRestore();
++	await Promise.all(refreshes);
++}
++
 +function availableProviders(runtime: ModelRuntime): string[] {
 +	return runtime.getAvailableSnapshot().map((entry) => entry.provider);
++}
++
++function availableModels(runtime: ModelRuntime): string[] {
++	return runtime.getAvailableSnapshot().map((entry) => `${entry.provider}/${entry.id}`);
 +}
 +
 +describe("ModelRuntime with a rejected OAuth refresh token", () => {
@@ -991,6 +1309,312 @@ index 0000000..31f873a
 +		expect(JSON.parse(readFileSync(authPath, "utf8")).subscription).toEqual(deadSignIn);
 +		await expect(runtime.getAuth("subscription")).rejects.toThrow("OAuth refresh failed for subscription");
 +		expect(refresh).toHaveBeenCalledTimes(2);
++	});
++
++	it("leaves an availability pass in flight alone after a transient refresh failure", async () => {
++		const store = AuthStorage.inMemory({ subscription: deadSignIn });
++		const list = holdableList(store);
++		const refresh = vi.fn(async (): Promise<OAuthCredential> => {
++			throw new OAuthEndpointError("token request failed (502)", 502);
++		});
++		const runtime = await ModelRuntime.create({
++			credentials: list.credentials,
++			modelsPath: null,
++			allowModelNetwork: false,
++		});
++		runtime.registerNativeProvider(provider("subscription", { oauth: signIn(refresh) }));
++		runtime.registerNativeProvider(provider("keyed", keyAuth));
++		await runtime.refresh({ allowNetwork: false });
++		expect(availableProviders(runtime)).toEqual(["subscription"]);
++
++		// A key stored outside this runtime: the next full pass finds it.
++		await store.modify("keyed", async () => ({ type: "api_key", key: "key" }));
++		const hold = list.hold();
++		const pass = runtime.getAvailable();
++		await hold.listed(1);
++		await expect(runtime.getAuth("subscription")).rejects.toThrow("OAuth refresh failed for subscription");
++		hold.release();
++
++		expect((await pass).map((entry) => entry.provider)).toEqual(["subscription", "keyed"]);
++		expect(runtime.hasConfiguredAuth("keyed")).toBe(true);
++		expect(refresh).toHaveBeenCalledOnce();
++	});
++
++	it("keeps every model filter when a refusal arrives while a refresh's pass is in flight", async () => {
++		const store = AuthStorage.inMemory({ subscription: deadSignIn, keyed: { type: "api_key", key: "key" } });
++		const list = holdableList(store);
++		const refresh = vi.fn(async (): Promise<OAuthCredential> => {
++			throw new Error("unused");
++		});
++		const runtime = await ModelRuntime.create({
++			credentials: list.credentials,
++			modelsPath: null,
++			allowModelNetwork: false,
++		});
++		runtime.registerNativeProvider(provider("subscription", { oauth: signIn(refresh) }));
++		runtime.registerNativeProvider(filteredKeyed());
++		await runtime.refresh({ allowNetwork: false });
++		expect(availableModels(runtime)).toEqual(["subscription/subscription-model", "keyed/keyed-model"]);
++
++		// Another process marks the sign-in. Until a refresh's own pass lands, its snapshot lists every
++		// model of every configured provider, unfiltered.
++		await store.modify("subscription", async () => ({ ...deadSignIn, refreshRejectedAt: 1 }));
++		const hold = list.hold();
++		const refreshed = runtime.refresh({ allowNetwork: false });
++		await hold.listed(1);
++		const failure = runtime.getAuth("subscription").then(
++			() => undefined,
++			(error: unknown) => error,
++		);
++		// The refusal's own pass waits on the same hold.
++		await Promise.race([failure, hold.listed(2)]);
++		hold.release();
++
++		expect(String(await failure)).toContain("Sign-in for subscription expired");
++		await refreshed;
++		expect(availableModels(runtime)).toEqual(["keyed/keyed-model"]);
++		expect(refresh).not.toHaveBeenCalled();
++	});
++
++	it("drops the provider before each of two concurrent failures reaches its caller", async () => {
++		// The second failure's pass replaces the first one's before it applies.
++		const store = AuthStorage.inMemory({ subscription: deadSignIn, keyed: { type: "api_key", key: "key" } });
++		const refresh = vi.fn(async (): Promise<OAuthCredential> => {
++			throw new OAuthEndpointError("token request failed (400)", 400, "invalid_grant");
++		});
++		const runtime = await ModelRuntime.create({ credentials: store, modelsPath: null, allowModelNetwork: false });
++		runtime.registerNativeProvider(provider("subscription", { oauth: signIn(refresh) }));
++		runtime.registerNativeProvider(provider("keyed", keyAuth));
++		await runtime.refresh({ allowNetwork: false });
++		expect(availableProviders(runtime)).toEqual(["subscription", "keyed"]);
++
++		const configuredWhenFailed = (request: Promise<unknown>) =>
++			request.then(
++				() => "resolved",
++				() => runtime.hasConfiguredAuth("subscription"),
++			);
++		const failures = await Promise.all([
++			configuredWhenFailed(runtime.getAuth("subscription")),
++			configuredWhenFailed(runtime.getAuth("subscription")),
++		]);
++
++		expect(failures).toEqual([false, false]);
++		expect(availableProviders(runtime)).toEqual(["keyed"]);
++		expect(refresh).toHaveBeenCalledOnce();
++	});
++
++	it("drops the provider when a provider-scoped refresh replaces the refusal's pass", async () => {
++		const store = AuthStorage.inMemory({ subscription: deadSignIn, keyed: { type: "api_key", key: "key" } });
++		const list = holdableList(store);
++		const refresh = vi.fn(async (): Promise<OAuthCredential> => {
++			throw new OAuthEndpointError("token request failed (400)", 400, "invalid_grant");
++		});
++		const runtime = await ModelRuntime.create({
++			credentials: list.credentials,
++			modelsPath: null,
++			allowModelNetwork: false,
++		});
++		runtime.registerNativeProvider(provider("subscription", { oauth: signIn(refresh) }));
++		runtime.registerNativeProvider(provider("keyed", keyAuth));
++		await runtime.refresh({ allowNetwork: false });
++
++		const first = list.hold();
++		const failure = runtime.getAuth("subscription").then(
++			() => undefined,
++			(error: unknown) => error,
++		);
++		await first.listed(1);
++		// Reads only its own provider, so it lands while the refusal's pass waits, and supersedes it.
++		await runtime.refresh({ providers: ["keyed"], allowNetwork: false });
++		// The pass queued in its place waits too, and another provider-scoped refresh supersedes it.
++		const second = list.hold();
++		first.release();
++		await second.listed(1);
++		await runtime.refresh({ providers: ["keyed"], allowNetwork: false });
++		second.release();
++
++		expect(String(await failure)).toContain("Sign-in for subscription expired");
++		expect(runtime.hasConfiguredAuth("subscription")).toBe(false);
++		expect(availableProviders(runtime)).toEqual(["keyed"]);
++	});
++
++	it("ends a request's wait on its own abort, while the refusal's pass still applies", async () => {
++		const store = AuthStorage.inMemory({ subscription: deadSignIn, keyed: { type: "api_key", key: "key" } });
++		const list = holdableList(store);
++		const refresh = vi.fn(async (): Promise<OAuthCredential> => {
++			throw new OAuthEndpointError("token request failed (400)", 400, "invalid_grant");
++		});
++		const runtime = await ModelRuntime.create({
++			credentials: list.credentials,
++			modelsPath: null,
++			allowModelNetwork: false,
++		});
++		runtime.registerNativeProvider(provider("subscription", { oauth: signIn(refresh) }));
++		runtime.registerNativeProvider(provider("keyed", keyAuth));
++		await runtime.refresh({ allowNetwork: false });
++
++		const hold = list.hold();
++		const controller = new AbortController();
++		const failure = runtime.getAuth("subscription", { signal: controller.signal }).then(
++			() => undefined,
++			(error: unknown) => error,
++		);
++		await hold.listed(1);
++		controller.abort();
++
++		// The original failure arrives while the refusal's pass is still held.
++		expect(String(await failure)).toContain("Sign-in for subscription expired");
++		expect(runtime.hasConfiguredAuth("subscription")).toBe(true);
++		hold.release();
++		await vi.waitFor(() => expect(runtime.hasConfiguredAuth("subscription")).toBe(false));
++		expect(availableProviders(runtime)).toEqual(["keyed"]);
++	});
++
++	it("drops the provider when another caller's pass replaces the refusal's and aborts", async () => {
++		const store = AuthStorage.inMemory({ subscription: deadSignIn, keyed: { type: "api_key", key: "key" } });
++		const list = holdableList(store);
++		const refresh = vi.fn(async (): Promise<OAuthCredential> => {
++			throw new OAuthEndpointError("token request failed (400)", 400, "invalid_grant");
++		});
++		const runtime = await ModelRuntime.create({
++			credentials: list.credentials,
++			modelsPath: null,
++			allowModelNetwork: false,
++		});
++		runtime.registerNativeProvider(provider("subscription", { oauth: signIn(refresh) }));
++		runtime.registerNativeProvider(provider("keyed", keyAuth));
++		await runtime.refresh({ allowNetwork: false });
++
++		const hold = list.hold();
++		const failure = runtime.getAuth("subscription").then(
++			() => undefined,
++			(error: unknown) => error,
++		);
++		await hold.listed(1);
++		// Like the RPC startup refresh after its catalog timeout: a full pass whose signal already aborted.
++		const aborted = runtime.getAvailable(undefined, { signal: AbortSignal.abort() }).then(
++			() => "applied",
++			() => "aborted",
++		);
++		hold.release();
++
++		expect(await aborted).toBe("aborted");
++		expect(String(await failure)).toContain("Sign-in for subscription expired");
++		expect(runtime.hasConfiguredAuth("subscription")).toBe(false);
++		expect(availableProviders(runtime)).toEqual(["keyed"]);
++		await expect(runtime.refreshAvailability()).resolves.toBeUndefined();
++	});
++
++	it("stops following another caller's pass when the re-read's own signal aborts", async () => {
++		const store = AuthStorage.inMemory({ keyed: { type: "api_key", key: "key" } });
++		const list = holdableList(store);
++		const runtime = await ModelRuntime.create({
++			credentials: list.credentials,
++			modelsPath: null,
++			allowModelNetwork: false,
++		});
++		await registerSettled(runtime, provider("keyed", keyAuth));
++
++		const first = list.hold();
++		const controller = new AbortController();
++		const reread = runtime.refreshAvailability({ signal: controller.signal }).then(
++			() => "resolved",
++			(error: unknown) => (error instanceof Error ? error.name : String(error)),
++		);
++		await first.listed(1);
++		// A newer pass, held on its own, replaces the re-read's before it applies.
++		const second = list.hold();
++		const newer = runtime.getAvailable();
++		await second.listed(1);
++		// A failed listing ends the re-read's own pass at once (an unapplied one waits on every provider's
++		// sign-in check), so the re-read is following the newer pass when the signal aborts.
++		first.fail(new Error("auth.json: Unexpected end of JSON input"));
++		await new Promise((resolve) => setTimeout(resolve, 0));
++		controller.abort();
++
++		expect(await reread).toBe("AbortError");
++		second.release();
++		await newer;
++	});
++
++	it("follows a newer pass when the re-read's own pass fails after it was replaced", async () => {
++		const store = AuthStorage.inMemory({ keyed: { type: "api_key", key: "key" } });
++		const list = holdableList(store);
++		const runtime = await ModelRuntime.create({
++			credentials: list.credentials,
++			modelsPath: null,
++			allowModelNetwork: false,
++		});
++		await registerSettled(runtime, provider("keyed", keyAuth));
++
++		const first = list.hold();
++		const reread = runtime.refreshAvailability();
++		await first.listed(1);
++		const second = list.hold();
++		const newer = runtime.getAvailable();
++		await second.listed(1);
++		first.fail(new Error("auth.json: Unexpected end of JSON input"));
++		second.release();
++
++		await expect(reread).resolves.toBeUndefined();
++		await expect(newer).resolves.toHaveLength(1);
++	});
++
++	it("rejects a re-read whose own pass fails", async () => {
++		const store = AuthStorage.inMemory({ keyed: { type: "api_key", key: "key" } });
++		const credentials: CredentialStore = {
++			read: (providerId, options) => store.read(providerId, options),
++			modify: (providerId, fn, options) => store.modify(providerId, fn, options),
++			delete: (providerId, options) => store.delete(providerId, options),
++			list: async () => {
++				throw new Error("auth.json: Unexpected end of JSON input");
++			},
++		};
++		const runtime = await ModelRuntime.create({ credentials, modelsPath: null, allowModelNetwork: false });
++		runtime.registerNativeProvider(provider("keyed", keyAuth));
++
++		await expect(runtime.refreshAvailability()).rejects.toThrow("auth.json: Unexpected end of JSON input");
++	});
++
++	it("re-reads sign-ins for extensions without reloading models.json, keeping every model filter", async () => {
++		// What the desktop bridge asks of each open session after another process marked a sign-in.
++		const directory = mkdtempSync(join(tmpdir(), "pi-oauth-rejection-"));
++		directories.push(directory);
++		const modelsPath = join(directory, "models.json");
++		writeFileSync(
++			modelsPath,
++			JSON.stringify({
++				providers: {
++					custom: {
++						baseUrl: "http://127.0.0.1:9/v1",
++						api: "openai-completions",
++						apiKey: "key",
++						models: [{ id: "custom-model" }],
++					},
++				},
++			}),
++		);
++		const store = AuthStorage.inMemory({ subscription: deadSignIn, keyed: { type: "api_key", key: "key" } });
++		const refresh = vi.fn(async (): Promise<OAuthCredential> => {
++			throw new Error("unused");
++		});
++		const runtime = await ModelRuntime.create({ credentials: store, modelsPath, allowModelNetwork: false });
++		await registerSettled(runtime, provider("subscription", { oauth: signIn(refresh) }), filteredKeyed());
++		expect(availableModels(runtime).sort()).toEqual([
++			"custom/custom-model",
++			"keyed/keyed-model",
++			"subscription/subscription-model",
++		]);
++
++		// An edit that waits for a restart, which re-reading the sign-ins must not apply.
++		writeFileSync(modelsPath, "{");
++		await store.modify("subscription", async () => ({ ...deadSignIn, refreshRejectedAt: 1 }));
++		await new ModelRegistry(runtime).refreshAvailability();
++
++		expect(availableModels(runtime).sort()).toEqual(["custom/custom-model", "keyed/keyed-model"]);
++		expect(runtime.hasConfiguredAuth("subscription")).toBe(false);
++		expect(runtime.getError()).toBeUndefined();
++		expect(refresh).not.toHaveBeenCalled();
 +	});
 +
 +	it("reads the mark through an in-memory store", async () => {

@@ -14,6 +14,7 @@
  *   /vengeance-system-prompt {"reqId"}
  *   /vengeance-mcp    {"reqId","action"?,"server"?}
  *                     (action: "reconnect" | "enable" | "disable" | "enable-project" | "disable-project" | "logout")
+ *   /vengeance-sign-ins {"reqId"}
  *
  * `vengeance-subagents` proxies pi-subagents' in-process event-bus RPC (`subagents:rpc:v1:request` →
  * `subagents:rpc:v1:reply:<requestId>`), which an RPC host cannot reach directly. It posts nothing to the
@@ -30,6 +31,12 @@
  * sections extensions add when a run starts (`before_agent_start`, e.g. the MCP servers).
  * `vengeance-mcp` answers the conversation's MCP status (`mcp-status.ts`), after running `action` on
  * `server` first; null when no MCP extension reports.
+ * `vengeance-sign-ins` re-reads every sign-in in auth.json and every provider's available models without network
+ * access, so the session's model registry, which extensions read (`modelRegistry.getAvailable()`, as session
+ * auto-title packages do), leaves out the providers whose sign-in another conversation found the provider refused
+ * to renew. It applies each provider's model filter (such as GitHub Copilot's per-plan models), and unlike
+ * `modelRegistry.refresh` it neither reloads models.json, whose edits wait for a restart, nor cancels the catalog
+ * refreshes in flight.
  *
  * Each handler replies with `ctx.ui.setStatus('__vengeance:<reqId>', JSON)` carrying `{ ok, data | error }`.
  * pi awaits the handler before it answers the `prompt` command, so the reply always precedes that response
@@ -40,7 +47,8 @@
  * `turn_start`, `agent_settled`, `model_select`, `before_provider_request`, `provider_stream_event`,
  * `message_end`, compaction events);
  * `ExtensionCommandContext.navigateTree`, `reload`, `sessionManager.getEntry` / `getLeafId` / `getBranch`,
- * `modelRegistry.isUsingOAuth` / `getApiKeyAndHeaders`; `ExtensionUIContext.setStatus`.
+ * `modelRegistry.isUsingOAuth` / `getApiKeyAndHeaders`, and `refreshAvailability` from the Engine's patch 0010;
+ * `ExtensionUIContext.setStatus`.
  *
  * The bridge also registers OpenAI native compaction (`openai-native-compaction.ts`), response speed
  * (`speed-mode.ts`) and the MCP status (`mcp-status.ts`), next to this file.
@@ -306,6 +314,11 @@ export default function vengeanceBridge(pi: ExtensionAPI): void {
       )
     }
     return mcp.run(requiredString(payload, 'server'), action)
+  })
+
+  command('vengeance-sign-ins', async (_payload, ctx) => {
+    await ctx.modelRegistry.refreshAvailability()
+    return null
   })
 
   command('vengeance-speed', async (payload, ctx) => {

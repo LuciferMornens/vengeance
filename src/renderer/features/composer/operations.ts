@@ -8,6 +8,7 @@ import { REVEAL_LABEL } from '../../lib/platform-copy'
 import { useAgents, withModelChange } from '../../store/agents'
 import { toast } from '../../ui'
 import { providerLabel } from '../chat/ModelPicker'
+import { toastFailure } from '../chat/failure-toast'
 import { openPalette } from '../palette/store'
 import { getEffectiveSetting } from '../settings/effective'
 import { supportsEngineCommand } from '../engines/registry'
@@ -35,14 +36,6 @@ function requireCommand(agentId: string, command: RpcCommandType): boolean {
   const engine = useAgents.getState().agents[agentId]?.info.engine ?? 'pi'
   toast({ level: 'info', title: `This action is unavailable in ${ENGINE_LABELS[engine]}` })
   return false
-}
-
-function fail(title: string, error: unknown): void {
-  toast({
-    level: 'error',
-    title,
-    description: error instanceof Error ? error.message : String(error)
-  })
 }
 
 /**
@@ -108,7 +101,7 @@ export async function compactContext(agentId: string, customInstructions?: strin
       toast({ level: 'info', title: 'Compaction cancelled' })
     else if (refusal)
       toast({ level: 'info', title: refusal.title, description: refusal.description })
-    else fail('Could not compact the context', error)
+    else toastFailure('Could not compact the context', error)
   } finally {
     clearTimeout(watchdog)
     unsubscribe()
@@ -130,7 +123,7 @@ export async function copyLastAssistantText(agentId: string): Promise<void> {
     await navigator.clipboard.writeText(text)
     toast({ level: 'success', title: 'Copied the last response', duration: 2200 })
   } catch (error) {
-    fail('Could not copy', error)
+    toastFailure('Could not copy', error)
   }
 }
 
@@ -151,7 +144,7 @@ export async function cycleModel(agentId: string): Promise<void> {
       duration: 2200
     })
   } catch (error) {
-    fail('Could not switch model', error)
+    toastFailure('Could not switch model', error)
   }
 }
 
@@ -214,7 +207,7 @@ export async function cycleModelBackward(agentId: string): Promise<void> {
       : `${providerLabel(previous.model.provider)} \u00b7 thinking ${thinkingLevel}`
     toast({ level: 'info', title: previous.model.name, description, duration: 2200 })
   } catch (error) {
-    fail('Could not switch model', error)
+    toastFailure('Could not switch model', error)
   }
 }
 
@@ -229,7 +222,7 @@ export async function cycleThinkingLevel(agentId: string): Promise<void> {
       return
     }
   } catch (error) {
-    fail('Could not change the thinking level', error)
+    toastFailure('Could not change the thinking level', error)
   }
 }
 
@@ -238,7 +231,7 @@ export async function setThinkingLevel(agentId: string, level: ThinkingLevel): P
   try {
     await useAgents.getState().setThinkingLevel(agentId, level)
   } catch (error) {
-    fail('Could not change the thinking level', error)
+    toastFailure('Could not change the thinking level', error)
   }
 }
 
@@ -318,7 +311,7 @@ export async function setModelBySpec(agentId: string, raw: string): Promise<void
       duration: 2200
     })
   } catch (error) {
-    fail('Could not switch model', error)
+    toastFailure('Could not switch model', error)
   }
 }
 
@@ -345,7 +338,7 @@ export async function exportSessionTo(agentId: string, outputPath: string): Prom
       action: { label: REVEAL_LABEL, onClick: () => void invoke('sys:reveal', written) }
     })
   } catch (error) {
-    fail('Could not export the session', error)
+    toastFailure('Could not export the session', error)
   }
 }
 
@@ -386,7 +379,7 @@ export async function reloadAgent(agentId: string): Promise<void> {
     await useAgents.getState().restartAgent(agentId)
     done()
   } catch (error) {
-    fail('Could not reload', error)
+    toastFailure('Could not reload', error)
   }
 }
 
@@ -417,6 +410,6 @@ export async function stopAgent(agentId: string): Promise<void> {
     }
     await useAgents.getState().abort(agentId)
   } catch (error) {
-    fail('Could not stop', error)
+    toastFailure('Could not stop', error)
   }
 }

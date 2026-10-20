@@ -208,7 +208,14 @@ export interface EngineStatusEvent {
 
 /** Named scripted runs available in mock mode (see main/engine/mock-scripts.ts). */
 export type MockScriptName =
-  'showcase' | 'short' | 'gallery' | 'parity' | 'marathon' | 'subagents' | 'toolbelt'
+  | 'showcase'
+  | 'short'
+  | 'gallery'
+  | 'parity'
+  | 'marathon'
+  | 'subagents'
+  | 'toolbelt'
+  | 'expired-sign-in'
 
 export interface MockPlayArgs {
   script?: MockScriptName
@@ -236,7 +243,8 @@ export const BRIDGE_COMMANDS = [
   'vengeance-subagents',
   'vengeance-speed',
   'vengeance-system-prompt',
-  'vengeance-mcp'
+  'vengeance-mcp',
+  'vengeance-sign-ins'
 ] as const
 export type BridgeCommandName = (typeof BRIDGE_COMMANDS)[number]
 
@@ -290,6 +298,12 @@ export type BridgeRequest =
   | { op: 'system-prompt' }
   /** The conversation's MCP status, after running `action` on `server` first. */
   | { op: 'mcp'; action?: McpLiveAction; server?: string }
+  /**
+   * The Engine only: re-read every sign-in in auth.json and every provider's availability, so that the
+   * conversation's model registry (what extensions read) leaves out those another conversation found the provider
+   * refused to renew.
+   */
+  | { op: 'sign-ins' }
 
 export type BridgeOp = BridgeRequest['op']
 
@@ -353,6 +367,7 @@ export interface BridgeResultMap {
   }
   /** Null when no MCP extension reports (the Engine without MCP). */
   mcp: McpLiveStatus | null
+  'sign-ins': null
 }
 
 export type BridgeResult = BridgeResultMap[BridgeOp]

@@ -15,7 +15,7 @@ import { cn } from '../../lib/cn'
 import { formatRelativeTime } from '../../lib/format'
 import { isImeComposing } from '../../lib/keybindings'
 import { useAgents } from '../../store/agents'
-import { Button, Textarea, toast } from '../../ui'
+import { Button, Textarea } from '../../ui'
 import { Markdown } from '../../ui/Markdown'
 import {
   openSubagentDetail,
@@ -26,6 +26,7 @@ import {
   useSupervisorRequestState
 } from '../subagents'
 import { DetailSection, RowDetail, ToolRow, useDisclosure, useHasSupervisorRequest, useUserSupervisorReply } from '../tools'
+import { toastFailure } from './failure-toast'
 
 /**
  * pi-subagents' custom messages (completion, attention, supervisor requests and the rest) as one quiet row
@@ -191,7 +192,7 @@ function SupervisorCard({ agentId, request, receivedAt }: { agentId: string; req
       await subagentActions.replyToSupervisor(agentId, request, text)
       setDraft('')
     } catch (error) {
-      toast({ level: 'error', title: `Couldn\u2019t reply to ${request.agent}`, description: error instanceof Error ? error.message : String(error) })
+      toastFailure(`Couldn\u2019t reply to ${request.agent}`, error)
     }
   }
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {

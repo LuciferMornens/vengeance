@@ -17,6 +17,13 @@
 // when the file finishes. TEMP/TMP/TMPDIR point into it for the harness process and the launched app,
 // so `mkdtemp(join(tmpdir(), …))` in a scenario and the mock engine's own temp folders are cleaned up
 // too. `helpers.tempDir(prefix)` creates a folder there explicitly.
+//
+// Engine config: the app gets no inherited PI_*, PRIME_* or AI_AGENT variable, so the mock seeds the
+// Engine's agent dir (PI_CODING_AGENT_DIR) and Engine 2 its mock agent dir in that temp root, and
+// scenarios that write auth.json, keybindings.json or Engine 2 sign-ins change only those copies.
+// Before a file's scenarios run, the harness checks that every Engine folder the app names lies in
+// its temp root; a file whose app names one elsewhere fails without running a scenario or saving a
+// -FAILED.png, as its window may show that other config.
 import { _electron as electron } from 'playwright'
 import { existsSync, realpathSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises'
@@ -24,6 +31,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { ELECTRON_SWITCHES } from './qa/lib/platform.mjs'
+import { isInside } from './qa/lib/tmp.mjs'
 import { MOCK_WORKSPACE } from './shots/lib/mock-paths.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -34,6 +42,23 @@ const HEIGHT = 900
 /** The real temp folder, captured before TEMP/TMP are pointed at a scenario's temp root. */
 const systemTmp = tmpdir()
 const TEMP_VARS = ['TEMP', 'TMP', 'TMPDIR']
+/**
+ * Inherited Engine and Engine 2 variables (e.g. when shots run inside an agent) would point the app
+ * at a real config: with PI_CODING_AGENT_DIR set the mock seeds no temp agent dir of its own. Any
+ * case, as Windows reads variable names.
+ */
+const INHERITED_ENGINE_VARS = /^(PI_|PRIME_|AI_AGENT$)/i
+/**
+ * Engine folders the app's environment can name. The mock sets PI_CODING_AGENT_DIR; without
+ * PRIME_AGENT_CODING_AGENT_DIR, Engine 2 creates its mock agent dir in the app's TEMP.
+ */
+const ENGINE_DIR_VARS = [
+  'PI_CODING_AGENT_DIR',
+  'PI_CODING_AGENT_SESSION_DIR',
+  'PRIME_AGENT_CODING_AGENT_DIR',
+  'PRIME_AGENT_SESSION_DIR',
+  'PRIME_AGENT_CODING_AGENT_SESSION_DIR'
+]
 
 /**
  * Seconds a scenario file takes on the hosted CI runners, for balancing --shard; a file not listed
@@ -119,18 +144,37 @@ function redirectTemp(dir) {
   }
 }
 
+/** The app's environment: `base` without inherited Engine variables, in mock mode with `userData`. */
+export function appEnv(base, userData) {
+  return {
+    ...Object.fromEntries(
+      Object.entries(base).filter(([name]) => !INHERITED_ENGINE_VARS.test(name))
+    ),
+    VENGEANCE_MOCK: '1',
+    VENGEANCE_TEST: '1',
+    VENGEANCE_NO_MICA: '1',
+    VENGEANCE_USER_DATA: userData
+  }
+}
+
+/**
+ * Why the Engine folders in the app's environment `env` are not inside `appTemp`, the TEMP the
+ * harness gave it: one line per folder elsewhere, none when the app's Engine config is its own.
+ */
+export function engineDirProblems(env, appTemp) {
+  const problems = env.PI_CODING_AGENT_DIR ? [] : ['PI_CODING_AGENT_DIR is not set']
+  for (const name of ENGINE_DIR_VARS) {
+    if (env[name] && !isInside(appTemp, env[name])) problems.push(`${name} is ${env[name]}`)
+  }
+  return problems
+}
+
 async function launch(tempRoot) {
   const userData = join(tempRoot, 'user-data')
   await mkdir(userData)
   const app = await electron.launch({
     args: [root, '--force-device-scale-factor=1', ...ELECTRON_SWITCHES],
-    env: {
-      ...process.env,
-      VENGEANCE_MOCK: '1',
-      VENGEANCE_TEST: '1',
-      VENGEANCE_NO_MICA: '1',
-      VENGEANCE_USER_DATA: userData
-    },
+    env: appEnv(process.env, userData),
     timeout: 60_000
   })
   // Electron turns an uncaught main-process exception into a native error dialog. Report it on stderr
@@ -222,21 +266,38 @@ async function main(args) {
   for (const file of files) {
     console.log(`▶ ${file}`)
     const tempRoot = await mkdtemp(join(systemTmp, 'vengeance-shots-'))
-    await mkdir(join(tempRoot, 'tmp'))
-    const restoreTemp = redirectTemp(join(tempRoot, 'tmp'))
+    const appTemp = join(tempRoot, 'tmp')
+    await mkdir(appTemp)
+    const restoreTemp = redirectTemp(appTemp)
     const { app, page, uncaughtMainErrors } = await launch(tempRoot)
     const errors = []
     page.on('pageerror', (error) => errors.push(error.message))
     page.on('console', (msg) => msg.type() === 'error' && errors.push(msg.text()))
+    // Set once the app's Engine config is this file's own: only then does a failure get a screenshot.
+    let isolated = false
     try {
+      // Scenarios write Engine config, so it has to be the copy in this file's temp root.
+      const appDirs = await app.evaluate(
+        (_electron, names) => Object.fromEntries(names.map((name) => [name, process.env[name]])),
+        ENGINE_DIR_VARS
+      )
+      const problems = engineDirProblems(appDirs, appTemp)
+      if (problems.length > 0) {
+        throw new Error(
+          `Engine config outside ${appTemp}, so no scenario ran: ${problems.join('; ')}`
+        )
+      }
+      isolated = true
       const mod = await import(pathToFileURL(join(scenarioDir, file)).href)
       await mod.scenarios(page, makeHelpers(page, app, file, tempRoot))
     } catch (error) {
       failed++
       console.error(`  ✗ ${file}: ${error.stack ?? error}`)
-      await page
-        .screenshot({ path: join(outDir, `${scenarioName(file)}-FAILED.png`) })
-        .catch(() => undefined)
+      if (isolated) {
+        await page
+          .screenshot({ path: join(outDir, `${scenarioName(file)}-FAILED.png`) })
+          .catch(() => undefined)
+      }
     } finally {
       if (errors.length) {
         console.warn(`  ⚠ renderer errors in ${file}:\n    ${errors.join('\n    ')}`)

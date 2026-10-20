@@ -19,6 +19,7 @@ import { hasReadyHistory } from '../../store/agent-state'
 import { ensureAgentHistory, useAgents } from '../../store/agents'
 import { useApp, workspaceEngine } from '../../store/app'
 import { toast } from '../../ui'
+import { toastFailure } from '../chat/failure-toast'
 import { setDraftText } from '../composer'
 import {
   newSession,
@@ -430,7 +431,11 @@ export async function goToPoint(
     useSessions.getState().reloadLoaded()
     return true
   } catch (error) {
-    fail(options.summarize ? 'Could not summarize and move' : 'Could not move to this point', error)
+    // A branch summary can fail on an Engine sign-in the provider refused to renew.
+    toastFailure(
+      options.summarize ? 'Could not summarize and move' : 'Could not move to this point',
+      error
+    )
     return false
   }
 }

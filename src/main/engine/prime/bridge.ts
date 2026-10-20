@@ -80,6 +80,9 @@ export async function callPrimeBridge(
     }
     case 'mcp':
       return primeMcp(request, nativeCommand, mcpTimeouts)
+    case 'sign-ins':
+      // Main sends it to the Engine only: Engine 2 reads its sign-ins again at every lookup.
+      return null
   }
 }
 

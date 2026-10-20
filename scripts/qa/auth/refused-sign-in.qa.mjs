@@ -7,6 +7,8 @@
 //   - get_available_models and the extension's model choice leave the provider out, so the next title
 //     comes from the working QA provider;
 //   - later requests for the provider fail at once, without another token request;
+//   - a second open conversation, which never used the sign-in, stops listing the provider without a
+//     restart: in its model list, in its extensions' model choice and for RPC set_model;
 //   - Settings → Providers shows Sign-in expired, and Sign in again (the real device-code flow against
 //     the local auth server) replaces the credential, which clears the mark.
 // Kimi's model requests are routed to the fake LLM; nothing leaves 127.0.0.1. The app runs with a temp HOME
@@ -54,6 +56,8 @@ const REJECTION = 'QA refresh token revoked'
 /** What the Engine reports for a refusal it just recorded, and for every later request. */
 const FIRST_FAILURE = `Sign-in for ${PROVIDER} expired: the provider rejected its refresh token (Kimi Code token refresh unauthorized (status 400): ${REJECTION}). Sign in again.`
 const LATER_FAILURE = `Sign-in for ${PROVIDER} expired: the provider rejected its refresh token. Sign in again.`
+/** What RPC set_model reports for the provider while the Engine still lists it. */
+const SELECT_FAILURE = `set_model: Sign-in for ${PROVIDER} expired: the provider rejected its refresh token. Run '/login ${PROVIDER}' to sign in again.`
 /** A request that fails at once has no network round trip to wait for. */
 const FAIL_FAST_MS = 1_000
 
@@ -145,6 +149,20 @@ async function titleAttempt(app, agentDir, args = '') {
   return attempts[before]
 }
 
+/** Run `/qa-title` in an open session that is not on screen and return its attempt. */
+async function titleAttemptIn(app, agentDir, agentId) {
+  const before = (await titleAttempts(agentDir)).length
+  await app.rpc({ type: 'prompt', message: '/qa-title' }, agentId)
+  const attempts = await waitUntil(
+    async () => {
+      const all = await titleAttempts(agentDir)
+      return all.length > before && all
+    },
+    { timeoutMs: 30_000, label: 'the title attempt' }
+  )
+  return attempts[before]
+}
+
 const isProvider = (modelKey) => modelKey.startsWith(`${PROVIDER}/`)
 
 console.log(`▶ ${SUITE_NAME} (fake)`)
@@ -182,13 +200,20 @@ try {
   })
   const page = app.page
   let firstSession
+  let otherSession
+  let otherPid
   let kimiModels
 
-  await step('before any use, the dead sign-in still lists its models', async () => {
-    firstSession = (await app.openWorkspace()).agentId
+  await step('before any use, both open conversations list the dead sign-in’s models', async () => {
+    // The other conversation opens first, so the first one is on screen and finds out the refusal.
+    otherSession = (await app.openWorkspace()).agentId
+    firstSession = await openAnotherWorkspace(app)
     kimiModels = (await engineModelKeys(app, firstSession)).filter(isProvider)
     assert.ok(kimiModels.length > 0, 'the Engine offers the signed-in provider')
+    assert.deepEqual((await engineModelKeys(app, otherSession)).filter(isProvider), kimiModels)
     assert.ok((await app.agentState()).commands.some((command) => command.name === 'qa-title'))
+    otherPid = (await app.agentState(otherSession)).info.pid
+    assert.ok(otherPid, 'the other conversation’s Engine runs')
     assert.deepEqual(kimiAuth.tokenRequests(), [], 'starting refreshes nothing')
   })
 
@@ -244,6 +269,43 @@ try {
     assert.equal(kimiAuth.refreshes().length, 1)
     assert.equal(server.requests.length, 1)
   })
+
+  await step(
+    'the other open conversation stops offering the provider too, without a restart',
+    async () => {
+      const keys = await engineModelKeys(app, otherSession)
+      assert.deepEqual(keys.filter(isProvider), [], 'its model list leaves the provider out')
+      assert.ok(keys.includes('qa/qa-reasoning'))
+      // Until its bridge re-reads the sign-ins, its Engine still lists the provider, and set_model names the
+      // expired sign-in without changing that list. Only the re-read makes it answer "Model not found". A
+      // request for the provider would drop it from the list by itself, so none is made before the re-read.
+      const [provider, ...id] = kimiModels[0].split('/')
+      await waitUntil(
+        async () => {
+          try {
+            await app.rpc({ type: 'set_model', provider, modelId: id.join('/') }, otherSession)
+          } catch (error) {
+            if (error.message === `set_model: Model not found: ${kimiModels[0]}`) return true
+            assert.equal(error.message, SELECT_FAILURE)
+            return false
+          }
+          assert.fail('set_model chose the expired sign-in')
+        },
+        { timeoutMs: 15_000, label: 'the other conversation’s bridge to re-read the sign-ins' }
+      )
+      // Its extensions read that registry: the first title attempt already leaves the provider out.
+      server.queue(turn.text('Other conversation title'))
+      const attempt = await titleAttemptIn(app, agentDir, otherSession)
+      assert.deepEqual(attempt.available.filter(isProvider), [])
+      assert.ok(attempt.model.startsWith('qa/'), `picked ${attempt.model}`)
+      assert.equal(attempt.ok, true, attempt.error)
+      assert.equal(attempt.title, 'Other conversation title')
+      assert.equal((await app.agentState(otherSession)).info.pid, otherPid, 'never restarted')
+      assert.equal(await page.getByText('Restart to apply').count(), 0)
+      assert.equal(server.requests.length, 2)
+      assert.equal(kimiAuth.refreshes().length, 1)
+    }
+  )
 
   await step('Settings → Providers: Sign-in expired, Sign in again, no restart offer', async () => {
     await openSettings(app, 'providers', 'Providers & accounts')

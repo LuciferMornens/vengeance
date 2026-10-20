@@ -336,10 +336,16 @@ Context** (context files, session dir, trust), **Keyboard shortcuts** (app-level
 version/path, development override, app-owned update policy, diagnostics/stderr log, open config folder), **Raw JSON** (global and
 project settings.json with validation). Global vs Project scope switch where pi supports project settings.
 Read the selected pi package's `docs/settings.md` and implement _every_ key it lists.
-When a provider refuses to renew an Engine sign-in (`invalid_grant`), the Engine marks the credential in
-auth.json with `refreshRejectedAt` and stops using it until a new sign-in replaces it. Providers shows it as
-_Sign-in expired_ with _Sign in again_; onboarding and model lists stop counting it as connected, without a
-restart offer. The new sign-in that clears the mark offers one like any other sign-in.
+When a provider refuses to renew an Engine sign-in (its token endpoint rejects the refresh token: see UPSTREAM.md
+for the codes), the Engine marks the credential in auth.json with `refreshRejectedAt` and stops using it until a
+new sign-in replaces it. Providers shows it as _Sign-in expired_ with _Sign in again_, and so do a failed reply
+and the error toast of a command that hit it (such as sending, compacting, summarizing a branch or switching
+models), where _Sign in again_ opens Providers. Onboarding and model lists stop counting it as connected, without
+a restart offer: open Engine conversations that read that auth.json leave its models out of their model list and
+model cycle, and those that use Vengeance's agent dir and load the bridge also re-read the sign-in, so extensions
+(such as session auto-title packages) stop picking the provider. A conversation with the bridge that starts, or
+switches to the Engine, while its auth.json holds the mark re-reads it once ready. The new sign-in that clears the
+mark offers a restart like any other sign-in.
 A restart offer ("Restart to apply") names what changed (packages, sign-ins, or the settings edited outside
 Vengeance). Writes an engine makes while applying a live change (runtime toggles it saves itself, such as the MCP
 panel's switches, models chosen in a session) never offer a restart, and a project's config changes only concern
@@ -815,9 +821,10 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   read the repository. Pull requests that touch engines, patches, the helper, packaging, toolchain pins,
   the workflow or its QA inputs, manual runs and a weekly scheduled run are dry runs that stop before
   publishing. Manual and scheduled dry runs build on clean runners like tag runs. A pull request dry run
-  may instead restore and verify the engine and helper payloads cached under CI's key for the same
-  engine inputs (by CI on `main` or an earlier run of that pull request); its provenance receipt records
-  the payloads as restored, with the cache key, or as built.
+  may instead restore and verify the engine and helper payloads cached under CI's key, which covers the
+  platform, its runner label and Linux container image digest, and a hash of the engine inputs (cached
+  by CI, or for Intel macOS and Linux arm64 by an earlier dry run of that pull request); its provenance
+  receipt records the payloads as restored, with the cache key, or as built.
 - Each platform is qualified by its own runs. CI and release dry runs are the qualification path for
   macOS and Linux; a Windows result never stands in for them. Record per-platform runs, payload hashes
   and package hashes in the release verification record. Transition and resident-upgrade suites need a

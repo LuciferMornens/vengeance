@@ -126,6 +126,7 @@ await runSuite(
         'vengeance-label',
         'vengeance-mcp',
         'vengeance-reload',
+        'vengeance-sign-ins',
         'vengeance-speed',
         'vengeance-subagents',
         'vengeance-system-prompt',

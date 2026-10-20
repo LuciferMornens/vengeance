@@ -1,7 +1,8 @@
 // Refused sign-ins: when a provider refuses to renew a sign-in, the Engine marks the credential in auth.json
-// (`refreshRejectedAt`). Onboarding and Settings → Providers show it as Sign-in expired with Sign in again, and the
-// mark shows up live without a restart offer; the sign-in that clears it offers one. Writes only the mock engine's
-// seeded temp agent dir.
+// (`refreshRejectedAt`). This scenario writes those marks itself, on fake tokens. Onboarding shows the provider's
+// sign-in card as Sign-in expired; Settings → Providers shows Sign-in expired with Sign in again. A mark shows up
+// live without a restart offer; a new sign-in that clears it offers one. The only file it writes is auth.json in the
+// app's PI_CODING_AGENT_DIR, which the harness has checked is the mock's seeded agent dir in this file's temp root.
 import assert from 'node:assert/strict'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -86,4 +87,29 @@ export async function scenarios(page, { app, shot, test, wait, MOCK_WORKSPACE })
   await page.getByRole('dialog', { name: 'Sign in to ChatGPT' }).waitFor()
   await shot('providers-expired-sign-in-again', { settleMs: 600 })
   await page.keyboard.press('Escape')
+  await page.getByRole('dialog', { name: 'Sign in to ChatGPT' }).waitFor({ state: 'detached' })
+  await test('closeSettings')
+
+  // ─── Chat: a reply that fails on the expired sign-in names the remedy, not the endpoint's error code ──
+  // The conversation runs on Anthropic's default model, whose sign-in the step above marked refused.
+  await test('mockPlay', {
+    script: 'expired-sign-in',
+    instant: true,
+    prompt: 'Summarize the open issues.'
+  })
+  const failure = page
+    .locator('[data-transcript-scroll]')
+    .getByRole('button', { name: 'Sign in again' })
+  await failure.waitFor({ timeout: 10_000 })
+  const transcript = page.locator('[data-transcript-scroll]')
+  await transcript.getByText('Sign-in expired', { exact: true }).waitFor()
+  // The card names the conversation's own provider and model, as the composer does.
+  await transcript.getByText('Anthropic · claude-sonnet-4-5', { exact: true }).waitFor()
+  // The token endpoint's error code was the card's title before the Engine's message was recognised.
+  assert.equal(await transcript.getByText('invalid_grant', { exact: true }).count(), 0)
+  await dismissToasts()
+  await shot('providers-expired-chat', { settleMs: 600 })
+  await failure.click()
+  await row('anthropic').getByText('Sign-in expired', { exact: true }).waitFor({ timeout: 10_000 })
+  await test('closeSettings')
 }

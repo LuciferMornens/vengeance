@@ -44,7 +44,9 @@ node scripts/qa/settings/thinking.qa.mjs   # one suite directly
   `--password-store=basic`, so safeStorage never waits on a desktop keyring, and adds `--no-sandbox`
   and `--disable-dev-shm-usage` only when `CI` runs as root (a container); macOS uses
   `--use-mock-keychain`, so safeStorage never prompts. Windows adds none. The shots harness and
-  `scripts/e2e-real.mjs` use the same switches.
+  `scripts/e2e-real.mjs` use the same switches. The shots harness also drops inherited `PI_*`,
+  `PRIME_*` and `AI_AGENT` variables, and runs no scenario unless the app's Engine folders are
+  inside that scenario file's temp root.
   Without OS encryption Linux keeps launch env values plain at rest, so the sealing assertions in
   `settings/launch-options.qa.mjs` and `settings/app-prefs-restart.qa.mjs` check that fallback.
   App shortcuts are pressed as `ControlOrMeta+…` (⌘ on macOS).

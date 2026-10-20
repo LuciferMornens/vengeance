@@ -139,8 +139,9 @@ Your own agent accounts and sessions are never test fixtures.
 4. CI must pass. It typechecks and builds, lints the workflows, builds the engines, then runs the
    checks, and the screenshots in two shards, on Windows, macOS and Linux. Pull requests that touch
    packaging, engines or the release workflow also run a full release dry run on all five
-   platforms. That dry run reuses the engines and helper already built for the same engine inputs,
-   by CI on `main` or by an earlier push of the pull request, and builds the rest from scratch.
+   platforms. That dry run reuses engines and helpers already cached for the same platform, runner
+   label, Linux container image and engine inputs (by CI, or for Intel macOS and Linux arm64 by an
+   earlier dry run of the pull request), and builds the rest from scratch.
 5. The maintainer reviews every change. Screenshots of UI changes speed this up.
 6. Pull requests land as one squash commit. `main` accepts no direct or force pushes: a change
    needs a pull request with every review thread resolved, a passing typecheck job and passing

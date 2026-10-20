@@ -1,9 +1,11 @@
+import { readFileSync, statSync } from 'node:fs'
 import type { ProviderInfo } from '@shared/api/settings'
 
 /**
  * When the provider refused to renew a stored OAuth sign-in: the Engine records `refreshRejectedAt` (epoch ms) on the
- * credential in auth.json once the token endpoint definitively rejects the refresh token (`invalid_grant`), keeps
- * every other field, and stops using the sign-in until a new one replaces the credential. Like the Engine
+ * credential in auth.json once the token endpoint definitively rejects the refresh token (`invalid_grant`, or one of
+ * OpenAI's `refresh_token_*` codes, with HTTP 400 or 401), keeps every other field, and stops using the sign-in until
+ * a new one replaces the credential. Like the Engine
  * (`isOAuthRefreshRejected`), any number marks it; engines without the mark never write the field.
  */
 export function refreshRejectedAt(raw: unknown): number | undefined {
@@ -62,4 +64,51 @@ export function rejectedSignInsChange(
 ): 'added' | 'cleared' | null {
   if (previous.some((provider) => !next.includes(provider))) return 'cleared'
   return next.some((provider) => !previous.includes(provider)) ? 'added' : null
+}
+
+const NONE: ReadonlySet<string> = new Set()
+/** The last successful read of each auth.json, by the file's modification time and size. */
+const readByFile = new Map<string, { identity: string; providers: ReadonlySet<string> }>()
+
+/**
+ * The providers whose sign-in in the auth.json at `authPath` carries the Engine's refusal mark. The file is read again
+ * only when its modification time or size changed. A missing, unreadable or malformed file marks none.
+ */
+export function rejectedSignInsAt(authPath: string): ReadonlySet<string> {
+  let identity: string
+  try {
+    const stat = statSync(authPath)
+    identity = `${stat.mtimeMs}:${stat.size}`
+  } catch {
+    return NONE
+  }
+  const cached = readByFile.get(authPath)
+  if (cached?.identity === identity) return cached.providers
+  let text: string | null
+  try {
+    text = readFileSync(authPath, 'utf8')
+  } catch {
+    text = null
+  }
+  const rejected = rejectedSignIns(text)
+  // A read that fails to parse (mid-write) is not kept: the next call reads the file again.
+  if (rejected === null) return NONE
+  const providers = new Set(rejected)
+  readByFile.set(authPath, { identity, providers })
+  return providers
+}
+
+type ModelRef = { provider: string; id: string }
+type ModelFilter = (model: ModelRef) => boolean
+
+/**
+ * `offered` (null: every model) without the models of `rejected` providers, whose sign-in the provider refused to
+ * renew; null when nothing is hidden.
+ */
+export function withoutRejectedSignIns(
+  offered: ModelFilter | null,
+  rejected: ReadonlySet<string>
+): ModelFilter | null {
+  if (rejected.size === 0) return offered
+  return (model) => !rejected.has(model.provider) && (offered?.(model) ?? true)
 }

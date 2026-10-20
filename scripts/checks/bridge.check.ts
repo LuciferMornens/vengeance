@@ -83,7 +83,8 @@ await check('hasBridgeCommands / isBridgeCommand: all commands from the bridge f
     'vengeance-subagents',
     'vengeance-speed',
     'vengeance-system-prompt',
-    'vengeance-mcp'
+    'vengeance-mcp',
+    'vengeance-sign-ins'
   ].map((n) => bridgeCommand(n))
   assert.equal(hasBridgeCommands(all), true)
   assert.equal(hasBridgeCommands(all.slice(1)), false)
