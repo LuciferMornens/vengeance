@@ -336,6 +336,10 @@ Context** (context files, session dir, trust), **Keyboard shortcuts** (app-level
 version/path, development override, app-owned update policy, diagnostics/stderr log, open config folder), **Raw JSON** (global and
 project settings.json with validation). Global vs Project scope switch where pi supports project settings.
 Read the selected pi package's `docs/settings.md` and implement _every_ key it lists.
+When a provider refuses to renew an Engine sign-in (`invalid_grant`), the Engine marks the credential in
+auth.json with `refreshRejectedAt` and stops using it until a new sign-in replaces it. Providers shows it as
+_Sign-in expired_ with _Sign in again_; onboarding and model lists stop counting it as connected, without a
+restart offer. The new sign-in that clears the mark offers one like any other sign-in.
 A restart offer ("Restart to apply") names what changed (packages, sign-ins, or the settings edited outside
 Vengeance). Writes an engine makes while applying a live change (runtime toggles it saves itself, such as the MCP
 panel's switches, models chosen in a session) never offer a restart, and a project's config changes only concern

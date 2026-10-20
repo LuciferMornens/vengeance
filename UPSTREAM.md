@@ -21,7 +21,7 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 
 `engines.lock.json` is the source of truth. Current stable bases are pi `v1.3.0` at
 `71023aec1546d6d677a65669c5665c0927ce0dd0` and Prime `v0.10.0` at
-`763094e1b6a7c17450ee8399b06cda1853847ca5`. The builds identify as `1.3.0+vengeance.3` and
+`763094e1b6a7c17450ee8399b06cda1853847ca5`. The builds identify as `1.3.0+vengeance.4` and
 `0.10.0+vengeance.13`. Never reuse a Vengeance build version for different shipped behavior.
 
 The current stable-release verification and Prime patch decisions are recorded in
@@ -174,6 +174,39 @@ Qualify on every base: the native MCP suites named in each patch guide, `scripts
 the `mcp-status` shots, `scripts/qa/ext/mcp.qa.mjs` against the real Engine and
 `scripts/qa/engines/mcp-live.qa.mjs` against the real Engine 2. Retire each patch when its upstream
 offers an equivalent host-facing interface and the app moves to it.
+
+### Rejected OAuth sign-ins
+
+pi build `.4` adds patch `0010`. Upstream pi keeps an OAuth credential whose refresh failed and kept
+counting its provider as signed in, so after a provider rejected the refresh token every request,
+and every "any signed-in provider" choice such as the conversation title model, picked that provider
+and failed after another token request. With the patch, only an RFC 6749 `invalid_grant` response
+(HTTP 400 or 401) from a built-in flow's token endpoint (OpenAI, OpenAI Codex, Anthropic, xAI, Kimi
+Code, Radius) marks the stored credential with `refreshRejectedAt` (epoch milliseconds); every other
+field is kept. Timeouts, network errors, server errors, cancellation, lock failures and other error
+codes leave it retryable. A marked credential configures nothing: the provider leaves `checkAuth`,
+`getAvailable`, the runtime availability snapshot and RPC `get_available_models`, and requests fail
+at once with "Sign-in for <provider> expired: the provider rejected its refresh token. Sign in
+again." without another token request. The stored credential still owns its provider, so an
+environment API key does not take over; an explicit request key or `--api-key` still authenticates.
+Prompting or selecting a model of the provider names the expired sign-in. A new login replaces the
+credential and clears the mark. `getProviderAuthStatus` still reports the stored credential
+(`configured`, source `stored`) while `isUsingOAuth` is false, which is how a host tells an expired
+sign-in from a missing one. Builds without the patch ignore the field.
+
+Engine 2 is unchanged. Prime keeps a credential whose refresh failed, returns no key for that lookup
+so model discovery skips the provider, and tries the token endpoint again on the next lookup;
+nothing is persisted, and only its xAI flow names a revoked authorization in the error text.
+
+Qualify on every base: the native `oauth-refresh-rejection.test.ts`,
+`model-runtime-oauth-rejection.test.ts` and `suite/agent-session-prompt.test.ts` named in the [pi
+patch guide](patches/pi/README.md), plus the app's refused sign-in check. Then run
+`scripts/qa/auth/refused-sign-in.qa.mjs` against the real Engine: Kimi Code's built-in flow refreshes
+against a local token endpoint (`KIMI_CODE_OAUTH_HOST`) that answers `invalid_grant`, a fixture
+extension picks a title model like session auto-title packages, and the suite checks the mark, the
+title model's fallback, fail-fast requests, Settings and Sign in again. Confirm that each built-in
+OAuth flow still raises `OAuthEndpointError` from its token endpoint. Retire the patch when upstream
+recognizes rejected refresh tokens and stops offering their providers.
 
 ## Platforms
 
@@ -439,6 +472,7 @@ sign-in testing only with explicit user authorization; report coverage gaps rath
 | Native prompt inspection, scoped edits and explicit application     | `scripts/qa/settings/system-prompts.qa.mjs`, `scripts/shots/system-prompts.mjs`; helper `system_prompt` tests                                                      |
 | Conversation instructions: composition, store and restart lifecycle | `scripts/checks/conversation-prompt.check.ts`, `scripts/shots/conversation-prompt.mjs`, `scripts/qa/settings/system-prompts.qa.mjs`                                |
 | Live MCP status and per-server reconnect in open conversations      | `scripts/qa/ext/mcp.qa.mjs`, `scripts/qa/engines/mcp-live.qa.mjs`, `scripts/checks/mcp-status.check.ts`; native suites of pi `0009` and Prime `0024`               |
+| Rejected OAuth sign-ins: availability and fail-fast requests        | `scripts/qa/auth/refused-sign-in.qa.mjs`, `scripts/checks/refused-sign-in.check.ts`; native suites of pi `0010`                                                    |
 | Parent/child model isolation and concurrent settings preservation   | `scripts/qa/engines/model-isolation.qa.mjs`; native `model_isolation`, settings persistence and `settings_mcp_save` regressions                                    |
 | Image capabilities, live model switches and tool/image delivery     | `scripts/qa/engines/image-capabilities.qa.mjs`; native model-switch and prompt regressions                                                                         |
 | Response speed, subscription entitlement and native tier transport  | `scripts/qa/engines/speed-mode-engine2.qa.mjs`, `speed-mode.qa.mjs`, `speed-mode-subscriptions.qa.mjs`; native `service_tiers` and `service_tiers_transport` tests |

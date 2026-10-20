@@ -6,7 +6,9 @@ import type { SettingsChangeArea } from '@shared/api/settings'
  *
  * N1: running engines write credentials on their own (OAuth refreshes in `auth.json`, MCP tokens in
  * `mcp-auth.json`, extension token caches). Those writes are never config changes: credential files have
- * no area, and `auth.json` only counts when its set of providers changes (`authSignature`).
+ * no area, and `auth.json` only counts when its set of providers changes (`authSignature`). The Engine's
+ * mark of a sign-in the provider refused to renew is no config change either; the watcher reports it as a
+ * live change so the app's lists follow (`rejectedSignIns`).
  */
 
 const RESOURCE_DIRS = new Set(['extensions', 'skills', 'prompts', 'themes'])

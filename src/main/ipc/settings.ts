@@ -123,11 +123,18 @@ export function registerSettingsIpc(context: IpcContext): void {
     if (area === 'models' || area === 'auth') refillModelCatalog(override())
   }
   const watcher = new ConfigWatcher(
-    (area, projectCwd, fromRun) => {
+    (area, projectCwd, fromRun, live) => {
       noteChange(area)
       // Engines rewrite auth.json when they refresh a token: a cheap local check, no fetch unless the list is stale.
       if (area === 'auth') checkAccountModels(false)
-      const event = { area, external: true, engine: 'pi' as const, ...(fromRun ? { fromRun } : {}) }
+      const event = {
+        area,
+        external: true,
+        engine: 'pi' as const,
+        ...(fromRun ? { fromRun } : {}),
+        // The Engine marked a sign-in the provider refused: it already stopped using it.
+        ...(live ? { apply: 'new-sessions' as const } : {})
+      }
       if (!projectCwd) {
         broadcast('settings:changed', event)
         return

@@ -7,6 +7,7 @@ import { platform } from '../../lib/ipc'
 import { Badge, Button, IconButton, SegmentedControl, Select } from '../../ui'
 import { ListEditor, NumberField } from './controls'
 import { modelKey, ModelLabel, ModelPicker, useCatalog } from './model-picker'
+import { SIGN_IN_EXPIRED, signInExpired } from './provider-status'
 import { activeCwd, useResolved, useSettings, type ResolvedSetting } from './store'
 
 /** Rich editors for structured settings (models, per-model maps, tool selection). */
@@ -38,6 +39,9 @@ export function DefaultModelEditor({ disabled }: { disabled: boolean }) {
         : undefined
   const lookup = useModelLookup()
   const selected = value ? lookup.get(value) : undefined
+  const selectedProvider = useSettings((s) =>
+    s.catalog?.providers.find((p) => p.id === selected?.provider)
+  )
   const choose = async (m: ModelInfo) => {
     const { engine, scope } = useSettings.getState()
     const target = { engine, scope, cwd: activeCwd() }
@@ -53,7 +57,13 @@ export function DefaultModelEditor({ disabled }: { disabled: boolean }) {
         disabled={disabled}
         className="flex-1"
       />
-      {selected && !selected.available && <Badge tone="warning">Needs sign-in</Badge>}
+      {selected && !selected.available && (
+        <Badge tone="warning">
+          {selectedProvider && signInExpired(selectedProvider)
+            ? SIGN_IN_EXPIRED.label
+            : 'Needs sign-in'}
+        </Badge>
+      )}
     </div>
   )
 }

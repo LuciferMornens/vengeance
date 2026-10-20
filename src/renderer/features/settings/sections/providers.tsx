@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import {
   CheckCircle2,
   CircleAlert,
@@ -19,6 +19,7 @@ import { LoginDialog, useLoginFlow } from '../auth-flow'
 import { Callout, Group, Note, Row } from '../layout'
 import { useCatalog } from '../model-picker'
 import { CHATGPT_PROVIDER, CODEX_PROVIDER, providerName, signInPlan } from '../provider-name'
+import { hasCredential, providerUsable, SIGN_IN_EXPIRED, signInExpired } from '../provider-status'
 import { useSettings } from '../store'
 
 /** Deterministic monogram tile for a provider (no third-party logos bundled). */
@@ -126,7 +127,10 @@ function ProviderTitle({ provider, size }: { provider: ProviderInfo; size?: numb
   )
 }
 
-/** A provider the engine can use now: its credential, a test, and the matching reconnect / replace / sign-out actions. */
+/**
+ * A provider with a credential: what it is, a test, and the matching reconnect / replace / sign-out actions. A sign-in
+ * the provider refused to renew reads as expired, with Sign in again as its main action.
+ */
 function ConnectedRow({
   provider: p,
   check,
@@ -144,7 +148,9 @@ function ConnectedRow({
   badges?: ReactNode
   detail?: ReactNode
 }) {
-  const credential = credentialLabel(p)
+  const expired = signInExpired(p)
+  const credential = expired ? null : credentialLabel(p)
+  const expiredId = useId()
   return (
     <Row
       settingKey={`provider.${p.id}`}
@@ -152,6 +158,12 @@ function ConnectedRow({
       badges={
         <>
           {credential && <Badge>{credential}</Badge>}
+          {expired && (
+            <Badge tone="warning">
+              <CircleAlert className="mr-1 size-3" />
+              {SIGN_IN_EXPIRED.label}
+            </Badge>
+          )}
           {badges}
           <ExtensionBadge provider={p} />
           <CheckResult result={check} />
@@ -159,14 +171,21 @@ function ConnectedRow({
       }
       description={
         <>
-          <span className="ml-11 block">
-            {p.availableCount} {p.availableCount === 1 ? 'model' : 'models'}
-            {p.stored?.expiresAt && p.stored.type === 'oauth' && (
-              <> · token refreshes automatically</>
-            )}
-            {p.status.source === 'environment' && <> · from the environment</>}
-            <ModifiedBy provider={p} />
-          </span>
+          {expired && (
+            <span id={expiredId} className="ml-11 block text-pretty text-warning">
+              {SIGN_IN_EXPIRED.explanation}
+            </span>
+          )}
+          {(!expired || providerUsable(p)) && (
+            <span className="ml-11 block">
+              {p.availableCount} {p.availableCount === 1 ? 'model' : 'models'}
+              {!expired && p.stored?.expiresAt && p.stored.type === 'oauth' && (
+                <> · token refreshes automatically</>
+              )}
+              {p.status.source === 'environment' && <> · from the environment</>}
+              <ModifiedBy provider={p} />
+            </span>
+          )}
           {detail && <span className="ml-11 block">{detail}</span>}
         </>
       }
@@ -181,7 +200,18 @@ function ConnectedRow({
         >
           Test
         </Button>
-        {p.oauth && p.stored?.type === 'oauth' && (
+        {p.oauth && expired && (
+          <Button
+            size="sm"
+            variant="secondary"
+            leading={<ShieldCheck />}
+            aria-describedby={expiredId}
+            onClick={() => onStart(p, 'oauth')}
+          >
+            {SIGN_IN_EXPIRED.action}
+          </Button>
+        )}
+        {p.oauth && p.stored?.type === 'oauth' && !expired && (
           <Button size="sm" variant="ghost" onClick={() => onStart(p, 'oauth')}>
             Reconnect
           </Button>
@@ -338,7 +368,7 @@ function ChatGptGroup({
         ? 'Codex’s own sign-in. OpenAI Codex compat needs it for Codex compaction, Fast mode, apply_patch and web search.'
         : 'Codex’s own sign-in, for extensions made for Codex.'
     }
-    if (p.status.configured && !p.status.usingOAuth)
+    if (p.status.configured && !p.status.usingOAuth && !signInExpired(p))
       return 'Billed to your OpenAI API account. Sign in with ChatGPT instead to use your plan.'
     return `The official sign-in: the models your plan includes${nativeCompaction ? ', with OpenAI native compaction' : ''}.`
   }
@@ -349,7 +379,7 @@ function ChatGptGroup({
     >
       {providers.map((p) => {
         const badges = p.id === CODEX_PROVIDER ? <Badge>Legacy</Badge> : undefined
-        return p.status.configured ? (
+        return hasCredential(p) ? (
           <ConnectedRow
             key={p.id}
             provider={p}
@@ -406,8 +436,8 @@ export function ProvidersSection() {
     return pair.length === 2 ? pair : []
   }, [engine, providers])
   const listed = providers.filter((p) => !chatgpt.includes(p))
-  const connected = listed.filter((p) => p.status.configured)
-  const subscriptions = listed.filter((p) => !p.status.configured && p.oauth?.subscription)
+  const connected = listed.filter(hasCredential)
+  const subscriptions = listed.filter((p) => !hasCredential(p) && p.oauth?.subscription)
   // Everything else that can be connected: API keys, and sign-ins that are not a subscription plan.
   // Providers with a sign-in come first so the collapsed list never hides them.
   const keyProviders = useMemo(() => {
@@ -416,7 +446,7 @@ export function ProvidersSection() {
       .filter(
         (p) =>
           !chatgpt.includes(p) &&
-          !p.status.configured &&
+          !hasCredential(p) &&
           !p.oauth?.subscription &&
           (p.apiKey || p.oauth)
       )
@@ -476,7 +506,7 @@ export function ProvidersSection() {
     )
   }
 
-  const chatgptConnected = chatgpt.some((p) => p.status.configured)
+  const chatgptConnected = chatgpt.some(hasCredential)
   return (
     <>
       {error && (
@@ -495,7 +525,11 @@ export function ProvidersSection() {
       )}
       <Group
         title="Connected"
-        description="Credentials the engine can use right now."
+        description={
+          connected.some(signInExpired)
+            ? 'Credentials the engine can use right now, and sign-ins to renew.'
+            : 'Credentials the engine can use right now.'
+        }
         actions={
           <IconButton label="Refresh" size="sm" onClick={() => void loadCatalog(true, true)}>
             <RefreshCw className={cn(loading && 'animate-spin')} />

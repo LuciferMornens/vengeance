@@ -32,6 +32,7 @@ import { asJsonObject, maskModelsSecrets, restoreModelsSecrets, unresolvedSecret
 import { runPiCli } from './pi-cli'
 import { piModelRuntime, piSettingsManager, type AuthEventLike, type AuthPromptLike, type ModelLike, type ModelRuntimeLike } from './pi-modules'
 import { cachedExtensionProviders, loginThroughHost, logoutThroughHost, refreshExtensionProviders } from './provider-host'
+import { storedCredential } from './stored-credential'
 
 /**
  * Model catalog, provider readiness and login flows through the engine's ModelRuntime. The catalog comes from the
@@ -72,7 +73,10 @@ function fileRevision(path: string): string {
   }
 }
 
-/** OAuth fields that change on every token refresh; the catalog never shows them. */
+/**
+ * OAuth fields that change on every token refresh; the catalog never shows them. A refused refresh's
+ * `refreshRejectedAt` is not one of them: the Engine stops offering that provider's models.
+ */
 const TOKEN_FIELDS = new Set(['access', 'refresh', 'expires'])
 
 /**
@@ -227,19 +231,6 @@ export function refillModelCatalog(override: string | null): void {
     runtimeCatalog(override, extraModels, extraProviderIds).catch(() => undefined)
   }, CATALOG_REFILL_DELAY_MS)
   refillTimer.unref()
-}
-
-/** Masked description of a stored credential (never the secret itself). */
-function storedCredential(raw: unknown): ProviderInfo['stored'] {
-  if (!raw || typeof raw !== 'object') return undefined
-  const entry = raw as { type?: unknown; key?: unknown; expires?: unknown }
-  if (entry.type === 'oauth') return { type: 'oauth', expiresAt: typeof entry.expires === 'number' ? entry.expires : undefined }
-  if (entry.type !== 'api_key') return undefined
-  const key = typeof entry.key === 'string' ? entry.key : ''
-  if (key.startsWith('!')) return { type: 'api_key', command: true, hint: 'Command' }
-  if (/^\$\{?[A-Z0-9_]+\}?$/i.test(key)) return { type: 'api_key', hint: key }
-  if (key.length >= 12) return { type: 'api_key', hint: `${key.slice(0, 4)}…${key.slice(-4)}` }
-  return { type: 'api_key', hint: key ? '••••' : undefined }
 }
 
 const modelKey = (model: { provider: string; id: string }) => `${model.provider}/${model.id}`
