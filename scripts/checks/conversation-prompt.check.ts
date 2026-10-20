@@ -84,7 +84,11 @@ async function loadPrime(): Promise<PrimeFixtureModule> {
               namespace: 'fixture'
             }))
             bundler.onLoad({ filter: /^electron$/, namespace: 'fixture' }, () => ({
-              contents: `export const app = { isPackaged: false, getPath: () => ${JSON.stringify(directory)} }
+              // A constant stub: these modules never ask Electron for a path.
+              contents: `export const app = {
+                  isPackaged: false,
+                  getPath: () => { throw new Error('app.getPath is not part of this fixture') }
+                }
                 export const safeStorage = { isEncryptionAvailable: () => false }
                 export const shell = {}`,
               loader: 'js'
