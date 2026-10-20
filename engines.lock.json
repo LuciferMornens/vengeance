@@ -21,7 +21,7 @@
     "repository": "https://github.com/earendil-works/pi.git",
     "tag": "v1.3.0",
     "revision": "71023aec1546d6d677a65669c5665c0927ce0dd0",
-    "version": "1.3.0+vengeance.3",
+    "version": "1.3.0+vengeance.4",
     "patches": [
       "patches/pi/0001-vengeance-distribution.patch",
       "patches/pi/0002-preserve-extension-runtime-version.patch",
@@ -30,7 +30,8 @@
       "patches/pi/0006-abliteration-provider.patch",
       "patches/pi/0007-native-session-sharing.patch",
       "patches/pi/0008-posix-shell-test-paths.patch",
-      "patches/pi/0009-mcp-host-state.patch"
+      "patches/pi/0009-mcp-host-state.patch",
+      "patches/pi/0010-oauth-refresh-rejection.patch"
     ],
     "packageDir": "pi/node_modules/@earendil-works/pi-coding-agent",
     "entry": "pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"

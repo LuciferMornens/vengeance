@@ -137,8 +137,11 @@ Your own agent accounts and sessions are never test fixtures.
    `docs: explain the glibc baseline`.
 3. Fill in the pull request template, including the platforms you tested on.
 4. CI must pass. It typechecks and builds, lints the workflows, builds the engines, then runs the
-   checks and screenshots on Windows, macOS and Linux. Pull requests that touch packaging, engines
-   or the release workflow also run a full release dry run on all five platforms.
+   checks, and the screenshots in two shards, on Windows, macOS and Linux. Pull requests that touch
+   packaging, engines or the release workflow also run a full release dry run on all five
+   platforms. That dry run reuses engines and helpers already cached for the same platform, runner
+   label, Linux container image and engine inputs (by CI, or for Intel macOS and Linux arm64 by an
+   earlier dry run of the pull request), and builds the rest from scratch.
 5. The maintainer reviews every change. Screenshots of UI changes speed this up.
 6. Pull requests land as one squash commit. `main` accepts no direct or force pushes: a change
    needs a pull request with every review thread resolved, a passing typecheck job and passing
@@ -161,8 +164,9 @@ Releases are for maintainers.
    prerelease sets `package.json` and `package-lock.json` to `<version>-rc.N` and pushes the
    matching tag `v<version>-rc.N`. Its builds check the same update feed as stable ones (the newest
    stable release), so they are offered the next stable release, never a newer prerelease.
-3. The release workflow builds and smoke-tests all five platforms (the macOS apps are ad-hoc
-   signed) and install-tests the deb, rpm and pacman packages. It then creates a **draft** release
-   with every package, `SHA256SUMS` and a provenance attestation.
+3. The release workflow builds all five platforms on clean runners without caches, smoke-tests
+   them (the macOS apps are ad-hoc signed) and install-tests the deb, rpm and pacman packages. It
+   then creates a **draft** release with every package, `SHA256SUMS` and a provenance attestation.
+   Manual runs and the weekly scheduled dry run build just as cleanly but never publish.
 4. Check the draft, then publish it. Anyone can verify a download with
    `gh attestation verify <file> --repo LuciferMornens/vengeance`.

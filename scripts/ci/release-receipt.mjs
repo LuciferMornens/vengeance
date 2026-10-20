@@ -1,39 +1,65 @@
 // Records the packaged native payloads and release files after the packaged smoke check succeeds.
+// --engines-cache-key names the Actions cache entry a pull request dry run restored its staged
+// engines and helper from; empty or absent, the run built them itself, as every tag run does.
 import asar from '@electron/asar'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { createReadStream } from 'node:fs'
+import { createReadStream, realpathSync } from 'node:fs'
 import { appendFile, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parseArgs, promisify } from 'node:util'
 import { engineLock, executableName, hostKey, root, systemPath } from '../engines/common.mjs'
 import { verifyEngines } from '../engines/verify.mjs'
 
 const HELPER_PROTOCOL = 1
 const HELPER_TIMEOUT_MS = 15_000
+// CI's key (.github/workflows/ci.yml) after its platform: the builder's runner label, then its
+// container image pinned by digest or no-container, then the engine input hash.
+const CACHE_KEY_BUILDER =
+  '[a-z0-9][a-z0-9.-]*-(?:no-container|[a-z0-9][a-z0-9./_-]*@sha256:[a-f0-9]{64})'
 const executeFile = promisify(execFile)
-const { values } = parseArgs({
-  options: {
-    app: { type: 'string' },
-    artifacts: { type: 'string' },
-    output: { type: 'string' },
-    revision: { type: 'string' }
-  }
-})
 
-try {
-  for (const option of ['app', 'artifacts', 'output']) {
-    if (!values[option] || !isAbsolute(values[option])) {
-      throw new Error(`--${option} requires an absolute path`)
+/** Throws unless a pull request dry run for `platform` could have restored the entry `key`. */
+export function checkEnginesCacheKey(key, { platform, event }) {
+  if (event !== 'pull_request') {
+    throw new Error('Only pull request dry runs may restore their native payloads')
+  }
+  if (!new RegExp(`^engines-v\\d+-${platform}-${CACHE_KEY_BUILDER}-[a-f0-9]{64}$`).test(key)) {
+    throw new Error(`--engines-cache-key ${key} is not a ${platform} engine payload key`)
+  }
+}
+
+async function main() {
+  const { values } = parseArgs({
+    options: {
+      app: { type: 'string' },
+      artifacts: { type: 'string' },
+      'engines-cache-key': { type: 'string' },
+      output: { type: 'string' },
+      revision: { type: 'string' }
     }
+  })
+  try {
+    for (const option of ['app', 'artifacts', 'output']) {
+      if (!values[option] || !isAbsolute(values[option])) {
+        throw new Error(`--${option} requires an absolute path`)
+      }
+    }
+    if (!/^[a-f0-9]{40}$/.test(values.revision ?? '')) {
+      throw new Error('--revision requires the full checked-out commit SHA')
+    }
+    const cacheKey = values['engines-cache-key'] || null
+    if (cacheKey) {
+      checkEnginesCacheKey(cacheKey, { platform: hostKey, event: process.env.GITHUB_EVENT_NAME })
+    }
+    await recordReceipt({ ...values, cacheKey })
+  } catch (error) {
+    console.error(
+      `Release receipt failed: ${error instanceof Error ? error.message : String(error)}`
+    )
+    process.exitCode = 1
   }
-  if (!/^[a-f0-9]{40}$/.test(values.revision ?? '')) {
-    throw new Error('--revision requires the full checked-out commit SHA')
-  }
-  await recordReceipt(values)
-} catch (error) {
-  console.error(`Release receipt failed: ${error instanceof Error ? error.message : String(error)}`)
-  process.exitCode = 1
 }
 
 async function recordReceipt(options) {
@@ -80,8 +106,12 @@ async function recordReceipt(options) {
     workflow: {
       repository: process.env.GITHUB_REPOSITORY ?? null,
       runId: process.env.GITHUB_RUN_ID ?? null,
-      runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? null
+      runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
+      event: process.env.GITHUB_EVENT_NAME ?? null
     },
+    nativePayloads: options.cacheKey
+      ? { source: 'restored', cacheKey: options.cacheKey }
+      : { source: 'built' },
     engines,
     helper: {
       protocol: helper.protocol,
@@ -128,4 +158,12 @@ async function fileHash(path) {
   } finally {
     stream.destroy()
   }
+}
+
+// Runs only as a script (the release workflow): scripts/checks imports checkEnginesCacheKey.
+if (
+  process.argv[1] &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
+  await main()
 }

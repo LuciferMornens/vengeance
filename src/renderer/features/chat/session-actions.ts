@@ -6,6 +6,7 @@ import { toast } from '../../ui'
 import { setDraftText } from '../composer/drafts'
 import { forkAt, targetForAgent } from '../sessions'
 import { cloneSession } from '../sessions/actions'
+import { toastFailure } from './failure-toast'
 import { userText, type TurnInfo } from './transcript-items'
 
 /** Session entry of a user message (matched by timestamp, falling back to text). */
@@ -26,7 +27,7 @@ async function guarded(title: string, action: () => Promise<void>): Promise<void
   try {
     await action()
   } catch (error) {
-    toast({ level: 'error', title, description: (error as Error).message })
+    toastFailure(title, error)
   }
 }
 

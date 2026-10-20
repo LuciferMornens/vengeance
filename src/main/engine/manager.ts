@@ -62,6 +62,8 @@ export interface EngineManagerHooks {
   onExit(exit: EngineExitInfo): void
 }
 
+type ModelFilter = (model: { provider: string; id: string }) => boolean
+
 export interface EngineManagerOptions {
   mock: boolean
   engineOverridePath: (engine?: EngineId) => string | null
@@ -69,14 +71,74 @@ export interface EngineManagerOptions {
   bridgeExtensionPath: () => string | null
   /** Environment the bridge reads (e.g. `VENGEANCE_NATIVE_COMPACTION`), under the workspace's launch env. */
   bridgeEnv?: () => Record<string, string>
-  /** Models the user's accounts offer (`account-models.ts`); hidden ones leave the model list and the model cycle. */
-  offeredModel?: () => ((model: { provider: string; id: string }) => boolean) | null
+  /**
+   * Models an Engine conversation offers, by its spawn args: those of the user's accounts (`account-models.ts`) whose
+   * sign-in the provider did not refuse to renew. Hidden ones leave the model list and the model cycle; null when
+   * nothing is hidden.
+   */
+  offeredModel?: (args: CreateAgentArgs) => ModelFilter | null
+  /**
+   * Whether the auth.json an Engine conversation reads, by its spawn args, holds sign-ins the provider refused to
+   * renew (`rereadsSignInsAtStart`).
+   */
+  signInsRefused?: (args: CreateAgentArgs) => boolean
   /** Where the Engine reads a conversation's own instructions from, discovered fresh for each spawn. */
   piPromptSources?: (args: CreateAgentArgs) => Promise<PiPromptSources | undefined>
 }
 
 /** Most hidden models a forward cycle steps over before it gives up and keeps where it landed. */
 const MAX_CYCLE_SKIPS = 64
+
+/**
+ * `cycle_model` landed on `first`: while `offered` hides where it landed, `send` cycles on, until a model it offers
+ * or back to the start.
+ */
+export async function cycleToOffered(
+  send: (command: RpcCommand) => Promise<RpcResponse>,
+  first: RpcSuccessResponse<'cycle_model'>,
+  offered: ModelFilter
+): Promise<RpcResponse> {
+  const start = first.data?.model
+  if (!start) return first
+  let current = first
+  for (
+    let skips = 0;
+    skips < MAX_CYCLE_SKIPS && current.data && !offered(current.data.model);
+    skips++
+  ) {
+    const next = await send({ type: 'cycle_model' })
+    if (!next.success || next.command !== 'cycle_model' || !next.data) break
+    current = next
+    if (next.data.model.provider === start.provider && next.data.model.id === start.id) break
+  }
+  return current
+}
+
+/**
+ * The conversations of `open` whose bridge re-reads changed sign-ins: ready Engine conversations with the bridge
+ * whose spawn args `reads` the changed auth.json. A reply in progress does not hold one back.
+ */
+export function signInRefreshTargets(
+  open: AgentInfo[],
+  reads: (args: CreateAgentArgs) => boolean
+): AgentInfo[] {
+  return open.filter(
+    (info) => info.engine === 'pi' && info.bridge && info.status === 'ready' && reads(info.args)
+  )
+}
+
+/**
+ * Whether a conversation whose Engine just started, or that an engine switch just moved to the Engine, has its
+ * bridge re-read the sign-ins: a ready Engine conversation with the bridge whose auth.json holds sign-ins the
+ * provider refused to renew (`refused`). One marked while it started may have missed both the Engine's own first
+ * read and `refreshSignIns`, which skips conversations still starting or hidden.
+ */
+export function rereadsSignInsAtStart(
+  info: AgentInfo,
+  refused: (args: CreateAgentArgs) => boolean
+): boolean {
+  return signInRefreshTargets([info], refused).length > 0
+}
 
 interface ManagedAgent {
   info: AgentInfo
@@ -255,39 +317,34 @@ export class EngineManager {
             ? !!handle.bridge
             : hasBridgeCommands(response.data.commands)
       } else if (response.command === 'get_available_models' && agent.info.engine === 'pi') {
-        const offered = this.options.offeredModel?.()
+        const offered = this.options.offeredModel?.(agent.info.args)
         if (offered)
           return {
             ...response,
             data: { ...response.data, models: response.data.models.filter(offered) }
           }
       } else if (response.command === 'cycle_model' && agent.info.engine === 'pi') {
-        return this.cycleToOffered(handle, response)
+        const offered = this.options.offeredModel?.(agent.info.args)
+        if (offered) return cycleToOffered((next) => handle.send(next), response, offered)
       }
     }
     return response
   }
 
-  /** `cycle_model` landed on a model the account does not offer: cycle on until one it does (or back to the start). */
-  private async cycleToOffered(
-    handle: EngineHandle,
-    first: RpcSuccessResponse<'cycle_model'>
-  ): Promise<RpcResponse> {
-    const offered = this.options.offeredModel?.()
-    const start = first.data?.model
-    if (!offered || !start) return first
-    let current = first
-    for (
-      let skips = 0;
-      skips < MAX_CYCLE_SKIPS && current.data && !offered(current.data.model);
-      skips++
-    ) {
-      const next = await handle.send({ type: 'cycle_model' })
-      if (!next.success || next.command !== 'cycle_model' || !next.data) break
-      current = next
-      if (next.data.model.provider === start.provider && next.data.model.id === start.id) break
-    }
-    return current
+  /**
+   * Have the bridge of every open Engine conversation that `reads` the changed auth.json (by its spawn args)
+   * re-read its sign-ins (`sign-ins`), so that its model registry, which extensions read, follows the Engine's marks
+   * of sign-ins the provider refused to renew. Conversations without the bridge are skipped, and those still starting
+   * re-read once ready (`rereadsSignInsAtStart`). Never rejects: a conversation whose bridge op fails keeps offering
+   * those providers to its extensions until its Engine next re-reads their availability: a later full pass, or its
+   * first request for one of them, which fails at once on the mark.
+   */
+  async refreshSignIns(reads: (args: CreateAgentArgs) => boolean): Promise<void> {
+    await Promise.allSettled(
+      signInRefreshTargets(this.list(), reads).map(({ agentId }) =>
+        this.bridge(agentId, { op: 'sign-ins' })
+      )
+    )
   }
 
   /** Run a Vengeance bridge operation (in-place tree navigation, reload, tools, labels). */
@@ -561,6 +618,8 @@ export class EngineManager {
         if (event.type === 'extension_ui_request' && event.method === 'set_editor_text') continue
         this.hooks.onEvent(agentId, event)
       }
+      // It started hidden: its own start sent no re-read, and refreshSignIns lists only visible conversations.
+      this.startSignInReread(candidate)
       return { ...candidate.info }
     } finally {
       source.switching = false
@@ -707,6 +766,16 @@ export class EngineManager {
     } catch {
       // The engine is up; session details arrive with the renderer's own refresh.
     }
+    this.startSignInReread(agent)
+  }
+
+  /** Have a conversation that just started, unless hidden, re-read its sign-ins (`rereadsSignInsAtStart`). */
+  private startSignInReread(agent: ManagedAgent): void {
+    const refused = this.options.signInsRefused
+    if (agent.hidden || !refused || !rereadsSignInsAtStart(agent.info, refused)) return
+    // Not through bridge(): as an operation it would make a restart or engine switch asked for meanwhile
+    // refuse until it ends. A failure leaves the startup read.
+    void this.sendBridge(agent, { op: 'sign-ins' }, {}).catch(() => undefined)
   }
 
   private wire(agent: ManagedAgent, handle: EngineHandle): void {

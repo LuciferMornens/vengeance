@@ -1,3 +1,7 @@
+import type { ProviderInfo } from '@shared/api/settings'
+import { providerName } from '../settings/provider-name'
+import { SIGN_IN_EXPIRED } from '../settings/provider-status'
+
 /** A provider/engine error string reduced to something a human wants to read. */
 export interface ParsedProviderError {
   /** Short headline, e.g. "Overloaded" or "Rate limit reached". */
@@ -10,6 +14,46 @@ export interface ParsedProviderError {
   code?: string
   /** The original string (for "show details"). */
   raw: string
+  /**
+   * The provider (its Engine id) refused to renew the Engine's sign-in for it: the title and detail read as in
+   * Settings → Providers, where signing in again is the remedy.
+   */
+  expiredSignIn?: string
+}
+
+/**
+ * The Engine's failures for a sign-in the provider refused to renew: a request ("… rejected its refresh token
+ * (<the token endpoint's error>). Sign in again.") and a prompt or model switch ("… Run '/login <provider>' to sign
+ * in again.", a terminal command). Both name the provider first. A compaction and a branch summary report the
+ * request's failure behind their own label ("Summarization failed: …", "Turn prefix summarization failed: …",
+ * "Branch summarization failed: …").
+ */
+const EXPIRED_SIGN_IN =
+  /^(?:Error:\s*)?(?:(?:Turn prefix s|Branch s|S)ummarization failed:\s*)?Sign-in for (\S+) expired: the provider rejected its refresh token\b/
+
+/** The provider of an Engine error about a sign-in the provider refused to renew; undefined for any other error. */
+export function expiredSignInProvider(raw: string | undefined): string | undefined {
+  return EXPIRED_SIGN_IN.exec((raw ?? '').trim())?.[1]
+}
+
+/**
+ * UI name of the provider whose Engine sign-in expired, from the Engine's catalog when given. Only OAuth sign-ins are
+ * renewed, so `openai` reads as ChatGPT.
+ */
+export function expiredSignInName(provider: string, providers?: readonly ProviderInfo[]): string {
+  const known = providers?.find((p) => p.id === provider)
+  return providerName({
+    ...(known ?? { id: provider, name: provider }),
+    status: { usingOAuth: true }
+  })
+}
+
+/** The expired sign-in for a toast: "Sign-in expired for ChatGPT. The provider rejected the saved sign-in. …" */
+export function expiredSignInSummary(
+  provider: string,
+  providers?: readonly ProviderInfo[]
+): string {
+  return `${SIGN_IN_EXPIRED.label} for ${expiredSignInName(provider, providers)}. ${SIGN_IN_EXPIRED.explanation}`
 }
 
 const STATUS_TITLES: Record<number, string> = {
@@ -82,6 +126,15 @@ function markupHeadline(markup: string): string | undefined {
 /** Extract status, type and message from strings like `529 {"type":"error","error":{…}}`. */
 export function parseProviderError(raw: string | undefined): ParsedProviderError {
   const text = (raw ?? '').trim() || 'The model returned an error.'
+  // Before any status or JSON: the token endpoint's error the Engine quotes would hide the remedy.
+  const expiredSignIn = expiredSignInProvider(text)
+  if (expiredSignIn)
+    return {
+      title: SIGN_IN_EXPIRED.label,
+      detail: SIGN_IN_EXPIRED.explanation,
+      raw: text,
+      expiredSignIn
+    }
   const statusMatch = /^(?:Error:\s*)?(\d{3})\b/.exec(text) ?? /\bstatus(?:\s*code)?[:= ]+(\d{3})\b/i.exec(text)
   const status = statusMatch ? Number(statusMatch[1]) : undefined
   const json = findJson(text)

@@ -111,7 +111,18 @@ const JUMPS: JumpEntry[] = [
     section: 'providers',
     label: 'Sign in / API keys',
     description: 'Connect subscriptions and API keys.',
-    keywords: ['oauth', 'login', 'account', 'key', 'auth', 'claude', 'openai', 'copilot']
+    keywords: [
+      'oauth',
+      'login',
+      'account',
+      'key',
+      'auth',
+      'claude',
+      'openai',
+      'copilot',
+      'expired',
+      'sign in again'
+    ]
   },
   {
     key: 'custom-models',

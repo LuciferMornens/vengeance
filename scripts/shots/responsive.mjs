@@ -21,6 +21,13 @@ const MIN_CENTER_WIDTH = 480
 const unreachable = new Set()
 
 /**
+ * How long a size larger than the work area may take to apply. Windows grows a window past its
+ * work area at once; macOS never does, and each such size would otherwise wait out Playwright's
+ * 30 s default.
+ */
+const OVERSIZE_WAIT_MS = 5_000
+
+/**
  * Resize the window's content to `width`×`height`. Resolves false (logged once) when the size is
  * larger than the display's work area and the window manager clamps it there, as macOS does with
  * every window; any other failure to reach the size throws.
@@ -37,14 +44,16 @@ async function resize(app, page, { width, height }) {
     },
     { width, height }
   )
+  const fits = width <= workArea.width && height <= workArea.height
   try {
     await page.waitForFunction(
       (size) => window.innerWidth === size.width && window.innerHeight === size.height,
-      { width, height }
+      { width, height },
+      fits ? undefined : { timeout: OVERSIZE_WAIT_MS }
     )
     return true
   } catch (error) {
-    if (width <= workArea.width && height <= workArea.height) throw error
+    if (fits) throw error
     unreachable.add(key)
     console.log(
       `  ○ ${key} skipped: larger than the display's ${workArea.width}x${workArea.height} work area`

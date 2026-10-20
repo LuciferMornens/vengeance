@@ -361,6 +361,24 @@ function short(ctx: ScriptContext): MockStep[] {
   return b.steps
 }
 
+/** How the Engine fails a request whose sign-in `provider` refused to renew (patch 0010). */
+const expiredSignInError = (provider: string) =>
+  `Sign-in for ${provider} expired: the provider rejected its refresh token (token request failed (400): ` +
+  '{"error":"invalid_grant","error_description":"Refresh token not found or invalid."}). Sign in again.'
+
+/** A reply that fails at once because the provider refused to renew the conversation's sign-in. */
+function expiredSignIn(ctx: ScriptContext): MockStep[] {
+  const b = new ScriptBuilder(ctx)
+  b.emit({ type: 'agent_start' })
+  b.turn(() => {
+    b.user(ctx.prompt)
+    return { message: b.assistant([], 'error', expiredSignInError(ctx.model.provider)), results: [] }
+  })
+  b.emit({ type: 'agent_end', messages: [...b.produced], willRetry: false })
+  b.emit({ type: 'agent_settled', aborted: false }, 20)
+  return b.steps
+}
+
 /** Base64 SVG "screenshot" used as a user image attachment in the gallery run. */
 function mockScreenshot(accent: string, rows: number): string {
   const bars = Array.from({ length: rows }, (_, i) => {
@@ -719,5 +737,6 @@ export function buildScript(name: MockScriptName, ctx: ScriptContext): MockStep[
   if (name === 'marathon') return marathon(ctx)
   if (name === 'subagents') return subagents(ctx)
   if (name === 'toolbelt') return toolbelt(ctx)
+  if (name === 'expired-sign-in') return expiredSignIn(ctx)
   return name === 'showcase' ? showcase(ctx) : short(ctx)
 }

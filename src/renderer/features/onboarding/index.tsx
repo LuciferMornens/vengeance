@@ -17,6 +17,7 @@ import { invoke } from '../../lib/ipc'
 import { spring } from '../../lib/motion'
 import { useApp } from '../../store/app'
 import { Mark, Skeleton } from '../../ui'
+import { providerUsable } from '../settings/provider-status'
 import { useSettings } from '../settings/store'
 import { EnginePicker } from '../engines/EnginePicker'
 import { useEngineRegistry } from '../engines/registry'
@@ -195,7 +196,7 @@ export function Onboarding() {
     }
   }, [detect])
 
-  const ready = !!catalog?.providers.some((p) => p.status.configured)
+  const ready = !!catalog?.providers.some(providerUsable)
   // Pick the first step once detection settles: returning users with a working setup go straight to the project.
   useEffect(() => {
     if (step !== null || !engine) return

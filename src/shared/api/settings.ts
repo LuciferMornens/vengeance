@@ -102,8 +102,17 @@ export interface ProviderInfo {
     label?: string
     usingOAuth: boolean
   }
-  /** Credential stored in auth.json (type + masked hint only). */
-  stored?: { type: 'api_key' | 'oauth'; hint?: string; expiresAt?: number; command?: boolean }
+  /**
+   * Credential stored in auth.json (type + masked hint only). `refreshRejectedAt` (OAuth, epoch ms): the provider
+   * refused to renew this sign-in, so the Engine no longer uses it until a new sign-in replaces it.
+   */
+  stored?: {
+    type: 'api_key' | 'oauth'
+    hint?: string
+    expiresAt?: number
+    command?: boolean
+    refreshRejectedAt?: number
+  }
   /** Environment variable(s) the provider reads, when known. */
   envVars: string[]
   /** Registered by an extension (`pi.registerProvider`). */
@@ -628,7 +637,8 @@ export interface SettingsEventMap {
     fromRun?: boolean
     /**
      * No restart is offered: an explicit file save is for future sessions (applying it to open work
-     * is a separate action), and an engine's own save of a change it made live is already applied.
+     * is a separate action), an engine's own save of a change it made live is already applied, and the
+     * Engine's mark of a sign-in the provider refused to renew is applied to open conversations by main.
      */
     apply?: 'new-sessions'
   }

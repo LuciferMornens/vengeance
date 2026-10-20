@@ -42,7 +42,7 @@ const SECTIONS: Record<SettingsSectionId, { title: string; icon: LucideIcon; key
     providers: {
       title: 'Providers & accounts',
       icon: UserRound,
-      keywords: ['login', 'sign in', 'api key', 'oauth', 'auth', '/login']
+      keywords: ['login', 'sign in', 'api key', 'oauth', 'auth', '/login', 'expired']
     },
     'custom-models': {
       title: 'Custom models',

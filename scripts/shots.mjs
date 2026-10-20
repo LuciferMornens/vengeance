@@ -1,8 +1,15 @@
 // Screenshot harness: launches the BUILT app (npm run build first) with the mock engine and a temp
 // profile, runs every scenario file in scripts/shots/*.mjs and writes PNGs to .shots/<name>.png.
 //
-//   npm run shots              all scenario files
-//   npm run shots -- shell     only scripts/shots/shell.mjs
+//   npm run shots                  all scenario files
+//   npm run shots -- shell         only scripts/shots/shell.mjs
+//   npm run shots -- --shard=1/2   shard 1 of 2 (CI runs each shard in its own job)
+//
+// --shard=<i>/<n> splits every scenario file into n shards by expected duration (SCENARIO_SECONDS)
+// and runs shard i (1-based) in name order. The same files always split the same way, and a new
+// file lands in some shard on its own. It does not combine with scenario names: a malformed or
+// repeated --shard, names next to it, or more shards than files stop the run before any launch, as
+// does a name no scenario file has.
 //
 // Scenario files export `async function scenarios(page, helpers)`; helpers are documented below.
 //
@@ -10,13 +17,21 @@
 // when the file finishes. TEMP/TMP/TMPDIR point into it for the harness process and the launched app,
 // so `mkdtemp(join(tmpdir(), …))` in a scenario and the mock engine's own temp folders are cleaned up
 // too. `helpers.tempDir(prefix)` creates a folder there explicitly.
+//
+// Engine config: the app gets no inherited PI_*, PRIME_* or AI_AGENT variable, so the mock seeds the
+// Engine's agent dir (PI_CODING_AGENT_DIR) and Engine 2 its mock agent dir in that temp root, and
+// scenarios that write auth.json, keybindings.json or Engine 2 sign-ins change only those copies.
+// Before a file's scenarios run, the harness checks that every Engine folder the app names lies in
+// its temp root; a file whose app names one elsewhere fails without running a scenario or saving a
+// -FAILED.png, as its window may show that other config.
 import { _electron as electron } from 'playwright'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { ELECTRON_SWITCHES } from './qa/lib/platform.mjs'
+import { isInside } from './qa/lib/tmp.mjs'
 import { MOCK_WORKSPACE } from './shots/lib/mock-paths.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -27,10 +42,94 @@ const HEIGHT = 900
 /** The real temp folder, captured before TEMP/TMP are pointed at a scenario's temp root. */
 const systemTmp = tmpdir()
 const TEMP_VARS = ['TEMP', 'TMP', 'TMPDIR']
+/**
+ * Inherited Engine and Engine 2 variables (e.g. when shots run inside an agent) would point the app
+ * at a real config: with PI_CODING_AGENT_DIR set the mock seeds no temp agent dir of its own. Any
+ * case, as Windows reads variable names.
+ */
+const INHERITED_ENGINE_VARS = /^(PI_|PRIME_|AI_AGENT$)/i
+/**
+ * Engine folders the app's environment can name. The mock sets PI_CODING_AGENT_DIR; without
+ * PRIME_AGENT_CODING_AGENT_DIR, Engine 2 creates its mock agent dir in the app's TEMP.
+ */
+const ENGINE_DIR_VARS = [
+  'PI_CODING_AGENT_DIR',
+  'PI_CODING_AGENT_SESSION_DIR',
+  'PRIME_AGENT_CODING_AGENT_DIR',
+  'PRIME_AGENT_SESSION_DIR',
+  'PRIME_AGENT_CODING_AGENT_SESSION_DIR'
+]
 
-if (!existsSync(join(root, 'out', 'main', 'index.js'))) {
-  console.error('Build output missing — run `npm run build` first.')
-  process.exit(1)
+/**
+ * Seconds a scenario file takes on the hosted CI runners, for balancing --shard; a file not listed
+ * is expected to take DEFAULT_SCENARIO_SECONDS. On macOS the runner's display clamps 35 responsive
+ * sizes, and each waits out responsive.mjs's oversize timeout.
+ */
+const SCENARIO_SECONDS = new Map([
+  ['chat', 105],
+  ['composer', 75],
+  ['conversation-prompt', 15],
+  ['launch', 50],
+  ['mcp-status', 20],
+  ['prime-engine', 30],
+  ['responsive', process.platform === 'darwin' ? 190 : 70],
+  ['sessions', 45],
+  ['settings', 70],
+  ['subagents', 55]
+])
+const DEFAULT_SCENARIO_SECONDS = 8
+
+const scenarioName = (file) => file.replace(/\.mjs$/, '')
+const scenarioSeconds = (file) =>
+  SCENARIO_SECONDS.get(scenarioName(file)) ?? DEFAULT_SCENARIO_SECONDS
+
+/** Every scenario file in scripts/shots, in name order. */
+export async function scenarioFiles() {
+  return (await readdir(scenarioDir)).filter((f) => f.endsWith('.mjs')).sort()
+}
+
+/** The `--shard=<i>/<n>` among `args` as { index, count } (index 1-based), or null without one. */
+export function parseShard(args) {
+  const options = args.filter((arg) => /^--shard(=|$)/.test(arg))
+  if (options.length === 0) return null
+  if (options.length > 1) throw new Error(`--shard is given ${options.length} times: pass one`)
+  const names = args.filter((arg) => arg !== options[0])
+  if (names.length > 0) {
+    throw new Error(
+      `--shard splits every scenario file; drop the scenario names ${names.join(', ')}`
+    )
+  }
+  const match = /^--shard=(\d+)\/(\d+)$/.exec(options[0])
+  const index = Number(match?.[1])
+  const count = Number(match?.[2])
+  if (!match || index < 1 || index > count) {
+    throw new Error(`${options[0]}: expected --shard=<i>/<n> with whole numbers 1 <= i <= n`)
+  }
+  return { index, count }
+}
+
+/**
+ * `files` split into `count` shards of { files, seconds }: longest expected first, each file joins
+ * the shard with the fewest expected seconds so far (the lower shard on a tie). Every file lands in
+ * exactly one shard, whatever order `files` come in, and each shard lists its files in name order.
+ */
+export function splitShards(files, count) {
+  if (count > files.length) {
+    throw new Error(`--shard: ${count} shards for only ${files.length} scenario files`)
+  }
+  const shards = Array.from({ length: count }, () => ({ files: [], seconds: 0 }))
+  const longestFirst = [...files].sort(
+    (a, b) => scenarioSeconds(b) - scenarioSeconds(a) || (a < b ? -1 : 1)
+  )
+  for (const file of longestFirst) {
+    const lightest = shards.reduce((least, shard) =>
+      shard.seconds < least.seconds ? shard : least
+    )
+    lightest.files.push(file)
+    lightest.seconds += scenarioSeconds(file)
+  }
+  for (const shard of shards) shard.files.sort()
+  return shards
 }
 
 /** Point TEMP/TMP/TMPDIR at `dir` for this process; returns a function that restores the previous values. */
@@ -45,18 +144,37 @@ function redirectTemp(dir) {
   }
 }
 
+/** The app's environment: `base` without inherited Engine variables, in mock mode with `userData`. */
+export function appEnv(base, userData) {
+  return {
+    ...Object.fromEntries(
+      Object.entries(base).filter(([name]) => !INHERITED_ENGINE_VARS.test(name))
+    ),
+    VENGEANCE_MOCK: '1',
+    VENGEANCE_TEST: '1',
+    VENGEANCE_NO_MICA: '1',
+    VENGEANCE_USER_DATA: userData
+  }
+}
+
+/**
+ * Why the Engine folders in the app's environment `env` are not inside `appTemp`, the TEMP the
+ * harness gave it: one line per folder elsewhere, none when the app's Engine config is its own.
+ */
+export function engineDirProblems(env, appTemp) {
+  const problems = env.PI_CODING_AGENT_DIR ? [] : ['PI_CODING_AGENT_DIR is not set']
+  for (const name of ENGINE_DIR_VARS) {
+    if (env[name] && !isInside(appTemp, env[name])) problems.push(`${name} is ${env[name]}`)
+  }
+  return problems
+}
+
 async function launch(tempRoot) {
   const userData = join(tempRoot, 'user-data')
   await mkdir(userData)
   const app = await electron.launch({
     args: [root, '--force-device-scale-factor=1', ...ELECTRON_SWITCHES],
-    env: {
-      ...process.env,
-      VENGEANCE_MOCK: '1',
-      VENGEANCE_TEST: '1',
-      VENGEANCE_NO_MICA: '1',
-      VENGEANCE_USER_DATA: userData
-    },
+    env: appEnv(process.env, userData),
     timeout: 60_000
   })
   // Electron turns an uncaught main-process exception into a native error dialog. Report it on stderr
@@ -115,50 +233,98 @@ function makeHelpers(page, app, file, tempRoot) {
   }
 }
 
-const only = process.argv.slice(2)
-const files = (await readdir(scenarioDir))
-  .filter((f) => f.endsWith('.mjs'))
-  .filter((f) => only.length === 0 || only.includes(f.replace(/\.mjs$/, '')))
-  .sort()
+/** The scenario files `args` select (see the usage at the top); throws on a usage error. */
+async function selectScenarios(args) {
+  const all = await scenarioFiles()
+  const shard = parseShard(args)
+  if (!shard) {
+    // A misspelled name or option would otherwise run nothing and pass.
+    const unknown = args.filter((name) => !all.some((f) => scenarioName(f) === name))
+    if (unknown.length > 0) throw new Error(`No scenario file is named ${unknown.join(', ')}`)
+    return all.filter((f) => args.length === 0 || args.includes(scenarioName(f)))
+  }
+  const { files, seconds } = splitShards(all, shard.count)[shard.index - 1]
+  console.log(`Shard ${shard.index}/${shard.count}, about ${seconds} s: ${files.join(', ')}`)
+  return files
+}
 
-await mkdir(outDir, { recursive: true })
-let failed = 0
-for (const file of files) {
-  console.log(`▶ ${file}`)
-  const tempRoot = await mkdtemp(join(systemTmp, 'vengeance-shots-'))
-  await mkdir(join(tempRoot, 'tmp'))
-  const restoreTemp = redirectTemp(join(tempRoot, 'tmp'))
-  const { app, page, uncaughtMainErrors } = await launch(tempRoot)
-  const errors = []
-  page.on('pageerror', (error) => errors.push(error.message))
-  page.on('console', (msg) => msg.type() === 'error' && errors.push(msg.text()))
+async function main(args) {
+  if (!existsSync(join(root, 'out', 'main', 'index.js'))) {
+    console.error('Build output missing — run `npm run build` first.')
+    process.exit(1)
+  }
+  let files
   try {
-    const mod = await import(pathToFileURL(join(scenarioDir, file)).href)
-    await mod.scenarios(page, makeHelpers(page, app, file, tempRoot))
+    files = await selectScenarios(args)
   } catch (error) {
-    failed++
-    console.error(`  ✗ ${file}: ${error.stack ?? error}`)
-    await page
-      .screenshot({ path: join(outDir, `${file.replace(/\.mjs$/, '')}-FAILED.png`) })
-      .catch(() => undefined)
-  } finally {
-    if (errors.length) {
-      console.warn(`  ⚠ renderer errors in ${file}:\n    ${errors.join('\n    ')}`)
-    }
-    await app.close().catch(() => undefined)
-    restoreTemp()
-    // Windows can hold a just-closed app's files for a moment: retry instead of leaking the folder.
-    await rm(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }).catch(
-      (error) => console.warn(`  ⚠ temp folder left behind: ${tempRoot} (${error.message})`)
-    )
-    const uncaught = uncaughtMainErrors()
-    if (uncaught.length) {
-      failed++
-      console.error(
-        `  ✗ ${file}: uncaught main-process exception (a native error dialog in a real run):\n    ${uncaught.join('\n    ')}`
+    console.error(error.message)
+    process.exit(1)
+  }
+
+  await mkdir(outDir, { recursive: true })
+  let failed = 0
+  for (const file of files) {
+    console.log(`▶ ${file}`)
+    const tempRoot = await mkdtemp(join(systemTmp, 'vengeance-shots-'))
+    const appTemp = join(tempRoot, 'tmp')
+    await mkdir(appTemp)
+    const restoreTemp = redirectTemp(appTemp)
+    const { app, page, uncaughtMainErrors } = await launch(tempRoot)
+    const errors = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    page.on('console', (msg) => msg.type() === 'error' && errors.push(msg.text()))
+    // Set once the app's Engine config is this file's own: only then does a failure get a screenshot.
+    let isolated = false
+    try {
+      // Scenarios write Engine config, so it has to be the copy in this file's temp root.
+      const appDirs = await app.evaluate(
+        (_electron, names) => Object.fromEntries(names.map((name) => [name, process.env[name]])),
+        ENGINE_DIR_VARS
       )
+      const problems = engineDirProblems(appDirs, appTemp)
+      if (problems.length > 0) {
+        throw new Error(
+          `Engine config outside ${appTemp}, so no scenario ran: ${problems.join('; ')}`
+        )
+      }
+      isolated = true
+      const mod = await import(pathToFileURL(join(scenarioDir, file)).href)
+      await mod.scenarios(page, makeHelpers(page, app, file, tempRoot))
+    } catch (error) {
+      failed++
+      console.error(`  ✗ ${file}: ${error.stack ?? error}`)
+      if (isolated) {
+        await page
+          .screenshot({ path: join(outDir, `${scenarioName(file)}-FAILED.png`) })
+          .catch(() => undefined)
+      }
+    } finally {
+      if (errors.length) {
+        console.warn(`  ⚠ renderer errors in ${file}:\n    ${errors.join('\n    ')}`)
+      }
+      await app.close().catch(() => undefined)
+      restoreTemp()
+      // Windows can hold a just-closed app's files for a moment: retry instead of leaking the folder.
+      await rm(tempRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }).catch(
+        (error) => console.warn(`  ⚠ temp folder left behind: ${tempRoot} (${error.message})`)
+      )
+      const uncaught = uncaughtMainErrors()
+      if (uncaught.length) {
+        failed++
+        console.error(
+          `  ✗ ${file}: uncaught main-process exception (a native error dialog in a real run):\n    ${uncaught.join('\n    ')}`
+        )
+      }
     }
   }
+  console.log(failed ? `${failed} scenario file(s) failed` : `Screenshots in ${outDir}`)
+  process.exit(failed ? 1 : 0)
 }
-console.log(failed ? `${failed} scenario file(s) failed` : `Screenshots in ${outDir}`)
-process.exit(failed ? 1 : 0)
+
+// Runs only as a script (npm run shots): scripts/checks imports the shard functions above.
+if (
+  process.argv[1] &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
+  await main(process.argv.slice(2))
+}

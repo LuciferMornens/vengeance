@@ -81,6 +81,7 @@ try {
     'vengeance-label',
     'vengeance-mcp',
     'vengeance-reload',
+    'vengeance-sign-ins',
     'vengeance-speed',
     'vengeance-subagents',
     'vengeance-system-prompt',
@@ -92,7 +93,7 @@ try {
     'all bridge commands registered'
   )
   const listed = await page.evaluate(() =>
-    /vengeance-(tree|reload|tools|label|subagents|speed|system-prompt)/.test(
+    /vengeance-(tree|reload|tools|label|subagents|speed|system-prompt|mcp|sign-ins)/.test(
       document.body.innerText
     )
   )

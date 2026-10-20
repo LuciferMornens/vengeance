@@ -7,6 +7,7 @@ import { cn } from '../../lib/cn'
 import { floatingSurface, Spinner } from '../../ui'
 import { humanizeTokens } from './controls'
 import { providerName } from './provider-name'
+import { SIGN_IN_EXPIRED, signInExpired } from './provider-status'
 import { useSettings } from './store'
 
 /** Searchable model picker over the engine's catalog (grouped by provider, availability-aware). */
@@ -83,6 +84,7 @@ export function ModelPicker({
   const groups = useMemo(() => {
     if (!open || !catalog) return []
     const names = new Map(catalog.providers.map((p) => [p.id, providerName(p)]))
+    const expired = new Set(catalog.providers.filter(signInExpired).map((p) => p.id))
     const byProvider = new Map<string, ModelInfo[]>()
     for (const m of catalog.models) {
       if (availableOnly && !m.available) continue
@@ -96,6 +98,7 @@ export function ModelPicker({
         provider,
         name: names.get(provider) ?? provider,
         available: models.some((m) => m.available),
+        expired: expired.has(provider),
         models
       }))
       .sort((a, b) => Number(b.available) - Number(a.available) || a.name.localeCompare(b.name))
@@ -170,6 +173,9 @@ export function ModelPicker({
                     <span className="flex items-center gap-1.5">
                       {group.name}
                       {!group.available && <Lock className="size-3" />}
+                      {group.expired && (
+                        <span className="text-warning">{SIGN_IN_EXPIRED.label}</span>
+                      )}
                     </span>
                   }
                   className="[&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:pt-2.5 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-fg-3"

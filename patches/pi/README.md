@@ -1,12 +1,13 @@
 # Vengeance's pi build
 
 Vengeance builds stable `v1.3.0`, commit `71023aec1546d6d677a65669c5665c0927ce0dd0`,
-as `1.3.0+vengeance.3`. See [UPSTREAM.md](../../UPSTREAM.md) and
+as `1.3.0+vengeance.4`. See [UPSTREAM.md](../../UPSTREAM.md) and
 [engines.lock.json](../../engines.lock.json) for the source and maintenance contract.
 
 The active series includes distribution policy (0001), extension runtime version identity (0002),
 native runtime qualification (0003), Windows native test fixtures (0005), Abliteration (0006),
-native session sharing (0007), POSIX shell test paths (0008) and MCP host state (0009).
+native session sharing (0007), POSIX shell test paths (0008), MCP host state (0009) and OAuth
+refresh rejection (0010).
 Patch `0005` normalizes the external-editor fixture's temporary path on Windows. Patch `0006`
 also supplies Abliteration's native default model, required by the 1.3 provider-selection contract.
 The series applies to the stable base without source conflict.
@@ -59,6 +60,45 @@ The native `agent-session-mcp-host-state.test.ts` qualifies the host channels; `
 `agent-session-mcp-oauth.test.ts`, `mcp-extension.test.ts`, `mcp-command.test.ts` and
 `mcp-manager-view.test.ts` qualify the unchanged behavior. Retire it when upstream offers an
 equivalent host-facing state and action interface and the bridge moves to it.
+
+Patch `0010` stops a dead OAuth sign-in from looking signed in. Upstream keeps a credential whose
+refresh failed so a retry can succeed, and so it kept counting a provider as available after its
+token endpoint had rejected the refresh token: every request, including extensions' choice of "any
+signed-in provider" (for example an auto-title model), picked it and failed with another token
+request. A refresh by one of the built-in OAuth flows (OpenAI, OpenAI Codex, Anthropic, xAI, Kimi
+Code and Radius) now reports a token endpoint error response with a JSON body as
+`OAuthEndpointError`, directly or (Anthropic's) as the thrown error's `cause`, with the HTTP status
+and the error code: the RFC 6749 `error` string, or the `code` of the `error` object OpenAI's
+authorization server sends. Some flows raise it from login too, which never marks a credential. Only
+a rejected refresh token marks the stored credential: `invalid_grant`, or OpenAI's
+`refresh_token_expired`, `refresh_token_reused` or `refresh_token_invalidated`, with HTTP 400 or
+401. The credential keeps every field and gains `refreshRejectedAt` (epoch milliseconds) under the
+same credential-store lock as the refresh. Timeouts, network errors, server errors, cancellation,
+lock failures and other error codes never mark it. A marked credential leaves its provider
+unconfigured, since a stored credential owns its provider and environment keys do not replace it:
+`checkAuth`, `getAvailable`, the runtime's availability snapshot (the RPC `get_available_models`,
+`/model`, scoped models and extensions' `modelRegistry.getAvailable()`) and catalog refreshes skip
+it, and requests fail at once with "Sign-in for <provider> expired ... Sign in again." without
+calling the token endpoint. A request that fails on a marked credential waits for a full
+availability pass to apply before the failure reaches the caller, unless the request is aborted
+first, which ends only the wait; the pass replaces any pass in flight and applies every provider's
+model filter, and other OAuth failures leave availability alone. Each process keeps its own
+snapshot, so another running process lists the provider until it re-reads availability or reaches
+the mark itself, and its requests already fail at once. `ModelRegistry.refreshAvailability()` is
+that re-read for extensions (the desktop bridge calls it): it reads every stored credential and
+every provider's available models again, with their filters, and resolves once such a pass applied,
+without reloading models.json or rebuilding providers, so catalog refreshes in flight keep running.
+Prompting or selecting a model of that provider names the expired sign-in instead of a missing API
+key. A new login replaces the credential, which clears the mark; upstream builds and older Vengeance
+builds ignore the field. The interactive `/login` selector, which Vengeance does not show, infers a
+stored credential's type from `isUsingOAuth` and so labels an expired sign-in as a configured API
+key. GitHub Copilot, Meta and OpenRouter have no RFC 6749 refresh grant and are unchanged. Lazily
+loaded OAuth flows are bundled with their own copy of the error module, so recognition uses a
+registered symbol, not `instanceof`. The native `oauth-refresh-rejection.test.ts` (pi-ai),
+`model-runtime-oauth-rejection.test.ts` and the expired sign-in case of
+`suite/agent-session-prompt.test.ts` qualify it, with the existing OAuth flow, `models-runtime`,
+model runtime and model registry suites for the unchanged behavior. Retire it when upstream
+recognizes rejected refresh tokens and stops offering their providers.
 
 The distribution patch refuses native self-updates and suppresses upstream release notifications.
 Extension/package updates and model catalog refreshes remain native operations. Built-in extensions,

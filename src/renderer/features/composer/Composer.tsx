@@ -18,6 +18,7 @@ import { isImeComposing, shortcutText } from '../../lib/keybindings'
 import { spring } from '../../lib/motion'
 import { useAgents } from '../../store/agents'
 import { Kbd, Spinner, toast } from '../../ui'
+import { toastFailure } from '../chat/failure-toast'
 import { RetryNotice } from '../chat/notices'
 import { ExtensionStatusChips, ExtensionWidgets } from '../extension-ui'
 import { McpChip } from '../mcp/McpChip'
@@ -324,7 +325,7 @@ export function Composer({ agentId, opening }: { agentId: string; opening: Openi
     } catch (error) {
       if (override === undefined)
         patchDraft((d) => (d.text ? {} : { text: current.text, images: current.images }))
-      toast({ level: 'error', title: 'Could not send', description: (error as Error).message })
+      toastFailure('Could not send', error)
     }
   }
 

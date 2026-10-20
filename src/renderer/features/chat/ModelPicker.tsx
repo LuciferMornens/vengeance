@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { Command } from 'cmdk'
 import { Brain, ChevronDown, ImageIcon, Search } from 'lucide-react'
-import type { EngineId } from '@shared/api/engine'
 import type { ProviderInfo } from '@shared/api/settings'
 import type { Model } from '@shared/engine-types'
 import { cn } from '../../lib/cn'
@@ -9,11 +8,10 @@ import { rpc } from '../../lib/engine'
 import { formatTokens } from '../../lib/format'
 import { on } from '../../lib/ipc'
 import { useAgents } from '../../store/agents'
-import { useApp } from '../../store/app'
-import { Badge, ListRowContent, listRowClass, Popover, Spinner, toast } from '../../ui'
+import { Badge, ListRowContent, listRowClass, Popover, Spinner } from '../../ui'
 import { providerName } from '../settings/provider-name'
-import { settingsInvokeForFolder } from '../settings/ipc'
-import { useSettings } from '../settings/store'
+import { useCatalogProviders } from './catalog-providers'
+import { toastFailure } from './failure-toast'
 
 const PROVIDER_COLORS: Record<string, string> = {
   anthropic: '#d97757',
@@ -35,59 +33,6 @@ const PROVIDER_COLORS: Record<string, string> = {
  */
 export function providerLabel(provider: string, providers?: ProviderInfo[]): string {
   return providerName(providers?.find((p) => p.id === provider) ?? { id: provider, name: provider })
-}
-
-/** The settings catalog's providers for picker headings, loading the catalog once when a picker first needs it. */
-export function useCatalogProviders(
-  engine?: EngineId,
-  cwd?: string | null
-): ProviderInfo[] | undefined {
-  const selectedEngine = useSettings((state) => state.engine)
-  const requestedEngine = engine ?? selectedEngine
-  const activeFolder = useApp((state) => state.prefs.activeWorkspace)
-  const requestedFolder = cwd === undefined ? activeFolder : cwd
-  const providers = useSettings((state) =>
-    cwd === undefined && state.engine === requestedEngine ? state.catalog?.providers : undefined
-  )
-  const [catalog, setCatalog] = useState<{
-    engine: EngineId
-    cwd: string | null
-    providers: ProviderInfo[]
-  } | null>(null)
-  useEffect(() => {
-    if (providers) return
-    let alive = true
-    const load = () => {
-      void settingsInvokeForFolder(requestedEngine, requestedFolder, 'settings:catalog')
-        .then((result) => {
-          if (alive)
-            setCatalog({
-              engine: requestedEngine,
-              cwd: requestedFolder,
-              providers: result.providers
-            })
-        })
-        .catch(() => undefined)
-    }
-    load()
-    const unsubscribe = on('settings:changed', (event) => {
-      if (
-        (event.engine ?? 'pi') === requestedEngine &&
-        (event.area === 'auth' || event.area === 'models')
-      )
-        load()
-    })
-    return () => {
-      alive = false
-      unsubscribe()
-    }
-  }, [requestedEngine, requestedFolder, providers])
-  return (
-    providers ??
-    (catalog?.engine === requestedEngine && catalog.cwd === requestedFolder
-      ? catalog.providers
-      : undefined)
-  )
 }
 
 /**
@@ -314,7 +259,7 @@ export function ModelPicker({
     try {
       await useAgents.getState().setModel(agentId, next.provider, next.id)
     } catch (e) {
-      toast({ level: 'error', title: 'Could not switch model', description: (e as Error).message })
+      toastFailure('Could not switch model', e)
     }
   }
 

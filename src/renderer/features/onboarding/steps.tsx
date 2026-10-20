@@ -20,6 +20,7 @@ import { useApp } from '../../store/app'
 import { Button, ListRow, Select, Spinner } from '../../ui'
 import { LoginDialog, useLoginFlow } from '../settings/auth-flow'
 import { providerName, signInPlan } from '../settings/provider-name'
+import { providerUsable, SIGN_IN_EXPIRED, signInExpired } from '../settings/provider-status'
 import { ProviderAvatar } from '../settings/sections/providers'
 import { useSettings } from '../settings/store'
 import { Callout } from '../settings/layout'
@@ -151,10 +152,10 @@ export function ProviderStep({ onNext }: { onNext: () => void }) {
   }, [loadCatalog])
 
   const providers = catalog?.providers ?? []
-  const connected = providers.filter((p) => p.status.configured)
+  const connected = providers.filter(providerUsable)
   const featured = useMemo(() => {
     // Connected providers already show as chips above, so the sign-in cards only offer the rest.
-    const oauth = providers.filter((p) => p.oauth && !p.status.configured && !isLegacy(p))
+    const oauth = providers.filter((p) => p.oauth && !providerUsable(p) && !isLegacy(p))
     return [
       ...FEATURED.map((id) => oauth.find((p) => p.id === id)).filter((p): p is ProviderInfo => !!p),
       ...oauth.filter((p) => !FEATURED.includes(p.id))
@@ -211,6 +212,7 @@ export function ProviderStep({ onNext }: { onNext: () => void }) {
         <div className="grid grid-cols-2 gap-2">
           {featured.map((p) => {
             const plan = signInPlan(p)
+            const expired = signInExpired(p)
             return (
               <button
                 key={p.id}
@@ -226,8 +228,12 @@ export function ProviderStep({ onNext }: { onNext: () => void }) {
                   <span className="block truncate text-ui font-medium text-fg">
                     {providerName(p)}
                   </span>
-                  <span className="block truncate text-xs text-fg-3">
-                    {plan ?? (p.oauth?.subscription ? 'Use your subscription' : 'Sign in')}
+                  <span
+                    className={cn('block truncate text-xs', expired ? 'text-warning' : 'text-fg-3')}
+                  >
+                    {expired
+                      ? SIGN_IN_EXPIRED.label
+                      : (plan ?? (p.oauth?.subscription ? 'Use your subscription' : 'Sign in'))}
                   </span>
                 </span>
                 <ShieldCheck className="size-4 shrink-0 text-fg-3 transition-colors group-hover:text-fg-2" />

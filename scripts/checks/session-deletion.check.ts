@@ -75,13 +75,19 @@ await check(
               path: 'workspace',
               namespace: 'test'
             }))
+            build.onResolve({ filter: /\.\.\/chat\/failure-toast$/ }, () => ({
+              path: 'failure-toast',
+              namespace: 'test'
+            }))
             build.onLoad({ filter: /.*/, namespace: 'test' }, ({ path }) => ({
               contents:
                 path === 'ui'
                   ? 'export const toast = () => {};'
                   : path === 'composer'
                     ? 'export const setDraftText = () => {};'
-                    : `
+                    : path === 'failure-toast'
+                      ? 'export const toastFailure = () => {};'
+                      : `
                       export const newSession = (...args) => globalThis.newSession(...args);
                       export const spawnAgent = (...args) => globalThis.createSession(...args);
                       export const requestSessionActivation = () => globalThis.reserveActivation();

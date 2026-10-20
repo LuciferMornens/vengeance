@@ -1,4 +1,5 @@
 import type { ProviderInfo } from '@shared/api/settings'
+import { signInExpired } from './provider-status'
 
 const PROVIDER_WORDS: Record<string, string> = {
   ai: 'AI',
@@ -18,18 +19,18 @@ export const CHATGPT_PROVIDER = 'openai'
 /** The Engine's legacy ChatGPT sign-in through Codex's client ("OpenAI Codex (legacy)"). */
 export const CODEX_PROVIDER = 'openai-codex'
 
-type NamedProvider = Pick<ProviderInfo, 'id' | 'name'> & {
+type NamedProvider = Pick<ProviderInfo, 'id' | 'name' | 'stored'> & {
   status?: Pick<ProviderInfo['status'], 'usingOAuth'>
 }
 
 /**
  * UI name of a provider: the catalog name, or a readable form of a bare id ("lm-studio" → "LM Studio"). The two
- * ChatGPT sign-ins read as ChatGPT: `openai` signed in with ChatGPT is "ChatGPT" (with an API key it stays "OpenAI"),
- * the legacy Codex sign-in is "ChatGPT · Codex".
+ * ChatGPT sign-ins read as ChatGPT: `openai` signed in with ChatGPT is "ChatGPT" (also once that sign-in expired; with
+ * an API key it stays "OpenAI"), the legacy Codex sign-in is "ChatGPT · Codex".
  */
 export function providerName(p: NamedProvider): string {
   if (p.id === CODEX_PROVIDER) return 'ChatGPT · Codex'
-  if (p.id === CHATGPT_PROVIDER && p.status?.usingOAuth) return 'ChatGPT'
+  if (p.id === CHATGPT_PROVIDER && (p.status?.usingOAuth || signInExpired(p))) return 'ChatGPT'
   if (p.name && p.name !== p.id) return p.name
   return p.id
     .split(/[-_\s]+/)

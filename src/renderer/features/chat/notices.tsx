@@ -8,6 +8,7 @@ import {
   Layers,
   Puzzle,
   RefreshCw,
+  ShieldCheck,
   Square
 } from 'lucide-react'
 import { friendlyExtensionName } from '@shared/display-names'
@@ -29,9 +30,12 @@ import { Badge, Button, Shimmer, Spinner } from '../../ui'
 import { Collapse } from '../../ui/Collapse'
 import { CopyButton } from '../../ui/CopyButton'
 import { Markdown } from '../../ui/Markdown'
+import { SIGN_IN_EXPIRED } from '../settings/provider-status'
 import { Console, ExitBadge, PromptIcon } from '../tools'
+import { useCatalogProviders } from './catalog-providers'
 import { EarlierHistoryContext } from './earlier-history'
-import { parseProviderError } from './provider-error'
+import { openSignIn } from './failure-toast'
+import { expiredSignInName, parseProviderError, type ParsedProviderError } from './provider-error'
 
 /** Hairline — label — hairline separator for session events. */
 function Divider({
@@ -283,6 +287,40 @@ function gaveUpTitle(title: string): string {
   return `Gave up retrying — ${title.charAt(0).toLowerCase()}${title.slice(1)}`
 }
 
+/** A failure of an Engine sign-in the provider refused to renew: its provider by name, and Sign in again. */
+function ExpiredSignInCard({
+  parsed,
+  provider,
+  title,
+  model
+}: {
+  parsed: ParsedProviderError
+  provider: string
+  title: string
+  model?: string
+}) {
+  const providers = useCatalogProviders('pi')
+  return (
+    <ErrorCard
+      title={title}
+      detail={parsed.detail}
+      meta={[expiredSignInName(provider, providers), model].filter(Boolean).join(' · ')}
+      raw={parsed.raw}
+      action={
+        <Button
+          size="sm"
+          variant="secondary"
+          leading={<ShieldCheck />}
+          className="shrink-0"
+          onClick={() => openSignIn(provider)}
+        >
+          {SIGN_IN_EXPIRED.action}
+        </Button>
+      }
+    />
+  )
+}
+
 /**
  * A failed response. While an automatic retry of it is pending, the retry banner speaks for it instead; once the
  * retries ran out, the card says so (one card for the turn).
@@ -300,15 +338,18 @@ export const AssistantErrorCard = memo(function AssistantErrorCard({
   const gaveUp = useAgents((s) => retriesGaveUpOn(s.agents[agentId], message))
   if (retrying) return null
   const parsed = parseProviderError(message.errorMessage)
+  const title = gaveUp ? gaveUpTitle(parsed.title) : parsed.title
+  if (parsed.expiredSignIn)
+    return (
+      <ExpiredSignInCard
+        parsed={parsed}
+        provider={parsed.expiredSignIn}
+        title={title}
+        model={message.model}
+      />
+    )
   const meta = [parsed.status, parsed.code, message.model].filter(Boolean).join(' · ')
-  return (
-    <ErrorCard
-      title={gaveUp ? gaveUpTitle(parsed.title) : parsed.title}
-      detail={parsed.detail}
-      meta={meta}
-      raw={parsed.raw}
-    />
-  )
+  return <ErrorCard title={title} detail={parsed.detail} meta={meta} raw={parsed.raw} />
 })
 
 /**
@@ -446,7 +487,10 @@ export function RetryNotice({ agentId }: { agentId: string }) {
 /** The retries' final error when no failed response at the end of the transcript carries it (AssistantErrorCard). */
 export function RetryFailedCard({ message }: { message: string }) {
   const parsed = parseProviderError(message)
-  return <ErrorCard title={gaveUpTitle(parsed.title)} detail={parsed.detail} raw={parsed.raw} />
+  const title = gaveUpTitle(parsed.title)
+  if (parsed.expiredSignIn)
+    return <ExpiredSignInCard parsed={parsed} provider={parsed.expiredSignIn} title={title} />
+  return <ErrorCard title={title} detail={parsed.detail} raw={parsed.raw} />
 }
 
 /** A user `!command` run: "You ran" console card (live while running). */
