@@ -456,19 +456,30 @@ async function run() {
         )
       )
     )
+    // `prompt` answers before the window applies the turn's events, so a session can still read idle
+    // from before its turn: wait until it is idle with its reply, then confirm it with the Engine.
     await Promise.all(
-      piAgents.map((agent) =>
+      piAgents.map((agent, index) =>
         waitFor(
-          async () => (await application.agentState(agent.agentId)).phase === 'idle',
-          'concurrent Engine replies',
+          async () => {
+            const state = await application.agentState(agent.agentId)
+            if (
+              state.phase !== 'idle' ||
+              !replies.some((reply) => JSON.stringify(state.entries).includes(reply))
+            ) {
+              const last = JSON.stringify(state.entries.at(-1)?.message ?? null).slice(0, 300)
+              throw new Error(
+                `phase ${state.phase}; last entry ${last}; ${fixture.piServer.pending()} fake turns unserved`
+              )
+            }
+            const messages = await application.rpc({ type: 'get_messages' }, agent.agentId)
+            return replies.some((reply) => JSON.stringify(messages).includes(reply))
+          },
+          `Dock Engine ${index + 1} reply`,
           WAIT_TIMEOUT_MS
         )
       )
     )
-    for (const agent of piAgents) {
-      const messages = await application.rpc({ type: 'get_messages' }, agent.agentId)
-      assert.ok(replies.some((reply) => JSON.stringify(messages).includes(reply)))
-    }
     evidence.settings = await checkSettingsHosts(application, observer, workspace)
     const prime = await application.openWorkspace({
       cwd: workspace,

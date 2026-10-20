@@ -75,10 +75,20 @@ No build step continues on error, so each passing build also passed its update-f
 visibility check (macOS), the official 0.3.2 to candidate Engine 2 upgrades (macOS and Linux), the
 first-navigation benchmark and the provenance receipt. These dry-run packages are numbered 0.3.3.
 
+## Release commit `41bc0ce`
+
+The version-bump commit passed [CI 39381510064](https://github.com/LuciferMornens/vengeance/actions/runs/39381510064)
+and merged as `bf84fd1`. Its
+[Release dry run 39381510068](https://github.com/LuciferMornens/vengeance/actions/runs/39381510068)
+passed Version and four builds, but the `mac-x64` Dock visibility check failed: it waited only for
+three concurrent Engine sessions to read idle, and `prompt` answers before the window applies the
+turn's events, so on the slow runner one session was checked before its reply arrived. The check
+now waits for each session to be idle with its reply and names the session, its last entry and the
+unserved fake turns if one never arrives. The install jobs did not run in that dry run.
+
 ## Not verified
 
-- The version-bump commit's own CI and Release dry run, the `v0.3.4` tag run, the draft and the
-  published release.
+- The `v0.3.4` tag run, the draft and the published release.
 - Visual review of the CI screenshots and the qualification, benchmark and provenance artifacts of
   the runs above; their counts are not recorded here. No benchmark comparison with 0.3.3 is made.
 - An upgrade from the official 0.3.3 package (Engine 2 `.12`): the release upgrade gate stages 0.3.2
