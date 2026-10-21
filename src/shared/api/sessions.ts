@@ -70,7 +70,7 @@ export interface WorkspaceScan {
 }
 
 export interface WorkspaceDiscoveryResult extends WorkspaceScan {
-  /** Known workspace folders that were deleted: missing from a parent folder that is still there. */
+  /** Known workspace folders that are not there while their drive or share is (deleted, or an unmounted mount point). */
   gone: string[]
 }
 

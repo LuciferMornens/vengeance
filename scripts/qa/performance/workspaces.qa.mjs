@@ -143,6 +143,8 @@ try {
         await savedSession(agentDir, otherCwd, 'Other saved workspace')
         // Test runs leave history behind for temporary folders they already deleted.
         await savedSession(agentDir, deletedCwd, 'History of a deleted folder')
+        // Including folders inside a temporary tree that is gone too.
+        await savedSession(agentDir, join(deletedCwd, 'nested'), 'History of a deleted tree')
 
         await step(
           'persist only the active folder and custom metadata before restart',
@@ -498,7 +500,7 @@ try {
           await current.page.keyboard.press('Escape')
         })
 
-        await step('an opened folder leaves the switcher once it is deleted', async () => {
+        await step('an opened folder is left out of the switcher while it is deleted', async () => {
           const hasRemoved = (prefs) =>
             prefs.workspaces.some(
               (workspace) => normalizedPath(workspace.path) === normalizedPath(removedCwd)
@@ -516,18 +518,25 @@ try {
             ]
           })
           await waitForPersistence(current, hasRemoved)
+          await openSwitcher(current)
+          await workspaceChoice(current, removedCwd).waitFor()
           // The folder goes; its saved history stays, as when a project folder is deleted.
           await rm(removedCwd, { recursive: true })
           await notifySessionChange(current, agentDir.path('sessions'))
-          const prefs = await waitForPreferences(
-            current,
-            (value) => !hasRemoved(value),
-            'deleted folder removal'
-          )
-          const paths = new Set(prefs.workspaces.map((workspace) => normalizedPath(workspace.path)))
+          await workspaceChoice(current, removedCwd).waitFor({ state: 'detached' })
           for (const folder of folders) {
-            assert.ok(paths.has(normalizedPath(folder)), `${folder} stays after the scan`)
+            assert.equal(await workspaceChoice(current, folder).count(), 1, `${folder} stays`)
           }
+          await current.screenshot('workspaces-deleted-folder-hidden')
+          // The entry keeps its engine default and recency, and returns with the folder.
+          assert.ok(hasRemoved((await current.appState()).prefs))
+          await agentDir.writeText(
+            join('..', basename(removedCwd), 'README.md'),
+            '# Removed workspace QA\n'
+          )
+          await notifySessionChange(current, agentDir.path('sessions'))
+          await workspaceChoice(current, removedCwd).waitFor()
+          await current.page.keyboard.press('Escape')
         })
 
         await step(

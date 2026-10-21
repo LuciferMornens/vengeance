@@ -20,6 +20,7 @@ import type { AppAction } from '../../lib/actions'
 import { basename } from '../../lib/format'
 import { useAgents } from '../../store/agents'
 import { selectWorkspaceEngine, useApp } from '../../store/app'
+import { useShownWorkspaces } from '../../store/shown-workspaces'
 import { toast } from '../../ui'
 import { setDraftText } from '../composer'
 import { isBuiltinAvailable } from '../composer/builtins'
@@ -129,7 +130,7 @@ export function useRootEntries(actions: AppAction[]): PaletteEntry[] {
       })
       .join('\u0000')
   )
-  const workspaces = useApp((s) => s.prefs.workspaces)
+  const workspaces = useShownWorkspaces()
   const activeWorkspace = useApp((s) => s.prefs.activeWorkspace)
 
   return useMemo(() => {

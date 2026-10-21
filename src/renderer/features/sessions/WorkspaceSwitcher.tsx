@@ -9,6 +9,7 @@ import { isImeComposing } from '../../lib/keybindings'
 import { normalizePath, samePath } from '../../lib/paths'
 import { useAgents } from '../../store/agents'
 import { selectActiveWorkspace, useApp } from '../../store/app'
+import { useShownWorkspaces } from '../../store/shown-workspaces'
 import { Avatar, Badge, Input, ListRow, listRowClass, Popover, Skeleton } from '../../ui'
 import { chooseWorkspace } from '../shell/workspace'
 import { EnginePicker } from '../engines/EnginePicker'
@@ -130,7 +131,7 @@ export function WorkspaceSwitcher() {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const list = useRef<HTMLDivElement>(null)
-  const workspaces = useApp((s) => s.prefs.workspaces)
+  const workspaces = useShownWorkspaces()
   const discovery = useApp((s) => s.workspaceDiscovery)
   const discoveryError = useApp((s) => s.workspaceDiscoveryError)
   const active = useApp(selectActiveWorkspace)

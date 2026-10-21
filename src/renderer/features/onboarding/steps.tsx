@@ -17,6 +17,7 @@ import { basename, formatRelativeTime } from '../../lib/format'
 import { invoke } from '../../lib/ipc'
 import { spring } from '../../lib/motion'
 import { useApp } from '../../store/app'
+import { useShownWorkspaces } from '../../store/shown-workspaces'
 import { Button, ListRow, Select, Spinner } from '../../ui'
 import { LoginDialog, useLoginFlow } from '../settings/auth-flow'
 import { providerName, signInPlan } from '../settings/provider-name'
@@ -287,7 +288,7 @@ export function ProviderStep({ onNext }: { onNext: () => void }) {
 // ─── Step 3: project ────────────────────────────────────────────────────────
 
 export function ProjectStep({ onOpen }: { onOpen: (path: string) => void }) {
-  const recent = useApp((s) => s.prefs.workspaces).slice(0, 4)
+  const recent = useShownWorkspaces().slice(0, 4)
   const [over, setOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
 

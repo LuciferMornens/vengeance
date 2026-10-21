@@ -2,7 +2,10 @@ import { strict as assert } from 'node:assert'
 import { DEFAULT_APP_STATE, type AppPersistedState, type Workspace } from '../../src/shared/api/app'
 import type { SessionListItem, WorkspaceDiscoveryResult } from '../../src/shared/api/sessions'
 import { partitionSessions } from '../../src/renderer/features/sessions/model'
-import { reconcileWorkspaces as reconcile } from '../../src/renderer/store/workspace-reconcile'
+import {
+  reconcileWorkspaces as reconcile,
+  shownWorkspaces
+} from '../../src/renderer/store/workspace-reconcile'
 import { check } from './harness'
 
 /** Windows-style comparable paths, like the renderer's `normalizePath` there. */
@@ -133,23 +136,34 @@ await check(
 )
 
 await check(
-  'reconcileWorkspaces: deleted folders leave unless active, pinned or holding a restored tab',
+  'reconcileWorkspaces: a gone folder leaves unless opened, active, pinned or holding a restored tab',
   () => {
-    const deleted = workspace('deleted', { lastOpenedAt: 1 })
-    const active = workspace('active', { lastOpenedAt: 1 })
+    const deleted = workspace('deleted')
+    const opened = workspace('opened', { lastOpenedAt: 1 })
+    const active = workspace('active')
     const pinned = workspace('pinned', { pinned: true })
     const restored = workspace('restored')
-    const state = prefs([deleted, active, pinned, restored], {
+    const state = prefs([deleted, opened, active, pinned, restored], {
       activeWorkspace: active.path,
       openSessions: [
         { path: `${restored.path}\\s.jsonl`, cwd: restored.path.toUpperCase(), engine: 'pi' }
       ]
     })
-    const gone = [deleted.path, active.path, pinned.path, restored.path]
+    const gone = [deleted.path, opened.path, active.path, pinned.path, restored.path]
     const kept = reconcileWorkspaces(state, scan({ gone, complete: false }))
-    assert.deepEqual(names(kept), ['active', 'pinned', 'restored'])
+    assert.deepEqual(names(kept), ['active', 'opened', 'pinned', 'restored'])
   }
 )
+
+await check('shownWorkspaces: a gone folder is left out until it is back, unless active', () => {
+  const back = workspace('back', { lastOpenedAt: 1 })
+  const gone = workspace('gone', { lastOpenedAt: 1 })
+  const active = workspace('active', { lastOpenedAt: 1 })
+  const all = [back, gone, active]
+  const missing = new Set([gone.path, active.path].map(key))
+  assert.deepEqual(names(shownWorkspaces(all, missing, active.path, key)), ['active', 'back'])
+  assert.equal(shownWorkspaces(all, new Set(), active.path, key), all)
+})
 
 await check(
   'reconcileWorkspaces: new folders join unless removed, and an unchanged list stays the same array',

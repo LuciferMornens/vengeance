@@ -238,9 +238,10 @@ beside the Windows one, never in its place.
   file, delete). The list holds main conversations: subagent sessions sit collapsed beneath their parent,
   and one whose parent is missing or outside the view appears only while it is open or running, or as
   a search result. A pinned subagent session stays in the list, and a fork of one is a conversation of its
-  own. The workspace switcher drops a folder once it is deleted (missing from a parent folder that
-  is still there), except the active one and folders of restored tabs. Folders found through saved history
-  join while the folder exists; one never opened also leaves once a complete scan no longer finds its history.
+  own. The workspace switcher leaves out a folder that is missing while its drive or share is there (deleted,
+  or an unmounted mount point) until it is back, except the active one. Folders found through saved history
+  join while the folder exists; one never opened leaves once its folder is gone or a complete scan no longer
+  finds its history.
 - **Center:** transcript (max readable width ~760px, centered) with the **floating composer** docked at the
   bottom (glass surface). Session header row: name (inline rename), context-usage ring
   (tokens used / window, hover for breakdown), cost and session actions. Model, reasoning and speed

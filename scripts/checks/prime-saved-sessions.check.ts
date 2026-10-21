@@ -236,8 +236,8 @@ await check(
       assert.equal((await api.primeSessionIdentity(child))?.engine, 'prime')
       const warnedScan = await api.discoverPrimeWorkspaces()
       assert.ok(warnedScan.workspaces.some((item) => item.path === childWorkspace))
-      // A lineage warning may hide child-only folders, so the scan cannot drop workspaces.
-      assert.equal(warnedScan.complete, false)
+      // A lineage warning leaves verified children counted and the scan complete.
+      assert.equal(warnedScan.complete, true)
       includeChildren = false
       const partial = await api.listPrimeSessions({ cwd: null })
       assert.equal(partial.warning, warning)

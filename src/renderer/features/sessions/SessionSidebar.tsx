@@ -556,10 +556,12 @@ export function SessionSidebar() {
   }, [rest])
 
   const loading = (scope === 'all' || !!listCwd) && (!list || !list.loaded)
+  // Open sessions are listed under Open, not Background sessions.
   const hasBackgroundMatch = background.some(
     (agent) =>
       !primeBackgroundFamilyNode(families, agent)?.child &&
       inView(agent.cwd) &&
+      !(agent.sessionPath && runningFiles.has(normalizePath(agent.sessionPath))) &&
       backgroundMatches(agent, families, query)
   )
   const primeOrphans = visiblePrimeOrphans(families, query, inView)

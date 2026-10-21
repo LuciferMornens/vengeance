@@ -218,10 +218,13 @@ export async function discoverPrimeWorkspaces(
   knownCwds: string[] = []
 ): Promise<WorkspaceScan> {
   const directories = await primeSessionRoots(knownCwds)
-  const key = JSON.stringify(directories.map(comparablePath).sort())
+  const key = JSON.stringify([
+    directories.map(comparablePath).sort(),
+    knownCwds.map(comparablePath).sort()
+  ])
   const pending = pendingDiscoveries.get(key)
   if (pending) return pending
-  const request = loadPrimeWorkspaces(directories)
+  const request = loadPrimeWorkspaces(directories, knownCwds)
   pendingDiscoveries.set(key, request)
   try {
     return await request
@@ -230,7 +233,11 @@ export async function discoverPrimeWorkspaces(
   }
 }
 
-async function loadPrimeWorkspaces(directories: string[]): Promise<WorkspaceScan> {
+async function loadPrimeWorkspaces(
+  directories: string[],
+  knownCwds: string[]
+): Promise<WorkspaceScan> {
+  const known = new Set(knownCwds.map(comparablePath))
   let unreadable = false
   const [rootFiles, lineage] = await Promise.all([
     mapSessionFiles(directories, (directory) =>
@@ -251,14 +258,16 @@ async function loadPrimeWorkspaces(directories: string[]): Promise<WorkspaceScan
     const result = await sessionIndex.header(path)
     if (!result?.header.cwd || !validPrimeId(result.header.id)) return
     if (excluded(path)) return
+    const key = comparablePath(result.header.cwd)
+    // Without the helper's lineage a child session is unverified: it keeps a known folder, but adds none.
     if (
       lineage.warning &&
       (result.header.rlmDepth ?? 0) > 0 &&
-      !verifiedChildren.has(comparablePath(path))
+      !verifiedChildren.has(comparablePath(path)) &&
+      !known.has(key)
     )
       return
     if (!(await supportedPath(path))) return
-    const key = comparablePath(result.header.cwd)
     const workspace = workspaces.get(key)
     if (!workspace || workspace.lastActivityAt < result.modifiedAt) {
       workspaces.set(key, {
@@ -272,8 +281,7 @@ async function loadPrimeWorkspaces(directories: string[]): Promise<WorkspaceScan
     workspaces: [...workspaces.values()].sort(
       (first, second) => second.lastActivityAt - first.lastActivityAt
     ),
-    // Without the helper's lineage, saved child sessions (and folders only they used) are left out.
-    complete: !unreadable && !lineage.warning
+    complete: !unreadable
   }
 }
 

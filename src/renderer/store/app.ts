@@ -27,6 +27,8 @@ export interface AppStore {
   ui: UiState
   workspaceDiscovery: 'idle' | 'loading' | 'ready' | 'error'
   workspaceDiscoveryError: string | null
+  /** Comparable paths of known workspaces whose folder the last scan found gone. */
+  missingWorkspaces: ReadonlySet<string>
 
   load(): Promise<void>
   discoverWorkspaces(): Promise<void>
@@ -82,6 +84,7 @@ export const useApp = create<AppStore>()((set, get) => ({
   ui: { settingsOpen: false, settingsSection: null, settingsEngine: null, paletteOpen: false },
   workspaceDiscovery: 'idle',
   workspaceDiscoveryError: null,
+  missingWorkspaces: new Set(),
 
   async load() {
     const prefs = await invoke('app:get-state')
@@ -103,6 +106,11 @@ export const useApp = create<AppStore>()((set, get) => ({
       const { prefs } = get()
       const workspaces = reconcileWorkspaces(prefs, discovery, normalizePath)
       if (workspaces !== prefs.workspaces) get().update({ workspaces })
+      const missing = discovery.gone.map(normalizePath)
+      const previous = get().missingWorkspaces
+      if (missing.length !== previous.size || missing.some((key) => !previous.has(key))) {
+        set({ missingWorkspaces: new Set(missing) })
+      }
       if (!quiet) set({ workspaceDiscovery: 'ready' })
     } catch (error) {
       // A failed quiet re-scan keeps the list it has; the next one tries again.

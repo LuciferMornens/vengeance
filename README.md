@@ -68,8 +68,9 @@ either one separately.
   transcript and in the inspector's Agents panel, where you can answer, steer or stop a worker that
   needs a decision.
 - **Workspaces.** Switch workspaces from the sidebar, choose which engine new sessions use, and pick
-  up from recent sessions or suggested prompts. A folder leaves the switcher once it is deleted, and
-  one found only through its saved history also leaves once its last session is gone.
+  up from recent sessions or suggested prompts. A folder that is deleted or on an unmounted drive
+  is left out of the switcher until it is back, unless it is the active one. A folder found only
+  through its saved history also leaves once its last session is gone.
 
 <p align="center">
   <a href="docs/screenshots/subagents.png"><img src="docs/screenshots/subagents.png" alt="A worker subagent asking for a decision, with Answer, Steer and Stop buttons in the Agents panel" width="880"></a>

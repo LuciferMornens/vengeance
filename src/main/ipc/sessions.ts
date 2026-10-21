@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, extname, isAbsolute, join, resolve } from 'node:path'
+import { dirname, extname, isAbsolute, join, parse, resolve } from 'node:path'
 import {
   app,
   BrowserWindow,
@@ -87,12 +87,12 @@ function knownWorkspacePaths(): string[] {
 }
 
 /**
- * A deleted folder: missing from a parent folder that is still there. A folder on a drive or share that is not
- * connected, or one that cannot be checked, is not gone.
+ * A folder that is not there while its drive or share is. One whose drive or share is not connected, or that
+ * cannot be checked, is not gone.
  */
 async function folderGone(path: string): Promise<boolean> {
   try {
-    return !(await directoryExists(path)) && (await directoryExists(dirname(path)))
+    return !(await directoryExists(path)) && (await directoryExists(parse(path).root))
   } catch {
     return false
   }
@@ -100,7 +100,7 @@ async function folderGone(path: string): Promise<boolean> {
 
 /**
  * Sessions outlive their folders (test suites and scratch work leave history for deleted temporary folders), so
- * deleted folders do not become workspaces, and known workspaces whose folder was deleted are reported.
+ * gone folders do not become workspaces, and known workspaces whose folder is gone are reported.
  */
 async function withoutGoneFolders(scan: WorkspaceScan): Promise<WorkspaceDiscoveryResult> {
   const known = appState.getPrefs().workspaces.map(({ path }) => path)
