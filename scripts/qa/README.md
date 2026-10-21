@@ -502,7 +502,7 @@ This needs a macOS desktop. CI uses
 ### Official release upgrades
 
 Since 0.3.3, both macOS and both Linux architectures qualify official 0.3.2 Engine 2 `.10` to the final
-packaged candidate (`.12` in 0.3.3, `.13` in 0.3.4 and 0.3.5). With the same absolute `QA_PACKAGED_EXE` and
+packaged candidate (`.12` in 0.3.3, `.13` in 0.3.4 to 0.3.6). With the same absolute `QA_PACKAGED_EXE` and
 outside-home/repository `QA_TMP_ROOT` exported, run after core qualification and the macOS
 visibility check:
 
@@ -536,7 +536,7 @@ The upgrade group runs candidate-transition and resident-upgrade serially agains
 candidate and uses the same receipts, deadlines and report layout as core. CI uses
 `$RUNNER_TEMP/release-baseline` and `$RUNNER_TEMP/engine-upgrade`. Windows's native `.10` to `.11`
 transition has retained PR evidence that predates `.12`; each later candidate needs fresh
-qualification. Pi keeps its `v1.3.0` base (`.2` in 0.3.2 and 0.3.3, `.3` in 0.3.4, `.4` in 0.3.5), so the
+qualification. Pi keeps its `v1.3.0` base (`.2` in 0.3.2 and 0.3.3, `.3` in 0.3.4, `.4` in 0.3.5 and 0.3.6), so the
 historical pi 1.2 to 1.3 transition fixture is not a release gate.
 
 ### Built-app navigation benchmark
