@@ -1,9 +1,9 @@
 # Vengeance 0.3.6 qualification checkpoint
 
-21 October 2026. This checkpoint records local verification on Windows x64 and the CI and release dry
-run of the pull request since 0.3.5. The release commit's CI, the tag run and the published release's
-receipts identify the qualified shipping bytes and supersede this checkpoint where source or artifacts
-differ.
+21 October 2026. This checkpoint records local verification on Windows x64, the CI and release dry
+run of the pull request since 0.3.5, the release commit's CI and the tag run. The tag run and the
+published release's receipts identify the qualified shipping bytes and supersede this checkpoint where
+source or artifacts differ.
 
 ## Source and scope
 
@@ -12,6 +12,7 @@ differ.
 | Official 0.3.5 release   | `650376967f6bd425fe4592f365cd036bc565e3c7` |
 | PR #27 head tested by CI | `2ee9c4325fab719c698947033ec7c985566a5c49` |
 | PR #27 merged on `main`  | `cbf4c4faaf43d70354a7036a5b88eab53f438d6b` |
+| `v0.3.6` (PR #28 merged) | `f9e1cead94c7cd8e733c17d405c560b67d1a433e` |
 
 Since 0.3.5: the workspace switcher leaves out folders that no longer exist, and the sidebar lists
 main conversations with subagent sessions under them (#27).
@@ -65,6 +66,25 @@ No build step continues on error, so each passing build also passed its update-f
 2.35 gate (Linux), signature, zip and dmg checks (macOS), the nine packaged core suites, the Dock
 visibility check (macOS), the official 0.3.2 to candidate Engine 2 upgrades (macOS and Linux), the
 first-navigation benchmark and the provenance receipt. These dry-run packages are numbered 0.3.5.
+
+## Release commit `6f2f4d7`
+
+The version-bump commit ([PR #28](https://github.com/LuciferMornens/vengeance/pull/28)) passed
+[CI 39647845958](https://github.com/LuciferMornens/vengeance/actions/runs/39647845958) and its
+[Release dry run 39647845947](https://github.com/LuciferMornens/vengeance/actions/runs/39647845947)
+(Version, the five builds and the deb, rpm and pacman install jobs), both on the first attempt. It
+merged as `f9e1cea`, and [CI 39649394770](https://github.com/LuciferMornens/vengeance/actions/runs/39649394770)
+passes on `main`.
+
+## Tag run
+
+`v0.3.6` points at `f9e1cea`. The
+[tag run 39652126107](https://github.com/LuciferMornens/vengeance/actions/runs/39652126107) passed
+Version, the five builds, the deb, rpm and pacman install jobs and the draft job on the first
+attempt. Every build built both engines from source; none restored cached payloads. The draft
+carried the 24 expected files (packages, blockmaps, the four update files and `SHA256SUMS`, which
+lists the other 23), its body was `docs/RELEASE-0.3.6.md`, and every update file named version 0.3.6.
+It was published as the latest release on 21 October 2026.
 
 ## Not verified
 
