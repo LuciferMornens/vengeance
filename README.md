@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/LuciferMornens/vengeance/releases/latest"><img alt="Version 0.3.5" src="https://img.shields.io/badge/version-0.3.5-FF4D3D?style=flat-square"></a>
+  <a href="https://github.com/LuciferMornens/vengeance/releases/latest"><img alt="Version 0.3.6" src="https://img.shields.io/badge/version-0.3.6-FF4D3D?style=flat-square"></a>
   <a href="https://github.com/LuciferMornens/vengeance/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/LuciferMornens/vengeance/actions/workflows/ci.yml/badge.svg"></a>
   <a href="#download"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-0078D4?style=flat-square"></a>
   <a href="#download"><img alt="macOS arm64 and x64" src="https://img.shields.io/badge/macOS-arm64%20%7C%20x64-000000?style=flat-square"></a>
@@ -555,9 +555,9 @@ The app version is defined in [package.json](package.json).
 
 ### Release notes
 
-**Latest: [Vengeance 0.3.5](docs/RELEASE-0.3.5.md)** covers expired Engine sign-ins, which stop
-counting as connected and offer _Sign in again_, and the Engine build behind it, with qualification
-status for this version. Published packages are on the
+**Latest: [Vengeance 0.3.6](docs/RELEASE-0.3.6.md)** covers a workspace switcher without deleted
+folders and a sidebar that lists main conversations, with subagent sessions under them, with
+qualification status for this version. Published packages are on the
 [GitHub release](https://github.com/LuciferMornens/vengeance/releases/latest).
 
 <details>
@@ -568,6 +568,7 @@ They are evidence, not current installation status or promises that local genera
 exist. Use the lockfile and current guides for maintenance instructions. Reports before 0.3.0 cover
 local Windows x64 builds only.
 
+- [Release 0.3.5](docs/RELEASE-0.3.5.md): expired Engine sign-ins offer _Sign in again_; faster CI.
 - [Release 0.3.4](docs/RELEASE-0.3.4.md): per-conversation instructions and live MCP status.
 - [Release 0.3.3](docs/RELEASE-0.3.3.md): system prompt editing, safer restarts and the macOS
   background-process fix.

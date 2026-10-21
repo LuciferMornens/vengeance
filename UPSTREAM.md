@@ -326,7 +326,7 @@ background activity stays out of the Dock. The main Vengeance app must remain a 
 
 Since 0.3.3, the macOS arm64/x64 and Linux arm64/x64 release runners then qualify the official
 same-platform 0.3.2 Engine 2 package (`0.10.0+vengeance.10`) against the final packaged candidate
-(`.12` in 0.3.3, `.13` in 0.3.4 and 0.3.5).
+(`.12` in 0.3.3, `.13` in 0.3.4 to 0.3.6).
 `scripts/qa/engines/release-baseline.mjs` pins both the public release's `SHA256SUMS` and each archive's
 SHA-256, verifies the complete extracted native inventories and macOS app signature, and emits
 `release-baseline.json` plus `release-baseline-env.json`. It never launches the production app.
@@ -340,7 +340,7 @@ This upgrade group follows the nine core suites and macOS visibility gate, befor
 benchmarking. Windows's `.10` to `.11` native transition is covered by the retained PR qualification
 report; that historical evidence does not qualify `.12` or later builds. The Intel wheel patch
 changes no Windows dependency resolution. pi is `1.3.0+vengeance.2` in 0.3.2 and 0.3.3,
-`1.3.0+vengeance.3` in 0.3.4 and `1.3.0+vengeance.4` in 0.3.5, all on the `v1.3.0` base. Its historical 1.2 to 1.3 transition fixture
+`1.3.0+vengeance.3` in 0.3.4 and `1.3.0+vengeance.4` in 0.3.5 and 0.3.6, all on the `v1.3.0` base. Its historical 1.2 to 1.3 transition fixture
 is not used as a release upgrade gate.
 
 Each of the five release runners then runs
