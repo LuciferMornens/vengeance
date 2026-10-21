@@ -1,5 +1,6 @@
 // Workspace discovery and keyboard switching through the built app, with isolated Engine histories.
 import assert from 'node:assert/strict'
+import { rm } from 'node:fs/promises'
 import { basename, join, normalize } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { answerOpenDialog } from '../lib/main-stubs.mjs'
@@ -126,6 +127,8 @@ try {
         const activeCwd = agentDir.path(join('..', 'workspace-discovery-active'))
         const historyCwd = agentDir.path(join('..', 'workspace-discovery-history'))
         const otherCwd = agentDir.path(join('..', 'workspace-discovery-other'))
+        const deletedCwd = agentDir.path(join('..', 'workspace-discovery-deleted'))
+        const staleCwd = agentDir.path(join('..', 'workspace-discovery-stale'))
         const folders = [activeCwd, historyCwd, otherCwd]
         for (const folder of folders) {
           await agentDir.writeText(
@@ -137,6 +140,8 @@ try {
         await savedSession(agentDir, historyCwd, 'History without a recent workspace')
         await savedSession(agentDir, historyCwd, 'Case variant history', historyCwd.toUpperCase())
         await savedSession(agentDir, otherCwd, 'Other saved workspace')
+        // Test runs leave history behind for temporary folders they already deleted.
+        await savedSession(agentDir, deletedCwd, 'History of a deleted folder')
 
         await step(
           'persist only the active folder and custom metadata before restart',
@@ -171,7 +176,11 @@ try {
           )
           const paths = prefs.workspaces.map((workspace) => normalizedPath(workspace.path))
           assert.equal(new Set(paths).size, folders.length, 'case variants are merged')
-          assert.deepEqual(new Set(paths), new Set(folders.map(normalizedPath)))
+          assert.deepEqual(
+            new Set(paths),
+            new Set(folders.map(normalizedPath)),
+            'a deleted folder with saved history is not a workspace'
+          )
           assert.deepEqual(
             prefs.workspaces.find((workspace) => workspace.path === activeCwd),
             {
@@ -313,7 +322,10 @@ try {
           await current.screenshot('workspaces-discovery-retry')
           await replaceDiscovery(current, {
             ok: true,
-            value: folders.map((path) => ({ path, lastActivityAt: Date.now() }))
+            value: {
+              workspaces: folders.map((path) => ({ path, lastActivityAt: Date.now() })),
+              complete: true
+            }
           })
           await current.page
             .getByRole('dialog')
@@ -359,8 +371,14 @@ try {
                 })
               },
               {
-                first: known,
-                next: [...known, { path: nextCwd, lastActivityAt: Date.now(), engine: 'pi' }]
+                first: { workspaces: known, complete: true },
+                next: {
+                  workspaces: [
+                    ...known,
+                    { path: nextCwd, lastActivityAt: Date.now(), engine: 'pi' }
+                  ],
+                  complete: true
+                }
               }
             )
             await notifySessionChange(current, agentDir.path('sessions'))
@@ -441,6 +459,41 @@ try {
             current.assertNoErrors()
           }
         )
+
+        await step('a never-opened folder leaves the switcher with its last history', async () => {
+          const hasStale = (prefs) =>
+            prefs.workspaces.some(
+              (workspace) => normalizedPath(workspace.path) === normalizedPath(staleCwd)
+            )
+          await agentDir.writeText(
+            join('..', basename(staleCwd), 'README.md'),
+            '# Stale workspace QA\n'
+          )
+          const stalePath = await savedSession(agentDir, staleCwd, 'Only history of this folder')
+          await notifySessionChange(current, agentDir.path('sessions'))
+          const discovered = await waitForPreferences(current, hasStale, 'stale folder discovery')
+          assert.equal(
+            discovered.workspaces.find(
+              (workspace) => normalizedPath(workspace.path) === normalizedPath(staleCwd)
+            ).lastOpenedAt,
+            0
+          )
+          await rm(stalePath)
+          await notifySessionChange(current, agentDir.path('sessions'))
+          const prefs = await waitForPreferences(
+            current,
+            (value) => !hasStale(value),
+            'stale folder removal'
+          )
+          const paths = new Set(prefs.workspaces.map((workspace) => normalizedPath(workspace.path)))
+          for (const folder of folders) {
+            assert.ok(paths.has(normalizedPath(folder)), `${folder} stays after the scan`)
+          }
+          await openSwitcher(current)
+          assert.equal(await workspaceChoice(current, staleCwd).count(), 0)
+          await current.screenshot('workspaces-stale-history-removed')
+          await current.page.keyboard.press('Escape')
+        })
 
         await step(
           'both workspace scopes merge saved histories once per normalized path',

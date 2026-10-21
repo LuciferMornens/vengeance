@@ -380,7 +380,7 @@ await runSuite('performance-session-listing', async ({ agentDir, app, step }) =>
 
       const beforeHeap = await app.app.evaluate(() => process.memoryUsage().heapUsed)
       const started = performance.now()
-      const discovered = await app.invoke('sessions:workspaces')
+      const { workspaces: discovered } = await app.invoke('sessions:workspaces')
       const elapsedMs = performance.now() - started
       const afterHeap = await app.app.evaluate(() => process.memoryUsage().heapUsed)
       const workspace = discovered.find((item) => item.path === discoveryCwd)

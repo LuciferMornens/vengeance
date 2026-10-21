@@ -46,6 +46,20 @@ export function generatedChildName(name: string | undefined): string | undefined
   return childSessionAgent(name) ? name?.trim() : undefined
 }
 
+/**
+ * A session a subagent ran in: an Engine 2 child its parent spawned, or an Engine session stored in a parent's run
+ * folder or named by the subagents extension.
+ */
+export function isSubagentSession(item: SessionListItem): boolean {
+  if (item.engine === 'prime') return !!item.lineage?.childId
+  return !!item.subagentRun || !!childSessionAgent(item.name)
+}
+
+/** The session that started an Engine subagent session, when it is known. */
+export function subagentParentPath(item: SessionListItem): string | undefined {
+  return item.subagentRun?.parentPath ?? item.parentSessionPath
+}
+
 /** Sidebar title of a persisted session: name, else first user message. */
 export function itemTitle(item: SessionListItem): string {
   return (

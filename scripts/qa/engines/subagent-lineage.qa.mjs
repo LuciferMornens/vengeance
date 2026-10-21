@@ -277,9 +277,14 @@ try {
     },
     { label: 'surviving orphan child history', timeoutMs: KERNEL_TIMEOUT_MS }
   )
-  await application.page.getByRole('textbox', { name: 'Search sessions' }).fill(CHILD_NAME)
-  await application.page.getByRole('region', { name: 'Subagent sessions' }).waitFor()
+  const orphanRegion = application.page.getByRole('region', { name: 'Subagent sessions' })
+  const search = application.page.getByRole('textbox', { name: 'Search sessions' })
+  await search.fill(CHILD_NAME)
+  await orphanRegion.waitFor()
   await application.screenshot('recoverable-orphan-child')
+  // The sidebar lists main conversations; a saved orphan child only surfaces for a search.
+  await search.fill('')
+  await orphanRegion.waitFor({ state: 'detached' })
   assert.equal(fixture.primeServer.requests.length, providerRequests)
   assert.equal((await application.invoke('engine:background-list', 'prime')).length, 0)
   console.log(

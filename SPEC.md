@@ -235,7 +235,10 @@ beside the Windows one, never in its place.
 - **Left sidebar** (resizable, collapsible `Ctrl+B`): "New session" (Ctrl+N), workspace switcher, sessions
   grouped by workspace and date (Today / Yesterday / This week / Older) with live state dots (streaming pulse,
   waiting-for-input, error), search filter, pinned sessions, right-click menu (rename, fork, export, reveal
-  file, delete).
+  file, delete). The list holds main conversations: subagent sessions sit collapsed beneath their parent,
+  and one whose parent is missing or outside the view appears only while it is open or running, or as
+  a search result. The workspace switcher keeps folders the user opened or pinned; folders found through
+  saved history are added while the folder exists and leave once a complete scan no longer finds them.
 - **Center:** transcript (max readable width ~760px, centered) with the **floating composer** docked at the
   bottom (glass surface). Session header row: name (inline rename), context-usage ring
   (tokens used / window, hover for breakdown), cost and session actions. Model, reasoning and speed

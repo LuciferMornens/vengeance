@@ -138,7 +138,7 @@ await check(
     assert.equal(primeFamilyNode(families, COPIED_PATH)?.children.length, 0)
     const missingParent = project([copy, child])
     assert.equal(primeFamilyNode(missingParent, CHILD_PATH)?.parent, undefined)
-    assert.equal(primeFamilyOrphans(missingParent, () => true).length, 1)
+    assert.equal(primeFamilyOrphans(missingParent, () => true, true).length, 1)
   }
 )
 
@@ -175,7 +175,7 @@ await check(
   }
 )
 
-await check('Missing, filtered and cyclic parent bindings leave child work accessible', () => {
+await check('Missing, filtered and cyclic parent bindings leave child work searchable', () => {
   const parent = saved(PARENT_PATH, 'parent', { depth: 0 })
   parent.cwd = OTHER_WORKSPACE
   const child = saved(CHILD_PATH, 'child', {
@@ -184,13 +184,14 @@ await check('Missing, filtered and cyclic parent bindings leave child work acces
     parentSessionPath: PARENT_PATH
   })
   const families = project([parent, child])
-  assert.equal(primeFamilyOrphans(families, (cwd) => cwd === WORKSPACE)[0]?.path, CHILD_PATH)
-  assert.equal(primeFamilyOrphans(families, () => true).length, 0)
+  const inWorkspace = (cwd: string) => cwd === WORKSPACE
+  assert.equal(primeFamilyOrphans(families, inWorkspace, true)[0]?.path, CHILD_PATH)
+  assert.equal(primeFamilyOrphans(families, () => true, true).length, 0)
   const cycle = project([
     saved(PARENT_PATH, 'parent', { childId: 'parent', parentSessionPath: CHILD_PATH }),
     child
   ])
-  assert.equal(primeFamilyOrphans(cycle, () => true).length, 1)
+  assert.equal(primeFamilyOrphans(cycle, () => true, true).length, 1)
   assert.equal(cycle.nodes.flatMap((node) => node.children).length, 1)
 })
 
@@ -208,7 +209,7 @@ await check(
     assert.equal(ambiguous.nodes.length, 3)
     assert.equal(primeFamilyNode(ambiguous, undefined, first.id), undefined)
     assert.equal(primeFamilyNode(ambiguous, CHILD_PATH)?.parent, undefined)
-    assert.equal(primeFamilyOrphans(ambiguous, () => true).length, 1)
+    assert.equal(primeFamilyOrphans(ambiguous, () => true, true).length, 1)
     const precise = project(
       [{ ...child, lineage: { ...child.lineage, parentSessionPath: PARENT_PATH } }],
       [first, second]
@@ -228,6 +229,37 @@ await check(
       primeFamilyNode(concreteParent, CHILD_PATH)?.parent,
       primeFamilyNode(concreteParent, PARENT_PATH)?.key,
       'an exact saved parent path precedes a resident whose file metadata has not arrived'
+    )
+  }
+)
+
+await check(
+  'Saved orphan child histories surface only while searching; live ones always do',
+  () => {
+    const lineage = { depth: 1, childId: 'sub-child', parentSessionPath: PARENT_PATH }
+    const grandchildPath = 'D:\\qa\\artifacts\\grandchild.jsonl'
+    const grandchildLineage = { depth: 2, childId: 'sub-grandchild', parentSessionPath: CHILD_PATH }
+    const savedOnly = project([
+      saved(CHILD_PATH, 'child', lineage),
+      saved(grandchildPath, 'grandchild', grandchildLineage)
+    ])
+    assert.equal(primeFamilyOrphans(savedOnly, () => true, false).length, 0)
+    assert.equal(primeFamilyOrphans(savedOnly, () => true, true)[0]?.path, CHILD_PATH)
+
+    const running = project(
+      [saved(CHILD_PATH, 'child', lineage)],
+      [resident('child-live', CHILD_PATH, lineage)]
+    )
+    assert.equal(primeFamilyOrphans(running, () => true, false)[0]?.path, CHILD_PATH)
+
+    const runningGrandchild = project(
+      [saved(CHILD_PATH, 'child', lineage), saved(grandchildPath, 'grandchild', grandchildLineage)],
+      [resident('grandchild-live', grandchildPath, grandchildLineage)]
+    )
+    assert.equal(
+      primeFamilyOrphans(runningGrandchild, () => true, false)[0]?.path,
+      CHILD_PATH,
+      'a saved child stays reachable while work below it runs'
     )
   }
 )

@@ -46,7 +46,7 @@ try {
           assert.equal(environment.daemonSocket, undefined)
           assert.equal(environment.inheritedProbe, undefined)
           assert.notEqual(environment.agentDir, process.env.PRIME_AGENT_CODING_AGENT_DIR)
-          const workspaces = await current.invoke('sessions:workspaces')
+          const { workspaces } = await current.invoke('sessions:workspaces')
           assert.deepEqual(workspaces, [], 'no real or inherited native workspaces are discovered')
           await current.openWorkspace()
           server.queue(turn.text('The isolated primary engine still works.'))

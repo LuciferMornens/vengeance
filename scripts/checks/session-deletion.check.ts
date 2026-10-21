@@ -154,7 +154,7 @@ await check(
               }
               return descriptions.get(path)
             }
-            if (channel === 'sessions:workspaces') return []
+            if (channel === 'sessions:workspaces') return { workspaces: [], complete: true }
             if (channel === 'sessions:list') return { sessions: [], sessionDir: root }
             if (channel === 'sessions:trash' && failTrash) throw new Error('File is locked')
             if (channel === 'engine:background-list') return []

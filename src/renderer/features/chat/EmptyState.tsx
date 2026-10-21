@@ -12,7 +12,7 @@ import { useAgents } from '../../store/agents'
 import { Mark, toast } from '../../ui'
 import { activateAgent, openSessionFile } from '../sessions'
 import { findAgentForFile } from '../sessions/actions'
-import { itemTitle } from '../sessions/model'
+import { isSubagentSession, itemTitle } from '../sessions/model'
 import { toastFailure } from './failure-toast'
 
 interface Suggestion {
@@ -54,8 +54,8 @@ function suggestionsFor(project: string): Suggestion[] {
 const RECENT_LIMIT = 4
 
 /**
- * The workspace's latest sessions of this engine with messages (`sessions:list`, the session browser's
- * source): an in-place switch only opens the engine's own session files.
+ * The workspace's latest main conversations of this engine with messages (`sessions:list`, the session
+ * browser's source): an in-place switch only opens the engine's own session files.
  */
 function useRecentSessions(cwd: string, engine: EngineId): SessionListItem[] {
   const [sessions, setSessions] = useState<SessionListItem[]>([])
@@ -66,7 +66,9 @@ function useRecentSessions(cwd: string, engine: EngineId): SessionListItem[] {
       .then(({ sessions: list }) => {
         if (!alive) return
         const recent = list
-          .filter((s) => s.messageCount > 0 && (!s.cwd || samePath(s.cwd, cwd)))
+          .filter(
+            (s) => s.messageCount > 0 && !isSubagentSession(s) && (!s.cwd || samePath(s.cwd, cwd))
+          )
           .sort((a, b) => b.modifiedAt - a.modifiedAt)
           .slice(0, RECENT_LIMIT)
         setSessions(recent)

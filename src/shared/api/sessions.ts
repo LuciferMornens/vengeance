@@ -62,6 +62,12 @@ export interface WorkspaceDiscovery {
   engine?: EngineId
 }
 
+/** Existing folders with saved history. `complete` is false when an engine's history was unreadable. */
+export interface WorkspaceDiscoveryResult {
+  workspaces: WorkspaceDiscovery[]
+  complete: boolean
+}
+
 export interface SessionIdentity {
   cwd: string
   engine: EngineId
@@ -189,7 +195,7 @@ export type ShareSessionResult =
   { destination: 'gist'; url: string; gistUrl: string } | { destination: 'radius'; url: string }
 
 export interface SessionsInvokeMap {
-  'sessions:workspaces': [result: WorkspaceDiscovery[]]
+  'sessions:workspaces': [result: WorkspaceDiscoveryResult]
   'sessions:describe': [path: string, result: SessionIdentity & { cwdExists: boolean }]
   'sessions:pick-import-for-engine': [engine: EngineId, result: ImportCandidate | null]
   'sessions:inspect-import': [args: InspectImportArgs, result: ImportCandidate]

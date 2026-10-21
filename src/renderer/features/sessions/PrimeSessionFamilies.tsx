@@ -54,7 +54,9 @@ function containsActive(node: PrimeFamilyNode, activeAgentId: string | null): bo
 
 function FamilyRow({ node }: { node: PrimeFamilyNode }) {
   const openId = node.open?.agentId
-  const ownTitle = useAgents((s) => (openId && s.agents[openId] ? agentOwnTitle(s.agents[openId]) : null))
+  const ownTitle = useAgents((s) =>
+    openId && s.agents[openId] ? agentOwnTitle(s.agents[openId]) : null
+  )
   const live = useAgents((s) => (openId && s.agents[openId] ? liveState(s.agents[openId]) : null))
   const active = useAgents((state) => state.activeAgentId === openId)
   const { pinned: pinnedPaths } = useSessionsPrefs()
@@ -192,18 +194,25 @@ export function PrimeFamilyChildren({
   )
 }
 
+export function visiblePrimeOrphans(
+  families: PrimeSessionFamilies,
+  query: string,
+  inView: (cwd: string) => boolean
+): PrimeFamilyNode[] {
+  return primeFamilyOrphans(families, inView, !!query.trim()).filter((node) =>
+    primeFamilyMatches(node, query)
+  )
+}
+
 export function PrimeOrphanSessions({
-  families,
+  orphans,
   query,
   inView
 }: {
-  families: PrimeSessionFamilies
+  orphans: PrimeFamilyNode[]
   query: string
   inView: (cwd: string) => boolean
 }) {
-  const orphans = primeFamilyOrphans(families, inView).filter((node) =>
-    primeFamilyMatches(node, query)
-  )
   if (!orphans.length) return null
   return (
     <section aria-label="Subagent sessions">

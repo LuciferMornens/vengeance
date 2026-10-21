@@ -235,13 +235,29 @@ export function primeBackgroundFamilyNode(
   )
 }
 
+/** The node or one of its descendants is open, restored as a tab or running in the background. */
+function primeFamilyLive(node: PrimeFamilyNode): boolean {
+  return !!(node.open || node.dormant || node.background) || node.children.some(primeFamilyLive)
+}
+
+/**
+ * Children shown apart from their parent because the parent is missing or outside the view. The
+ * sidebar lists main conversations, so a saved child history only appears there while searching;
+ * children with live work always stay reachable.
+ */
 export function primeFamilyOrphans(
   families: PrimeSessionFamilies,
-  inView: (cwd: string) => boolean
+  inView: (cwd: string) => boolean,
+  searching: boolean
 ): PrimeFamilyNode[] {
   const byKey = new Map(families.nodes.map((node) => [node.key, node]))
   return families.nodes.filter((node) => {
     const parent = node.parent ? byKey.get(node.parent) : undefined
-    return node.child && (!parent || !inView(parent.cwd)) && inView(node.cwd)
+    return (
+      node.child &&
+      (!parent || !inView(parent.cwd)) &&
+      inView(node.cwd) &&
+      (searching || primeFamilyLive(node))
+    )
   })
 }

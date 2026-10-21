@@ -22,6 +22,8 @@ interface MockSessionSeed {
   reply: string
   /** Generated exchanges of a long session (see `mockLongSessionEntries`); without it the history is one exchange. */
   turns?: number
+  /** Name of the seeded session a subagent child was started from. */
+  parent?: string
 }
 
 const AURORA = mockHomePath('projects', 'aurora')
@@ -42,6 +44,7 @@ const SEEDS: MockSessionSeed[] = [
   {
     cwd: AURORA,
     name: CHILD_SESSION_NAME,
+    parent: 'Debounced persist race',
     firstMessage: 'Task: Fix the session-tree jump on fork. When the user forks from a message in the Branches tab, the tree scrolls to the top.',
     ago: 70,
     messages: 64,
@@ -91,7 +94,7 @@ let records: MockSessionRecord[] | null = null
 function all(): MockSessionRecord[] {
   if (records) return records
   const now = Date.now()
-  records = SEEDS.map((seed, index) => {
+  const seeded = SEEDS.map((seed, index): MockSessionRecord => {
     const id = `0000${index.toString(16)}`.slice(-4) + randomUUID().slice(4)
     const modifiedAt = now - seed.ago * 60_000
     const createdAt = modifiedAt - Math.min(seed.messages, 60) * 45_000
@@ -109,7 +112,13 @@ function all(): MockSessionRecord[] {
       turns: seed.turns
     }
   })
-  return records
+  SEEDS.forEach((seed, index) => {
+    if (seed.parent) {
+      seeded[index]!.parentSessionPath = seeded.find((record) => record.name === seed.parent)?.path
+    }
+  })
+  records = seeded
+  return seeded
 }
 
 const strip = ({ reply: _reply, turns: _turns, ...item }: MockSessionRecord): SessionListItem => item

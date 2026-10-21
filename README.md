@@ -68,7 +68,8 @@ either one separately.
   transcript and in the inspector's Agents panel, where you can answer, steer or stop a worker that
   needs a decision.
 - **Workspaces.** Switch workspaces from the sidebar, choose which engine new sessions use, and pick
-  up from recent sessions or suggested prompts.
+  up from recent sessions or suggested prompts. Folders you opened stay in the switcher; a folder
+  found only through its saved history leaves it once the folder or its last session is gone.
 
 <p align="center">
   <a href="docs/screenshots/subagents.png"><img src="docs/screenshots/subagents.png" alt="A worker subagent asking for a decision, with Answer, Steer and Stop buttons in the Agents panel" width="880"></a>
@@ -456,8 +457,9 @@ installer.
   immediately. Partially streamed text from an unfinished turn is not guaranteed to replay.
 - **Switching engines.** A recovery copy stays with the source engine. Native goals, schedules and
   child workers do not transfer, and nonempty ephemeral sessions cannot switch.
-- **Subagent histories.** Engine 2 subagent histories appear beneath their native parent, with
-  accessible orphan histories when the parent is outside the current view. Independent sessions and
+- **Subagent histories.** The sidebar lists main conversations. Subagent histories of both engines
+  appear beneath their parent. An Engine 2 subagent whose parent is gone or outside the current view
+  is listed while it runs or is open, and in search results otherwise. Independent sessions and
   same-depth forks stay separate.
 - **Sharing.** Radius links use organization visibility.
 - **Trust.** Engine has an explicit project-trust dialog. Engine 2 has no per-project trust decisions

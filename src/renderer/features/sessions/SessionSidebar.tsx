@@ -32,11 +32,13 @@ import {
   DATE_GROUPS,
   dateGroup,
   generatedChildName,
+  isSubagentSession,
   itemTitle,
   LIVE_LABEL,
   liveState,
   matchesQuery,
-  shortTime
+  shortTime,
+  subagentParentPath
 } from './model'
 import { useSessionPaletteActions } from './palette-actions'
 import { SessionDialogs } from './SessionDialogs'
@@ -61,7 +63,8 @@ import { buildPrimeSessionFamilies, primeFamilyNode } from './prime-family-model
 import {
   PrimeFamilyChildren,
   primeFamilyMatches,
-  PrimeOrphanSessions
+  PrimeOrphanSessions,
+  visiblePrimeOrphans
 } from './PrimeSessionFamilies'
 
 const WORKSPACE_GROUP_HEIGHT = 294
@@ -82,7 +85,8 @@ function workspaceName(cwd: string, workspaces: { path: string; name: string }[]
 
 /** Child sessions of subagent runs under their parent's row: one quiet line, expanded on demand (or while searching). */
 function SubagentSessions({ items, searching }: { items: SessionListItem[]; searching: boolean }) {
-  const expansionKey = `subagents:${normalizePath(items[0]?.subagentRun?.parentPath ?? '')}`
+  const parentPath = items[0] ? subagentParentPath(items[0]) : undefined
+  const expansionKey = `subagents:${normalizePath(parentPath ?? '')}`
   const expanded = useSessions((state) => state.expandedLists.includes(expansionKey))
   const shown = expanded || searching
   return (
@@ -435,15 +439,22 @@ export function SessionSidebar() {
     () => new Map((listed ?? []).map((i) => [normalizePath(i.path), i])),
     [listed]
   )
-  // Subagent child sessions are shown under their parent's row when the parent is listed too.
+  const hasQuery = !!query.trim()
+  // The list holds main conversations: subagent sessions sit under their parent's row, and one
+  // whose parent is not listed only shows up as a search result.
   const { items, subagentsByParent } = useMemo(() => {
     const topLevel: SessionListItem[] = []
     const children = new Map<string, SessionListItem[]>()
     for (const item of listed ?? []) {
       if (item.engine === 'prime' && primeFamilyNode(families, item.path)?.child) continue
-      const parent = item.subagentRun ? normalizePath(item.subagentRun.parentPath) : undefined
-      if (!parent || !byPath.has(parent)) {
+      if (!isSubagentSession(item)) {
         topLevel.push(item)
+        continue
+      }
+      const parentPath = subagentParentPath(item)
+      const parent = parentPath ? normalizePath(parentPath) : undefined
+      if (!parent || !byPath.has(parent)) {
+        if (hasQuery) topLevel.push(item)
         continue
       }
       const siblings = children.get(parent)
@@ -451,12 +462,12 @@ export function SessionSidebar() {
       else children.set(parent, [item])
     }
     return { items: topLevel, subagentsByParent: children }
-  }, [listed, byPath, families])
+  }, [listed, byPath, families, hasQuery])
   const subagentsOf = (path: string, engine?: EngineId): SubagentRowProps => {
     const subagents = subagentsByParent.get(normalizePath(path))
     return {
       subagents,
-      searching: !!query.trim() && someMatch(query, subagents),
+      searching: hasQuery && someMatch(query, subagents),
       family: (
         <PrimeFamilyChildren
           parent={familyOf(path, undefined, engine)}
@@ -550,11 +561,13 @@ export function SessionSidebar() {
   const hasBackgroundMatch = background.some((agent) =>
     matchesQuery(query, agent.name, agent.cwd, agent.status)
   )
-  const hasFamilyMatch = families.nodes.some(
-    (node) => node.child && inView(node.cwd) && primeFamilyMatches(node, query)
-  )
+  const primeOrphans = visiblePrimeOrphans(families, query, inView)
   const nothing =
-    !loading && historyCount === 0 && openCount === 0 && !hasBackgroundMatch && !hasFamilyMatch
+    !loading &&
+    historyCount === 0 &&
+    openCount === 0 &&
+    !hasBackgroundMatch &&
+    primeOrphans.length === 0
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -641,7 +654,7 @@ export function SessionSidebar() {
           )}
 
           <BackgroundSessions families={families} />
-          <PrimeOrphanSessions families={families} query={query} inView={inView} />
+          <PrimeOrphanSessions orphans={primeOrphans} query={query} inView={inView} />
 
           <SessionListFeedback
             loading={loading}

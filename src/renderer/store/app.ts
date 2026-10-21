@@ -100,20 +100,28 @@ export const useApp = create<AppStore>()((set, get) => ({
     try {
       const discovered = await invoke('sessions:workspaces')
       const { prefs } = get()
-      const known = new Set(prefs.workspaces.map((workspace) => normalizePath(workspace.path)))
       const hidden = new Set((prefs.features.sessions?.hiddenWorkspaces ?? []).map(normalizePath))
-      const workspaces = [...prefs.workspaces]
       const restored = prefs.openSessions.map((session) => ({
         path: session.cwd,
         engine: session.engine
       }))
       const candidates = [
         ...restored,
-        ...discovered,
+        ...discovered.workspaces,
         ...(prefs.activeWorkspace ? [{ path: prefs.activeWorkspace, engine: undefined }] : [])
-      ]
+      ].filter(({ path }) => !!path)
+      const current = new Set(candidates.map(({ path }) => normalizePath(path)))
+      // A folder that was only ever found through its history leaves once a complete scan no longer
+      // finds it (its folder or its last session is gone); folders the user opened or pinned stay.
+      const workspaces = prefs.workspaces.filter(
+        (workspace) =>
+          !discovered.complete ||
+          workspace.lastOpenedAt > 0 ||
+          workspace.pinned ||
+          current.has(normalizePath(workspace.path))
+      )
+      const known = new Set(workspaces.map((workspace) => normalizePath(workspace.path)))
       for (const { path, engine } of candidates) {
-        if (!path) continue
         const key = normalizePath(path)
         if (known.has(key) || hidden.has(key)) continue
         known.add(key)
@@ -124,7 +132,10 @@ export const useApp = create<AppStore>()((set, get) => ({
           engine: normalizeEngineId(engine)
         })
       }
-      if (workspaces.length !== prefs.workspaces.length) get().update({ workspaces })
+      const changed =
+        workspaces.length !== prefs.workspaces.length ||
+        workspaces.some((workspace, index) => workspace !== prefs.workspaces[index])
+      if (changed) get().update({ workspaces })
       if (!quiet) set({ workspaceDiscovery: 'ready' })
     } catch (error) {
       // A failed quiet re-scan keeps the list it has; the next one tries again.

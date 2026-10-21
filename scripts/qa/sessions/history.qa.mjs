@@ -26,6 +26,7 @@ import {
 } from './lib/session-files.mjs'
 
 const SUMMARY = 'QA COMPACTION SUMMARY: the user asked about quince jam.'
+const ORPHAN_TASK = 'Review lane C'
 const isSummaryRequest = (request) =>
   inspectRequest(request).lastUserText.includes('<conversation>')
 
@@ -204,14 +205,29 @@ await runSuite(
         await childFor().write(join(sessionsDir, basename(parentPath, '.jsonl'), runId, 'run-0'))
         // A child that lives directly in the workspace folder (default storage).
         await childFor().write(sessionsDir)
+        // A child whose parent session was deleted.
+        const orphan = new SessionBuilder({
+          cwd,
+          parentSession: join(sessionsDir, 'deleted-parent.jsonl')
+        })
+        orphan.modelChange()
+        orphan.name(`subagent-reviewer-${randomUUID()}-1`)
+        orphan.user(`Task: ${ORPHAN_TASK}.`)
+        orphan.assistant('Lane C reviewed.')
+        await orphan.write(sessionsDir)
       }
     )
 
+    const subagentToggle = page.getByRole('button', { name: '2 subagent sessions' })
     await check(
-      'a top-level child session reads "Worker subagent · <task>", raw name only as a tooltip',
+      'a child stored beside its parent sits under it, titled "Worker subagent · <task>"',
       async () => {
-        const row = page.locator('[data-session-row]', { hasText: 'Worker subagent' }).first()
-        await row.waitFor({ timeout: 15_000 })
+        await subagentToggle.waitFor({ timeout: 15_000 })
+        const rows = page.locator('[data-session-row]', { hasText: 'Worker subagent' })
+        assert.equal(await rows.count(), 0, 'subagent sessions are not main conversations')
+        await subagentToggle.click()
+        const row = rows.first()
+        await row.waitFor()
         const text = await row.innerText()
         assert.match(text, /Worker subagent · Fix lane B/)
         assert.ok(!text.includes(runId), 'no run id in the row')
@@ -220,6 +236,17 @@ await runSuite(
         await app.screenshot('history-child-row', { settleMs: 200 })
       }
     )
+
+    await check('a child whose parent is gone only shows up as a search result', async () => {
+      const orphanRow = page.locator('[data-session-row]', { hasText: 'Reviewer subagent' })
+      assert.equal(await orphanRow.count(), 0)
+      const search = page.getByRole('textbox', { name: 'Search sessions' })
+      await search.fill(ORPHAN_TASK)
+      await orphanRow.first().waitFor()
+      await app.screenshot('history-orphan-child-search', { settleMs: 200 })
+      await search.fill('')
+      await orphanRow.first().waitFor({ state: 'detached' })
+    })
 
     await check('opening a child session titles the header the same way', async () => {
       await page.locator('[data-session-row]', { hasText: 'Worker subagent' }).first().click()
@@ -231,6 +258,7 @@ await runSuite(
       const title = await page.getByRole('button', { name: 'Rename session' }).innerText()
       assert.match(title, /^Worker subagent · Fix lane B/)
       assert.ok(!title.includes(runId))
+      await subagentToggle.click()
     })
 
     await check(
@@ -260,19 +288,18 @@ await runSuite(
       assert.equal(nested[0].subagentRun?.parentPath.toLowerCase(), parentPath.toLowerCase())
       assert.equal(nested[0].subagentRun?.runId, runId)
 
-      // Sidebar: grouped under the parent row, collapsed by default.
-      const toggle = page.getByRole('button', { name: '1 subagent session' })
-      await toggle.waitFor()
-      assert.equal(await toggle.getAttribute('aria-expanded'), 'false')
-      await toggle.click()
+      // Sidebar: grouped under the parent row with the child stored beside it, collapsed.
+      await subagentToggle.waitFor()
+      assert.equal(await subagentToggle.getAttribute('aria-expanded'), 'false')
+      await subagentToggle.click()
       const childRows = page.locator('section[aria-label="Today"] [data-session-row]', {
         hasText: 'Worker subagent · Fix lane B'
       })
-      await waitUntil(async () => (await childRows.count()) === 1, {
-        label: 'child row under the parent'
+      await waitUntil(async () => (await childRows.count()) === 2, {
+        label: 'child rows under the parent'
       })
       await app.screenshot('history-nested-child-row', { settleMs: 300 })
-      await toggle.click()
+      await subagentToggle.click()
 
       // Parent tree: the subagent notice opens the child session.
       await page

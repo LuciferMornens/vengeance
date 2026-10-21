@@ -16,7 +16,8 @@ import type {
   SessionExportFormat,
   ShareReadiness,
   ShareSessionResult,
-  ShareSessionArgs
+  ShareSessionArgs,
+  WorkspaceDiscovery
 } from '@shared/api/sessions'
 import { isEngineId, normalizeEngineId, type EngineId } from '@shared/api/engine'
 import { appState } from '../app-state'
@@ -81,6 +82,17 @@ function knownWorkspacePaths(): string[] {
       ].map((cwd) => [comparablePath(cwd), cwd])
     ).values()
   ]
+}
+
+/**
+ * Sessions outlive their folders (test suites and scratch work leave history for deleted temporary
+ * folders), so only folders that still exist become workspaces. A folder that cannot be checked stays.
+ */
+async function existingWorkspaces(discovered: WorkspaceDiscovery[]): Promise<WorkspaceDiscovery[]> {
+  const exists = await Promise.all(
+    discovered.map((workspace) => directoryExists(workspace.path).catch(() => true))
+  )
+  return discovered.filter((_workspace, index) => exists[index])
 }
 
 async function sessionEngine(
@@ -442,7 +454,7 @@ export function registerSessionsIpc(context: IpcContext): void {
           })
         }
       }
-      return [...discovered.values()]
+      return { workspaces: [...discovered.values()], complete: true }
     }
     const known = knownWorkspacePaths()
     const [standard, prime] = await Promise.allSettled([
@@ -453,7 +465,13 @@ export function registerSessionsIpc(context: IpcContext): void {
       standard.status === 'fulfilled'
         ? standard.value.map((workspace) => ({ ...workspace, engine: 'pi' as const }))
         : []
-    return [...discovered, ...(prime.status === 'fulfilled' ? prime.value : [])]
+    return {
+      workspaces: await existingWorkspaces([
+        ...discovered,
+        ...(prime.status === 'fulfilled' ? prime.value : [])
+      ]),
+      complete: standard.status === 'fulfilled' && prime.status === 'fulfilled'
+    }
   })
 
   handle('sessions:describe', async (path) => {

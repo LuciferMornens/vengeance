@@ -56,8 +56,13 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
   await test('openWorkspace', MOCK_WORKSPACE, LAUNCH)
   await row(page, 'Theme tokens audit').waitFor()
 
-  // A child subagent session reads as its role and task; the generated name is only in the tooltip.
+  // The list holds main conversations; a subagent session sits collapsed under the session that started it.
   const child = row(page, 'Worker subagent')
+  if (await child.isVisible()) throw new Error('a subagent session is listed as a main conversation')
+  const subagents = page.getByRole('button', { name: '1 subagent session' })
+  await subagents.click()
+  // It reads as its role and task; the generated name is only in the tooltip.
+  await child.waitFor()
   const childText = await child.innerText()
   if (
     !childText.includes('Worker subagent · Fix the session-tree jump on fork') ||
@@ -75,6 +80,8 @@ export async function scenarios(page, { shot, test, wait, MOCK_WORKSPACE }) {
     await tooltip.waitFor()
   }
   await shot('sessions-child-subagent', { settleMs: 600 })
+  await subagents.click()
+  await child.waitFor({ state: 'detached' })
   await settle()
 
   // Pin two sessions through the hover action.
