@@ -195,11 +195,11 @@ export const useApp = create<AppStore>()((set, get) => ({
     const hiddenWorkspaces = [
       ...new Set([...(sessions?.hiddenWorkspaces ?? []), normalizePath(path)])
     ]
+    const { missingWorkspaces } = get()
+    const fallback = remaining.find((w) => !missingWorkspaces.has(normalizePath(w.path)))
     get().update({
       workspaces: remaining,
-      activeWorkspace: samePath(activeWorkspace, path)
-        ? (remaining[0]?.path ?? null)
-        : activeWorkspace,
+      activeWorkspace: samePath(activeWorkspace, path) ? (fallback?.path ?? null) : activeWorkspace,
       features: { sessions: { ...sessions, hiddenWorkspaces } }
     })
   },

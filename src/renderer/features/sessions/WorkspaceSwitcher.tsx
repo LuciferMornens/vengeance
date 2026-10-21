@@ -126,6 +126,17 @@ function WorkspaceItem({
   )
 }
 
+/** Opening the switcher looks for folders that came back (a drive plugged in) at most this often. */
+const OPEN_RESCAN_MS = 5000
+let lastOpenRescan = 0
+
+function rescanOnOpen(): void {
+  const app = useApp.getState()
+  if (app.workspaceDiscovery !== 'ready' || Date.now() - lastOpenRescan < OPEN_RESCAN_MS) return
+  lastOpenRescan = Date.now()
+  void app.discoverWorkspaces()
+}
+
 /** Known folders stay available while session-history discovery runs in the background. */
 export function WorkspaceSwitcher() {
   const [open, setOpen] = useState(false)
@@ -180,6 +191,7 @@ export function WorkspaceSwitcher() {
       onOpenChange={(next) => {
         setOpen(next)
         if (!next) setQuery('')
+        else rescanOnOpen()
       }}
       align="start"
       className="w-[340px] max-w-[calc(100vw-24px)] p-1.5"

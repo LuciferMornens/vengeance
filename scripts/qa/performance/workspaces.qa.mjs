@@ -11,6 +11,8 @@ import { SessionBuilder, workspaceSessionDir } from '../sessions/lib/session-fil
 const READY_TIMEOUT_MS = 10_000
 const POLL_INTERVAL_MS = 50
 const EVENT_DELIVERY_MS = 150
+/** The switcher looks for returned folders on open at most this often (WorkspaceSwitcher). */
+const OPEN_RESCAN_MS = 5_500
 const SAVED_RECENCY = Date.now() - 86_400_000
 const SAVED_NAME = 'Release control'
 const PINNED_NAME = 'Pinned release plan'
@@ -528,13 +530,16 @@ try {
             assert.equal(await workspaceChoice(current, folder).count(), 1, `${folder} stays`)
           }
           await current.screenshot('workspaces-deleted-folder-hidden')
-          // The entry keeps its engine default and recency, and returns with the folder.
+          // The entry keeps its engine default and recency, and returns with the folder: opening the
+          // switcher looks again (at most every 5 s), with no session change needed.
           assert.ok(hasRemoved((await current.appState()).prefs))
+          await current.page.keyboard.press('Escape')
           await agentDir.writeText(
             join('..', basename(removedCwd), 'README.md'),
             '# Removed workspace QA\n'
           )
-          await notifySessionChange(current, agentDir.path('sessions'))
+          await current.page.waitForTimeout(OPEN_RESCAN_MS)
+          await openSwitcher(current)
           await workspaceChoice(current, removedCwd).waitFor()
           await current.page.keyboard.press('Escape')
         })
