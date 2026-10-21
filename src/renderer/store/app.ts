@@ -8,6 +8,7 @@ import {
 import { basename } from '../lib/format'
 import { invoke } from '../lib/ipc'
 import { normalizePath, samePath } from '../lib/paths'
+import { reconcileWorkspaces } from './workspace-reconcile'
 import { normalizeEngineId, type EngineId } from '@shared/api/engine'
 
 export interface UiState {
@@ -26,6 +27,8 @@ export interface AppStore {
   ui: UiState
   workspaceDiscovery: 'idle' | 'loading' | 'ready' | 'error'
   workspaceDiscoveryError: string | null
+  /** Comparable paths of known workspaces whose folder the last scan found gone. */
+  missingWorkspaces: ReadonlySet<string>
 
   load(): Promise<void>
   discoverWorkspaces(): Promise<void>
@@ -81,6 +84,7 @@ export const useApp = create<AppStore>()((set, get) => ({
   ui: { settingsOpen: false, settingsSection: null, settingsEngine: null, paletteOpen: false },
   workspaceDiscovery: 'idle',
   workspaceDiscoveryError: null,
+  missingWorkspaces: new Set(),
 
   async load() {
     const prefs = await invoke('app:get-state')
@@ -98,33 +102,15 @@ export const useApp = create<AppStore>()((set, get) => ({
     const quiet = get().workspaceDiscovery === 'ready'
     if (!quiet) set({ workspaceDiscovery: 'loading', workspaceDiscoveryError: null })
     try {
-      const discovered = await invoke('sessions:workspaces')
+      const discovery = await invoke('sessions:workspaces')
       const { prefs } = get()
-      const known = new Set(prefs.workspaces.map((workspace) => normalizePath(workspace.path)))
-      const hidden = new Set((prefs.features.sessions?.hiddenWorkspaces ?? []).map(normalizePath))
-      const workspaces = [...prefs.workspaces]
-      const restored = prefs.openSessions.map((session) => ({
-        path: session.cwd,
-        engine: session.engine
-      }))
-      const candidates = [
-        ...restored,
-        ...discovered,
-        ...(prefs.activeWorkspace ? [{ path: prefs.activeWorkspace, engine: undefined }] : [])
-      ]
-      for (const { path, engine } of candidates) {
-        if (!path) continue
-        const key = normalizePath(path)
-        if (known.has(key) || hidden.has(key)) continue
-        known.add(key)
-        workspaces.push({
-          path,
-          name: basename(path),
-          lastOpenedAt: 0,
-          engine: normalizeEngineId(engine)
-        })
+      const workspaces = reconcileWorkspaces(prefs, discovery, normalizePath)
+      if (workspaces !== prefs.workspaces) get().update({ workspaces })
+      const missing = discovery.gone.map(normalizePath)
+      const previous = get().missingWorkspaces
+      if (missing.length !== previous.size || missing.some((key) => !previous.has(key))) {
+        set({ missingWorkspaces: new Set(missing) })
       }
-      if (workspaces.length !== prefs.workspaces.length) get().update({ workspaces })
       if (!quiet) set({ workspaceDiscovery: 'ready' })
     } catch (error) {
       // A failed quiet re-scan keeps the list it has; the next one tries again.
@@ -193,7 +179,10 @@ export const useApp = create<AppStore>()((set, get) => ({
     get().update({
       workspaces: known
         ? workspaces.map((workspace) =>
-            samePath(workspace.path, path) ? { ...workspace, engine } : workspace
+            // Choosing an engine for a discovered folder keeps it like opening it does.
+            samePath(workspace.path, path)
+              ? { ...workspace, engine, lastOpenedAt: workspace.lastOpenedAt || Date.now() }
+              : workspace
           )
         : [...workspaces, { path, name: basename(path), engine, lastOpenedAt: Date.now() }]
     })
@@ -206,11 +195,11 @@ export const useApp = create<AppStore>()((set, get) => ({
     const hiddenWorkspaces = [
       ...new Set([...(sessions?.hiddenWorkspaces ?? []), normalizePath(path)])
     ]
+    const { missingWorkspaces } = get()
+    const fallback = remaining.find((w) => !missingWorkspaces.has(normalizePath(w.path)))
     get().update({
       workspaces: remaining,
-      activeWorkspace: samePath(activeWorkspace, path)
-        ? (remaining[0]?.path ?? null)
-        : activeWorkspace,
+      activeWorkspace: samePath(activeWorkspace, path) ? (fallback?.path ?? null) : activeWorkspace,
       features: { sessions: { ...sessions, hiddenWorkspaces } }
     })
   },

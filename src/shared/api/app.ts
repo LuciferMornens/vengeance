@@ -16,7 +16,7 @@ export interface Workspace {
   path: string
   /** Display name (defaults to folder basename). */
   name: string
-  /** epoch ms */
+  /** epoch ms; 0 for a folder only found through its saved history and never opened. */
   lastOpenedAt: number
   pinned?: boolean
 }

@@ -9,6 +9,7 @@ import { isImeComposing } from '../../lib/keybindings'
 import { normalizePath, samePath } from '../../lib/paths'
 import { useAgents } from '../../store/agents'
 import { selectActiveWorkspace, useApp } from '../../store/app'
+import { useShownWorkspaces } from '../../store/shown-workspaces'
 import { Avatar, Badge, Input, ListRow, listRowClass, Popover, Skeleton } from '../../ui'
 import { chooseWorkspace } from '../shell/workspace'
 import { EnginePicker } from '../engines/EnginePicker'
@@ -125,12 +126,23 @@ function WorkspaceItem({
   )
 }
 
+/** Opening the switcher looks for folders that came back (a drive plugged in) at most this often. */
+const OPEN_RESCAN_MS = 5000
+let lastOpenRescan = 0
+
+function rescanOnOpen(): void {
+  const app = useApp.getState()
+  if (app.workspaceDiscovery !== 'ready' || Date.now() - lastOpenRescan < OPEN_RESCAN_MS) return
+  lastOpenRescan = Date.now()
+  void app.discoverWorkspaces()
+}
+
 /** Known folders stay available while session-history discovery runs in the background. */
 export function WorkspaceSwitcher() {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const list = useRef<HTMLDivElement>(null)
-  const workspaces = useApp((s) => s.prefs.workspaces)
+  const workspaces = useShownWorkspaces()
   const discovery = useApp((s) => s.workspaceDiscovery)
   const discoveryError = useApp((s) => s.workspaceDiscoveryError)
   const active = useApp(selectActiveWorkspace)
@@ -179,6 +191,7 @@ export function WorkspaceSwitcher() {
       onOpenChange={(next) => {
         setOpen(next)
         if (!next) setQuery('')
+        else rescanOnOpen()
       }}
       align="start"
       className="w-[340px] max-w-[calc(100vw-24px)] p-1.5"

@@ -24,6 +24,18 @@ function residentTitle(agent: BackgroundAgentInfo): string {
   return agent.name?.trim() || basename(agent.cwd) || 'Background session'
 }
 
+/** A background session the search finds: by its own title, folder or status, or through its Engine 2 children. */
+export function backgroundMatches(
+  agent: BackgroundAgentInfo,
+  families: PrimeSessionFamilies,
+  query: string
+): boolean {
+  return (
+    matchesQuery(query, residentTitle(agent), agent.cwd, agent.status) ||
+    primeFamilyMatches(primeBackgroundFamilyNode(families, agent), query)
+  )
+}
+
 export function BackgroundSessions({ families }: { families: PrimeSessionFamilies }) {
   const agents = useSessions((state) => state.background)
   const error = useSessions((state) => state.backgroundError)
@@ -83,8 +95,7 @@ export function BackgroundSessions({ families }: { families: PrimeSessionFamilie
       inView(agent.cwd) &&
       (!agent.sessionPath || !open.has(`${agent.engine}:${normalizePath(agent.sessionPath)}`)) &&
       (!!agent.sessionPath || !attachedIds.includes(`${agent.engine}:${agent.id}`)) &&
-      (matchesQuery(query, residentTitle(agent), agent.cwd, agent.status) ||
-        primeFamilyMatches(primeBackgroundFamilyNode(families, agent), query))
+      backgroundMatches(agent, families, query)
   )
 
   if (visible.length === 0 && !error) return null

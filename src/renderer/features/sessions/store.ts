@@ -472,7 +472,10 @@ function scheduleWorkspaceRescan(): void {
 export function focusWorkspace(cwd: string): void {
   const app = useApp.getState()
   const existing = app.prefs.workspaces.find((w) => samePath(w.path, cwd))
-  if (existing) {
+  if (existing?.lastOpenedAt === 0) {
+    // A folder found through its history counts as opened once a session there comes to the front.
+    app.openWorkspace(existing.path)
+  } else if (existing) {
     if (app.prefs.activeWorkspace !== existing.path) app.update({ activeWorkspace: existing.path })
   } else {
     app.openWorkspace(cwd)

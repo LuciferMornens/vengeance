@@ -46,7 +46,11 @@ export async function mapSessionFiles<Value, Result>(
   return results
 }
 
-export async function sessionFilesIn(directory: string): Promise<string[]> {
+/** `.jsonl` files in `directory`, none when it is missing. Other read errors also list none and go to `onError`. */
+export async function sessionFilesIn(
+  directory: string,
+  onError?: (error: unknown) => void
+): Promise<string[]> {
   try {
     const entries = await readdir(directory, { withFileTypes: true })
     return entries
@@ -55,9 +59,16 @@ export async function sessionFilesIn(directory: string): Promise<string[]> {
       )
       .map((entry) => join(directory, entry.name))
       .sort((first, second) => second.localeCompare(first))
-  } catch {
+  } catch (error) {
+    if (!isMissing(error)) onError?.(error)
     return []
   }
+}
+
+/** A path that does not exist (or runs through a file). */
+export function isMissing(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code
+  return code === 'ENOENT' || code === 'ENOTDIR'
 }
 
 async function* sessionLines(

@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, extname, isAbsolute, join, resolve } from 'node:path'
+import { dirname, extname, isAbsolute, join, parse, resolve } from 'node:path'
 import {
   app,
   BrowserWindow,
@@ -16,13 +16,16 @@ import type {
   SessionExportFormat,
   ShareReadiness,
   ShareSessionResult,
-  ShareSessionArgs
+  ShareSessionArgs,
+  WorkspaceDiscoveryResult,
+  WorkspaceScan
 } from '@shared/api/sessions'
 import { isEngineId, normalizeEngineId, type EngineId } from '@shared/api/engine'
 import { appState } from '../app-state'
 import { env } from '../env'
 import type { EngineManager } from '../engine/manager'
 import { importSession, inspectImport } from '../features/sessions/import'
+import { mapSessionFiles } from '../features/sessions/index'
 import {
   branchOf,
   branchSession,
@@ -81,6 +84,41 @@ function knownWorkspacePaths(): string[] {
       ].map((cwd) => [comparablePath(cwd), cwd])
     ).values()
   ]
+}
+
+/**
+ * A folder that is not there while its drive or share is. One whose drive or share is not connected, or that
+ * cannot be checked, is not gone.
+ */
+async function folderGone(path: string): Promise<boolean> {
+  try {
+    return !(await directoryExists(path)) && (await directoryExists(parse(path).root))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Sessions outlive their folders (test suites and scratch work leave history for deleted temporary folders), so
+ * gone folders do not become workspaces, and known workspaces whose folder is gone are reported.
+ */
+async function withoutGoneFolders(scan: WorkspaceScan): Promise<WorkspaceDiscoveryResult> {
+  const known = appState.getPrefs().workspaces.map(({ path }) => path)
+  const checked = [
+    ...new Map(
+      [...known, ...scan.workspaces.map(({ path }) => path)].map((path) => [
+        comparablePath(path),
+        path
+      ])
+    ).entries()
+  ]
+  const goneFlags = await mapSessionFiles(checked, ([, path]) => folderGone(path))
+  const gone = new Set(checked.filter((_entry, index) => goneFlags[index]).map(([key]) => key))
+  return {
+    workspaces: scan.workspaces.filter(({ path }) => !gone.has(comparablePath(path))),
+    gone: known.filter((path) => gone.has(comparablePath(path))),
+    complete: scan.complete
+  }
 }
 
 async function sessionEngine(
@@ -442,18 +480,26 @@ export function registerSessionsIpc(context: IpcContext): void {
           })
         }
       }
-      return [...discovered.values()]
+      return { workspaces: [...discovered.values()], gone: [], complete: true }
     }
     const known = knownWorkspacePaths()
     const [standard, prime] = await Promise.allSettled([
       discoverSessionWorkspaces(override(), known),
       discoverPrimeWorkspaces(context.engineOverridePath('prime'), known)
     ])
-    const discovered =
-      standard.status === 'fulfilled'
-        ? standard.value.map((workspace) => ({ ...workspace, engine: 'pi' as const }))
-        : []
-    return [...discovered, ...(prime.status === 'fulfilled' ? prime.value : [])]
+    return withoutGoneFolders({
+      workspaces: [
+        ...(standard.status === 'fulfilled'
+          ? standard.value.workspaces.map((workspace) => ({ ...workspace, engine: 'pi' as const }))
+          : []),
+        ...(prime.status === 'fulfilled' ? prime.value.workspaces : [])
+      ],
+      complete:
+        standard.status === 'fulfilled' &&
+        standard.value.complete &&
+        prime.status === 'fulfilled' &&
+        prime.value.complete
+    })
   })
 
   handle('sessions:describe', async (path) => {

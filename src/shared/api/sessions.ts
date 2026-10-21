@@ -62,6 +62,18 @@ export interface WorkspaceDiscovery {
   engine?: EngineId
 }
 
+/** Folders with saved history. */
+export interface WorkspaceScan {
+  workspaces: WorkspaceDiscovery[]
+  /** False when some saved history could not be read, so a folder with history may be missing. */
+  complete: boolean
+}
+
+export interface WorkspaceDiscoveryResult extends WorkspaceScan {
+  /** Known workspace folders that are not there while their drive or share is (deleted, or an unmounted mount point). */
+  gone: string[]
+}
+
 export interface SessionIdentity {
   cwd: string
   engine: EngineId
@@ -189,7 +201,7 @@ export type ShareSessionResult =
   { destination: 'gist'; url: string; gistUrl: string } | { destination: 'radius'; url: string }
 
 export interface SessionsInvokeMap {
-  'sessions:workspaces': [result: WorkspaceDiscovery[]]
+  'sessions:workspaces': [result: WorkspaceDiscoveryResult]
   'sessions:describe': [path: string, result: SessionIdentity & { cwdExists: boolean }]
   'sessions:pick-import-for-engine': [engine: EngineId, result: ImportCandidate | null]
   'sessions:inspect-import': [args: InspectImportArgs, result: ImportCandidate]

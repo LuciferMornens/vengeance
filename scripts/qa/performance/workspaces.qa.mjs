@@ -1,5 +1,6 @@
 // Workspace discovery and keyboard switching through the built app, with isolated Engine histories.
 import assert from 'node:assert/strict'
+import { rm } from 'node:fs/promises'
 import { basename, join, normalize } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { answerOpenDialog } from '../lib/main-stubs.mjs'
@@ -10,6 +11,8 @@ import { SessionBuilder, workspaceSessionDir } from '../sessions/lib/session-fil
 const READY_TIMEOUT_MS = 10_000
 const POLL_INTERVAL_MS = 50
 const EVENT_DELIVERY_MS = 150
+/** The switcher looks for returned folders on open at most this often (WorkspaceSwitcher). */
+const OPEN_RESCAN_MS = 5_500
 const SAVED_RECENCY = Date.now() - 86_400_000
 const SAVED_NAME = 'Release control'
 const PINNED_NAME = 'Pinned release plan'
@@ -126,6 +129,9 @@ try {
         const activeCwd = agentDir.path(join('..', 'workspace-discovery-active'))
         const historyCwd = agentDir.path(join('..', 'workspace-discovery-history'))
         const otherCwd = agentDir.path(join('..', 'workspace-discovery-other'))
+        const deletedCwd = agentDir.path(join('..', 'workspace-discovery-deleted'))
+        const staleCwd = agentDir.path(join('..', 'workspace-discovery-stale'))
+        const removedCwd = agentDir.path(join('..', 'workspace-discovery-removed'))
         const folders = [activeCwd, historyCwd, otherCwd]
         for (const folder of folders) {
           await agentDir.writeText(
@@ -137,6 +143,10 @@ try {
         await savedSession(agentDir, historyCwd, 'History without a recent workspace')
         await savedSession(agentDir, historyCwd, 'Case variant history', historyCwd.toUpperCase())
         await savedSession(agentDir, otherCwd, 'Other saved workspace')
+        // Test runs leave history behind for temporary folders they already deleted.
+        await savedSession(agentDir, deletedCwd, 'History of a deleted folder')
+        // Including folders inside a temporary tree that is gone too.
+        await savedSession(agentDir, join(deletedCwd, 'nested'), 'History of a deleted tree')
 
         await step(
           'persist only the active folder and custom metadata before restart',
@@ -171,7 +181,11 @@ try {
           )
           const paths = prefs.workspaces.map((workspace) => normalizedPath(workspace.path))
           assert.equal(new Set(paths).size, folders.length, 'case variants are merged')
-          assert.deepEqual(new Set(paths), new Set(folders.map(normalizedPath)))
+          assert.deepEqual(
+            new Set(paths),
+            new Set(folders.map(normalizedPath)),
+            'a deleted folder with saved history is not a workspace'
+          )
           assert.deepEqual(
             prefs.workspaces.find((workspace) => workspace.path === activeCwd),
             {
@@ -313,7 +327,11 @@ try {
           await current.screenshot('workspaces-discovery-retry')
           await replaceDiscovery(current, {
             ok: true,
-            value: folders.map((path) => ({ path, lastActivityAt: Date.now() }))
+            value: {
+              workspaces: folders.map((path) => ({ path, lastActivityAt: Date.now() })),
+              gone: [],
+              complete: true
+            }
           })
           await current.page
             .getByRole('dialog')
@@ -359,8 +377,15 @@ try {
                 })
               },
               {
-                first: known,
-                next: [...known, { path: nextCwd, lastActivityAt: Date.now(), engine: 'pi' }]
+                first: { workspaces: known, gone: [], complete: true },
+                next: {
+                  workspaces: [
+                    ...known,
+                    { path: nextCwd, lastActivityAt: Date.now(), engine: 'pi' }
+                  ],
+                  gone: [],
+                  complete: true
+                }
               }
             )
             await notifySessionChange(current, agentDir.path('sessions'))
@@ -441,6 +466,83 @@ try {
             current.assertNoErrors()
           }
         )
+
+        await step('a never-opened folder leaves the switcher with its last history', async () => {
+          const hasStale = (prefs) =>
+            prefs.workspaces.some(
+              (workspace) => normalizedPath(workspace.path) === normalizedPath(staleCwd)
+            )
+          await agentDir.writeText(
+            join('..', basename(staleCwd), 'README.md'),
+            '# Stale workspace QA\n'
+          )
+          const stalePath = await savedSession(agentDir, staleCwd, 'Only history of this folder')
+          await notifySessionChange(current, agentDir.path('sessions'))
+          const discovered = await waitForPreferences(current, hasStale, 'stale folder discovery')
+          assert.equal(
+            discovered.workspaces.find(
+              (workspace) => normalizedPath(workspace.path) === normalizedPath(staleCwd)
+            ).lastOpenedAt,
+            0
+          )
+          await rm(stalePath)
+          await notifySessionChange(current, agentDir.path('sessions'))
+          const prefs = await waitForPreferences(
+            current,
+            (value) => !hasStale(value),
+            'stale folder removal'
+          )
+          const paths = new Set(prefs.workspaces.map((workspace) => normalizedPath(workspace.path)))
+          for (const folder of folders) {
+            assert.ok(paths.has(normalizedPath(folder)), `${folder} stays after the scan`)
+          }
+          await openSwitcher(current)
+          assert.equal(await workspaceChoice(current, staleCwd).count(), 0)
+          await current.screenshot('workspaces-stale-history-removed')
+          await current.page.keyboard.press('Escape')
+        })
+
+        await step('an opened folder is left out of the switcher while it is deleted', async () => {
+          const hasRemoved = (prefs) =>
+            prefs.workspaces.some(
+              (workspace) => normalizedPath(workspace.path) === normalizedPath(removedCwd)
+            )
+          await agentDir.writeText(
+            join('..', basename(removedCwd), 'README.md'),
+            '# Removed workspace QA\n'
+          )
+          await savedSession(agentDir, removedCwd, 'History that outlives its folder')
+          const { workspaces } = (await current.appState()).prefs
+          await current.test('setPrefs', {
+            workspaces: [
+              ...workspaces,
+              { path: removedCwd, name: 'removed', lastOpenedAt: Date.now(), engine: 'pi' }
+            ]
+          })
+          await waitForPersistence(current, hasRemoved)
+          await openSwitcher(current)
+          await workspaceChoice(current, removedCwd).waitFor()
+          // The folder goes; its saved history stays, as when a project folder is deleted.
+          await rm(removedCwd, { recursive: true })
+          await notifySessionChange(current, agentDir.path('sessions'))
+          await workspaceChoice(current, removedCwd).waitFor({ state: 'detached' })
+          for (const folder of folders) {
+            assert.equal(await workspaceChoice(current, folder).count(), 1, `${folder} stays`)
+          }
+          await current.screenshot('workspaces-deleted-folder-hidden')
+          // The entry keeps its engine default and recency, and returns with the folder: opening the
+          // switcher looks again (at most every 5 s), with no session change needed.
+          assert.ok(hasRemoved((await current.appState()).prefs))
+          await current.page.keyboard.press('Escape')
+          await agentDir.writeText(
+            join('..', basename(removedCwd), 'README.md'),
+            '# Removed workspace QA\n'
+          )
+          await current.page.waitForTimeout(OPEN_RESCAN_MS)
+          await openSwitcher(current)
+          await workspaceChoice(current, removedCwd).waitFor()
+          await current.page.keyboard.press('Escape')
+        })
 
         await step(
           'both workspace scopes merge saved histories once per normalized path',

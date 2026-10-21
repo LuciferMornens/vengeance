@@ -12,7 +12,8 @@ import type {
   SessionLineage,
   SessionListQuery,
   SessionListResult,
-  WorkspaceDiscovery
+  WorkspaceDiscovery,
+  WorkspaceScan
 } from '@shared/api/sessions'
 import type { FlatSessionTree } from '@shared/engine-types'
 import { mapSessionFiles, SessionIndex, sessionFilesIn } from '../../features/sessions/index'
@@ -62,7 +63,7 @@ export function primeCreatePayload(args: CreateAgentArgs): PrimeRecord {
 const sessionIndex = new SessionIndex('prime')
 const knownRoots = new Set<string>()
 const pendingListings = new Map<string, Promise<SessionListResult>>()
-const pendingDiscoveries = new Map<string, Promise<WorkspaceDiscovery[]>>()
+const pendingDiscoveries = new Map<string, Promise<WorkspaceScan>>()
 const pendingLineage = new Map<string, Promise<PrimeSavedLineage>>()
 
 async function savedLineage(directories: string[]): Promise<PrimeSavedLineage> {
@@ -215,12 +216,15 @@ async function loadPrimeSessions(query: SessionListQuery): Promise<SessionListRe
 export async function discoverPrimeWorkspaces(
   _overridePath?: string | null,
   knownCwds: string[] = []
-): Promise<WorkspaceDiscovery[]> {
+): Promise<WorkspaceScan> {
   const directories = await primeSessionRoots(knownCwds)
-  const key = JSON.stringify(directories.map(comparablePath).sort())
+  const key = JSON.stringify([
+    directories.map(comparablePath).sort(),
+    knownCwds.map(comparablePath).sort()
+  ])
   const pending = pendingDiscoveries.get(key)
   if (pending) return pending
-  const request = loadPrimeWorkspaces(directories)
+  const request = loadPrimeWorkspaces(directories, knownCwds)
   pendingDiscoveries.set(key, request)
   try {
     return await request
@@ -229,9 +233,18 @@ export async function discoverPrimeWorkspaces(
   }
 }
 
-async function loadPrimeWorkspaces(directories: string[]): Promise<WorkspaceDiscovery[]> {
+async function loadPrimeWorkspaces(
+  directories: string[],
+  knownCwds: string[]
+): Promise<WorkspaceScan> {
+  const known = new Set(knownCwds.map(comparablePath))
+  let unreadable = false
   const [rootFiles, lineage] = await Promise.all([
-    mapSessionFiles(directories, sessionFilesIn),
+    mapSessionFiles(directories, (directory) =>
+      sessionFilesIn(directory, () => {
+        unreadable = true
+      })
+    ),
     savedLineage(directories)
   ])
   const files = [
@@ -245,14 +258,16 @@ async function loadPrimeWorkspaces(directories: string[]): Promise<WorkspaceDisc
     const result = await sessionIndex.header(path)
     if (!result?.header.cwd || !validPrimeId(result.header.id)) return
     if (excluded(path)) return
+    const key = comparablePath(result.header.cwd)
+    // Without the helper's lineage a child session is unverified: it keeps a known folder, but adds none.
     if (
       lineage.warning &&
       (result.header.rlmDepth ?? 0) > 0 &&
-      !verifiedChildren.has(comparablePath(path))
+      !verifiedChildren.has(comparablePath(path)) &&
+      !known.has(key)
     )
       return
     if (!(await supportedPath(path))) return
-    const key = comparablePath(result.header.cwd)
     const workspace = workspaces.get(key)
     if (!workspace || workspace.lastActivityAt < result.modifiedAt) {
       workspaces.set(key, {
@@ -262,9 +277,12 @@ async function loadPrimeWorkspaces(directories: string[]): Promise<WorkspaceDisc
       })
     }
   })
-  return [...workspaces.values()].sort(
-    (first, second) => second.lastActivityAt - first.lastActivityAt
-  )
+  return {
+    workspaces: [...workspaces.values()].sort(
+      (first, second) => second.lastActivityAt - first.lastActivityAt
+    ),
+    complete: !unreadable
+  }
 }
 
 export async function primeSessionCwd(path: string): Promise<string> {

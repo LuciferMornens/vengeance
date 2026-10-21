@@ -6,13 +6,13 @@ import type { SessionListItem } from '@shared/api/sessions'
 import { rpc } from '../../lib/engine'
 import { basename, formatRelativeTime } from '../../lib/format'
 import { invoke } from '../../lib/ipc'
-import { samePath } from '../../lib/paths'
+import { normalizePath, samePath } from '../../lib/paths'
 import { fadeUp, stagger } from '../../lib/motion'
 import { useAgents } from '../../store/agents'
 import { Mark, toast } from '../../ui'
 import { activateAgent, openSessionFile } from '../sessions'
 import { findAgentForFile } from '../sessions/actions'
-import { itemTitle } from '../sessions/model'
+import { itemTitle, partitionSessions } from '../sessions/model'
 import { toastFailure } from './failure-toast'
 
 interface Suggestion {
@@ -54,8 +54,8 @@ function suggestionsFor(project: string): Suggestion[] {
 const RECENT_LIMIT = 4
 
 /**
- * The workspace's latest sessions of this engine with messages (`sessions:list`, the session browser's
- * source): an in-place switch only opens the engine's own session files.
+ * The workspace's latest main conversations of this engine with messages (`sessions:list`, the session
+ * browser's source): an in-place switch only opens the engine's own session files.
  */
 function useRecentSessions(cwd: string, engine: EngineId): SessionListItem[] {
   const [sessions, setSessions] = useState<SessionListItem[]>([])
@@ -65,7 +65,13 @@ function useRecentSessions(cwd: string, engine: EngineId): SessionListItem[] {
     invoke('sessions:list', { cwd, engine })
       .then(({ sessions: list }) => {
         if (!alive) return
-        const recent = list
+        const { items: conversations } = partitionSessions(list, {
+          key: normalizePath,
+          skip: () => false,
+          pinned: () => false,
+          searching: false
+        })
+        const recent = conversations
           .filter((s) => s.messageCount > 0 && (!s.cwd || samePath(s.cwd, cwd)))
           .sort((a, b) => b.modifiedAt - a.modifiedAt)
           .slice(0, RECENT_LIMIT)

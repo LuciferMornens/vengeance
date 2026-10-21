@@ -46,6 +46,78 @@ export function generatedChildName(name: string | undefined): string | undefined
   return childSessionAgent(name) ? name?.trim() : undefined
 }
 
+/**
+ * A session a subagent ran in: an Engine 2 child its parent spawned, or an Engine session stored in a parent's run
+ * folder or named by the subagents extension.
+ */
+function isSubagentSession(item: SessionListItem): boolean {
+  if (item.engine === 'prime') return !!item.lineage?.childId
+  return !!item.subagentRun || !!childSessionAgent(item.name)
+}
+
+/** The session that started an Engine subagent session, when it is known. */
+function subagentParentPath(item: SessionListItem): string | undefined {
+  return item.subagentRun?.parentPath ?? item.parentSessionPath
+}
+
+export interface SessionPartition {
+  /** Main conversations, plus subagent sessions that stay in the list (see `partitionSessions`). */
+  items: SessionListItem[]
+  /** Subagent sessions under each listed main conversation, by its path key. */
+  subagentsByParent: Map<string, SessionListItem[]>
+}
+
+/**
+ * Splits a listing into main conversations and the Engine subagent sessions shown under them. A subagent session sits
+ * under its top-level ancestor, so a subagent's own subagents do too. A pinned one stays in the list, and one whose
+ * ancestor is not listed shows only while searching. A fork of a subagent session keeps its source's name and records
+ * the source as its parent, so a session named like its parent is a conversation of its own.
+ */
+export function partitionSessions(
+  listed: readonly SessionListItem[],
+  options: {
+    /** Comparable form of a session path. */
+    key: (path: string) => string
+    /** Sessions shown elsewhere (Engine 2 family children). */
+    skip: (item: SessionListItem) => boolean
+    pinned: (item: SessionListItem) => boolean
+    searching: boolean
+  }
+): SessionPartition {
+  const { key, skip, pinned, searching } = options
+  const byPath = new Map(listed.map((item) => [key(item.path), item]))
+  // The listed session an item's row belongs to: itself when it is top-level, undefined when its ancestor is gone.
+  const topLevel = (item: SessionListItem): SessionListItem | undefined => {
+    const seen = new Set<SessionListItem>()
+    let current = item
+    while (isSubagentSession(current) && !pinned(current)) {
+      if (seen.has(current)) return undefined
+      seen.add(current)
+      const parentPath = subagentParentPath(current)
+      const parent = parentPath ? byPath.get(key(parentPath)) : undefined
+      if (!parent) return undefined
+      if (!current.subagentRun && !!current.name && current.name === parent.name) return current
+      current = parent
+    }
+    return current
+  }
+  const items: SessionListItem[] = []
+  const subagentsByParent = new Map<string, SessionListItem[]>()
+  for (const item of listed) {
+    if (skip(item)) continue
+    const top = topLevel(item)
+    if (top === item || (!top && searching)) {
+      items.push(item)
+      continue
+    }
+    if (!top) continue
+    const siblings = subagentsByParent.get(key(top.path))
+    if (siblings) siblings.push(item)
+    else subagentsByParent.set(key(top.path), [item])
+  }
+  return { items, subagentsByParent }
+}
+
 /** Sidebar title of a persisted session: name, else first user message. */
 export function itemTitle(item: SessionListItem): string {
   return (
