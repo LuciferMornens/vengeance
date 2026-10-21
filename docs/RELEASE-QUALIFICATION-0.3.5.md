@@ -1,9 +1,9 @@
 # Vengeance 0.3.5 qualification checkpoint
 
-20 October 2026. This checkpoint records the CI and release dry runs of the two pull requests since
-0.3.4 and local verification on Windows x64. The release commit's CI, the tag run and the published
-release's receipts identify the qualified shipping bytes and supersede this checkpoint where source
-or artifacts differ.
+20 October 2026. This checkpoint records local verification on Windows x64, the CI and release dry
+runs of the two pull requests since 0.3.4, the release commit's CI and the tag run. The tag run and
+the published release's receipts identify the qualified shipping bytes and supersede this checkpoint
+where source or artifacts differ.
 
 ## Source and scope
 
@@ -14,6 +14,7 @@ or artifacts differ.
 | PR #23 merged on `main`  | `70ca1116d3da4ce5c9827d2d1e6c400c165236a6` |
 | PR #24 head tested by CI | `43c536ecccaabe27c7fba8640beaeeb34066a222` |
 | PR #24 merged on `main`  | `3ab00720d897d6599c175e6cc68a8f42606fc13a` |
+| `v0.3.5` (PR #25 merged) | `650376967f6bd425fe4592f365cd036bc565e3c7` |
 
 Since 0.3.4: refused Engine sign-ins and faster CI and dry runs (#23), and a queue-deletion QA fix
 (#24).
@@ -70,12 +71,30 @@ No build step continues on error, so each passing build also passed its update-f
 visibility check (macOS), the official 0.3.2 to candidate Engine 2 upgrades (macOS and Linux), the
 first-navigation benchmark and the provenance receipt. These dry-run packages are numbered 0.3.4.
 
+## Release commit `bb391bb`
+
+The version-bump commit ([PR #25](https://github.com/LuciferMornens/vengeance/pull/25)) passed
+[CI 39486433748](https://github.com/LuciferMornens/vengeance/actions/runs/39486433748) and its
+[Release dry run 39486433753](https://github.com/LuciferMornens/vengeance/actions/runs/39486433753)
+(Version, the five builds and the deb, rpm and pacman install jobs), both on the first attempt. It
+merged as `6503769`.
+
+## Tag run
+
+`v0.3.5` points at `6503769`. The
+[tag run 39491855972](https://github.com/LuciferMornens/vengeance/actions/runs/39491855972) passed
+Version, the five builds, the deb, rpm and pacman install jobs and the draft job on the first
+attempt. Every build built both engines from source; none restored cached payloads. The draft
+carried the 24 expected files (packages, blockmaps, the four update files and `SHA256SUMS`), its
+body was `docs/RELEASE-0.3.5.md`, and every update file named version 0.3.5. It was published as the
+latest release on 20 October 2026.
+
 ## Not verified
 
 - Visual review of the CI screenshots and the qualification, benchmark and provenance artifacts of
   the runs above; their counts are not recorded here. No benchmark comparison with 0.3.4 is made.
-- A refusal from a live provider's token endpoint: the QA suite and native tests use a local endpoint
-  that answers `invalid_grant`.
+- A refusal from a live provider's token endpoint: the QA suite and native tests use a local
+  endpoint that answers `invalid_grant`.
 - An upgrade from the official 0.3.4 package: the release upgrade gate stages 0.3.2 (`.10`) as its
   baseline. Windows has no packaged upgrade gate.
 - Paid-provider inference and completed external OAuth, including MCP server sign-in.
