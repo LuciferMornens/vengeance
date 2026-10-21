@@ -6,7 +6,13 @@ import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { shell } from 'electron'
-import type { ForkPoint, SessionListItem, SessionListResult } from '@shared/api/sessions'
+import type {
+  ForkPoint,
+  SessionListItem,
+  SessionListResult,
+  WorkspaceDiscovery,
+  WorkspaceScan
+} from '@shared/api/sessions'
 import type { FlatSessionTree, SessionEntry } from '@shared/engine-types'
 import { locateEngine } from '../../engine/locate'
 import { engineEnv } from '../../engine/runtime'
@@ -15,7 +21,13 @@ import { comparablePath, isInside, physicalPath, samePath } from '../../paths'
 import { watchTree, type TreeWatcher } from '../../watch-tree'
 import { readJsonFile, replaceFile } from '../settings/json-file'
 import { piConfig, piPaths, piSessions, type PiSessionHeader } from '../settings/pi-modules'
-import { mapSessionFiles, readIndexedSessionHeader, SessionIndex, sessionFilesIn } from './index'
+import {
+  isMissing,
+  mapSessionFiles,
+  readIndexedSessionHeader,
+  SessionIndex,
+  sessionFilesIn
+} from './index'
 
 export type { PiSessionHeader }
 
@@ -157,24 +169,20 @@ async function assertStoredSession(overridePath: string | null, path: string): P
 
 const sessionIndex = new SessionIndex()
 const pendingListings = new Map<string, Promise<SessionListResult>>()
-const pendingDiscoveries = new Map<string, Promise<DiscoveredWorkspace[]>>()
-
-interface DiscoveredWorkspace {
-  path: string
-  lastActivityAt: number
-}
+const pendingDiscoveries = new Map<string, Promise<WorkspaceScan>>()
 
 /** pi-subagents' per-task folders inside a run folder: `run-0`, `run-1`, … */
 const SUBAGENT_TASK_FOLDER = /^run-\d+$/
 
-/** Subfolders of `dir` (none when it does not exist). */
-async function subfolders(dir: string): Promise<string[]> {
+/** Subfolders of `dir`, none when it is missing. Other read errors also list none and go to `onError`. */
+async function subfolders(dir: string, onError?: (error: unknown) => void): Promise<string[]> {
   try {
     const entries = await readdir(dir, { withFileTypes: true })
     return entries
       .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
       .map((entry) => entry.name)
-  } catch {
+  } catch (error) {
+    if (!isMissing(error)) onError?.(error)
     return []
   }
 }
@@ -220,9 +228,12 @@ async function withSubagentChildren(sessions: SessionListItem[]): Promise<Sessio
   return [...sessions, ...(await subagentChildren(sessions))]
 }
 
-async function allSessionDirectories(storage: SessionStorage): Promise<string[]> {
+async function allSessionDirectories(
+  storage: SessionStorage,
+  onError?: (error: unknown) => void
+): Promise<string[]> {
   const root = join(storage.agentDir, 'sessions')
-  const defaults = (await subfolders(root)).map((folder) => join(root, folder))
+  const defaults = (await subfolders(root, onError)).map((folder) => join(root, folder))
   const custom = rememberedCustomDir(storage, null)
   const directories = [...defaults, ...knownRoots, ...(custom ? [custom] : [])]
   return [
@@ -234,7 +245,7 @@ async function allSessionDirectories(storage: SessionStorage): Promise<string[]>
 export async function discoverSessionWorkspaces(
   overridePath: string | null,
   knownCwds: string[] = []
-): Promise<DiscoveredWorkspace[]> {
+): Promise<WorkspaceScan> {
   const key = JSON.stringify([overridePath, [...knownCwds].map(comparablePath).sort()])
   const pending = pendingDiscoveries.get(key)
   if (pending) return pending
@@ -250,12 +261,18 @@ export async function discoverSessionWorkspaces(
 async function loadSessionWorkspaces(
   overridePath: string | null,
   knownCwds: string[]
-): Promise<DiscoveredWorkspace[]> {
+): Promise<WorkspaceScan> {
   const storage = await sessionStorage(overridePath)
   for (const cwd of knownCwds) rememberedCustomDir(storage, cwd)
-  const directories = await allSessionDirectories(storage)
-  const files = (await mapSessionFiles(directories, sessionFilesIn)).flat()
-  const workspaces = new Map<string, DiscoveredWorkspace>()
+  let complete = true
+  const incomplete = (): void => {
+    complete = false
+  }
+  const directories = await allSessionDirectories(storage, incomplete)
+  const files = (
+    await mapSessionFiles(directories, (directory) => sessionFilesIn(directory, incomplete))
+  ).flat()
+  const workspaces = new Map<string, WorkspaceDiscovery>()
   await mapSessionFiles(files, async (path) => {
     const result = await sessionIndex.header(path)
     if (!result?.header.cwd) return
@@ -265,9 +282,12 @@ async function loadSessionWorkspaces(
       workspaces.set(key, { path: result.header.cwd, lastActivityAt: result.modifiedAt })
     }
   })
-  return [...workspaces.values()].sort(
-    (first, second) => second.lastActivityAt - first.lastActivityAt
-  )
+  return {
+    workspaces: [...workspaces.values()].sort(
+      (first, second) => second.lastActivityAt - first.lastActivityAt
+    ),
+    complete
+  }
 }
 
 export async function sessionsRoots(

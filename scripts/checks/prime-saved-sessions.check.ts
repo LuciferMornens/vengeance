@@ -7,7 +7,7 @@ import { runInNewContext } from 'node:vm'
 import type {
   SessionLineage,
   SessionListResult,
-  WorkspaceDiscovery
+  WorkspaceScan
 } from '../../src/shared/api/sessions'
 import { SessionIndex } from '../../src/main/features/sessions/index'
 import { samePath } from '../../src/main/paths'
@@ -15,7 +15,7 @@ import { check } from './harness'
 
 interface SavedSessionApi {
   listPrimeSessions(query: { cwd: string | null }): Promise<SessionListResult>
-  discoverPrimeWorkspaces(): Promise<WorkspaceDiscovery[]>
+  discoverPrimeWorkspaces(): Promise<WorkspaceScan>
   primeSessionIdentity(path: string): Promise<{
     cwd: string
     engine: 'prime'
@@ -227,12 +227,17 @@ await check(
       assert.equal(await api.primeSessionIdentity(deleted), null)
       assert.equal(await api.primeSessionIdentity(unadmitted), null)
       assert.equal(await api.primeSessionIdentity(outside), null)
-      assert.ok((await api.discoverPrimeWorkspaces()).some((item) => item.path === childWorkspace))
+      const healthyScan = await api.discoverPrimeWorkspaces()
+      assert.ok(healthyScan.workspaces.some((item) => item.path === childWorkspace))
+      assert.equal(healthyScan.complete, true)
       warning = 'Native lineage capacity reached'
       const healthyPartial = await api.listPrimeSessions({ cwd: null })
       assert.ok(healthyPartial.sessions.some((item) => item.path === child))
       assert.equal((await api.primeSessionIdentity(child))?.engine, 'prime')
-      assert.ok((await api.discoverPrimeWorkspaces()).some((item) => item.path === childWorkspace))
+      const warnedScan = await api.discoverPrimeWorkspaces()
+      assert.ok(warnedScan.workspaces.some((item) => item.path === childWorkspace))
+      // A lineage warning may hide child-only folders, so the scan cannot drop workspaces.
+      assert.equal(warnedScan.complete, false)
       includeChildren = false
       const partial = await api.listPrimeSessions({ cwd: null })
       assert.equal(partial.warning, warning)

@@ -32,13 +32,12 @@ import {
   DATE_GROUPS,
   dateGroup,
   generatedChildName,
-  isSubagentSession,
   itemTitle,
   LIVE_LABEL,
   liveState,
   matchesQuery,
-  shortTime,
-  subagentParentPath
+  partitionSessions,
+  shortTime
 } from './model'
 import { useSessionPaletteActions } from './palette-actions'
 import { SessionDialogs } from './SessionDialogs'
@@ -55,11 +54,15 @@ import {
   useSessionsPrefs
 } from './store'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
-import { BackgroundSessions } from './BackgroundSessions'
+import { backgroundMatches, BackgroundSessions } from './BackgroundSessions'
 import { WindowedList } from './WindowedList'
 import { inWorkspaceView } from './workspace-view'
 import { onSessionListKeyDown, SidebarSearch } from './SidebarSearch'
-import { buildPrimeSessionFamilies, primeFamilyNode } from './prime-family-model'
+import {
+  buildPrimeSessionFamilies,
+  primeBackgroundFamilyNode,
+  primeFamilyNode
+} from './prime-family-model'
 import {
   PrimeFamilyChildren,
   primeFamilyMatches,
@@ -84,9 +87,16 @@ function workspaceName(cwd: string, workspaces: { path: string; name: string }[]
 }
 
 /** Child sessions of subagent runs under their parent's row: one quiet line, expanded on demand (or while searching). */
-function SubagentSessions({ items, searching }: { items: SessionListItem[]; searching: boolean }) {
-  const parentPath = items[0] ? subagentParentPath(items[0]) : undefined
-  const expansionKey = `subagents:${normalizePath(parentPath ?? '')}`
+function SubagentSessions({
+  parentPath,
+  items,
+  searching
+}: {
+  parentPath: string
+  items: SessionListItem[]
+  searching: boolean
+}) {
+  const expansionKey = `subagents:${normalizePath(parentPath)}`
   const expanded = useSessions((state) => state.expandedLists.includes(expansionKey))
   const shown = expanded || searching
   return (
@@ -114,6 +124,7 @@ function SubagentSessions({ items, searching }: { items: SessionListItem[]; sear
             transition={spring.panel}
             className="overflow-hidden pl-4"
           >
+            {/* Pinned sessions stay in the list (`partitionSessions`), so none here is pinned. */}
             <WindowedList items={items} itemKey={(item) => item.path}>
               {(item) => <HistoryRow item={item} pinned={false} />}
             </WindowedList>
@@ -189,7 +200,7 @@ function HistoryRow({
         onIntent={() => prewarmSavedSession(target)}
       />
       {subagents && subagents.length > 0 && (
-        <SubagentSessions items={subagents} searching={searching} />
+        <SubagentSessions parentPath={item.path} items={subagents} searching={searching} />
       )}
       {family}
     </>
@@ -375,7 +386,7 @@ function DormantRow({
         onIntent={() => prewarmSavedSession(target)}
       />
       {subagents && subagents.length > 0 && (
-        <SubagentSessions items={subagents} searching={searching} />
+        <SubagentSessions parentPath={session.path} items={subagents} searching={searching} />
       )}
       {family}
     </>
@@ -440,29 +451,16 @@ export function SessionSidebar() {
     [listed]
   )
   const hasQuery = !!query.trim()
-  // The list holds main conversations: subagent sessions sit under their parent's row, and one
-  // whose parent is not listed only shows up as a search result.
-  const { items, subagentsByParent } = useMemo(() => {
-    const topLevel: SessionListItem[] = []
-    const children = new Map<string, SessionListItem[]>()
-    for (const item of listed ?? []) {
-      if (item.engine === 'prime' && primeFamilyNode(families, item.path)?.child) continue
-      if (!isSubagentSession(item)) {
-        topLevel.push(item)
-        continue
-      }
-      const parentPath = subagentParentPath(item)
-      const parent = parentPath ? normalizePath(parentPath) : undefined
-      if (!parent || !byPath.has(parent)) {
-        if (hasQuery) topLevel.push(item)
-        continue
-      }
-      const siblings = children.get(parent)
-      if (siblings) siblings.push(item)
-      else children.set(parent, [item])
-    }
-    return { items: topLevel, subagentsByParent: children }
-  }, [listed, byPath, families, hasQuery])
+  const { items, subagentsByParent } = useMemo(
+    () =>
+      partitionSessions(listed ?? [], {
+        key: normalizePath,
+        skip: (item) => item.engine === 'prime' && !!primeFamilyNode(families, item.path)?.child,
+        pinned: (item) => pinned.has(normalizePath(item.path)),
+        searching: hasQuery
+      }),
+    [listed, families, pinned, hasQuery]
+  )
   const subagentsOf = (path: string, engine?: EngineId): SubagentRowProps => {
     const subagents = subagentsByParent.get(normalizePath(path))
     return {
@@ -558,8 +556,11 @@ export function SessionSidebar() {
   }, [rest])
 
   const loading = (scope === 'all' || !!listCwd) && (!list || !list.loaded)
-  const hasBackgroundMatch = background.some((agent) =>
-    matchesQuery(query, agent.name, agent.cwd, agent.status)
+  const hasBackgroundMatch = background.some(
+    (agent) =>
+      !primeBackgroundFamilyNode(families, agent)?.child &&
+      inView(agent.cwd) &&
+      backgroundMatches(agent, families, query)
   )
   const primeOrphans = visiblePrimeOrphans(families, query, inView)
   const nothing =
@@ -606,7 +607,13 @@ export function SessionSidebar() {
                           : undefined
                       }
                     />
-                    {subagents && <SubagentSessions items={subagents} searching={!!searching} />}
+                    {agent.file && subagents && (
+                      <SubagentSessions
+                        parentPath={agent.file}
+                        items={subagents}
+                        searching={!!searching}
+                      />
+                    )}
                     <PrimeFamilyChildren
                       parent={familyOf(agent.file, agent.nativeId, agent.engine, agent.id)}
                       query={query}

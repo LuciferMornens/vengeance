@@ -8,6 +8,7 @@ import {
 import { basename } from '../lib/format'
 import { invoke } from '../lib/ipc'
 import { normalizePath, samePath } from '../lib/paths'
+import { reconcileWorkspaces } from './workspace-reconcile'
 import { normalizeEngineId, type EngineId } from '@shared/api/engine'
 
 export interface UiState {
@@ -98,44 +99,10 @@ export const useApp = create<AppStore>()((set, get) => ({
     const quiet = get().workspaceDiscovery === 'ready'
     if (!quiet) set({ workspaceDiscovery: 'loading', workspaceDiscoveryError: null })
     try {
-      const discovered = await invoke('sessions:workspaces')
+      const discovery = await invoke('sessions:workspaces')
       const { prefs } = get()
-      const hidden = new Set((prefs.features.sessions?.hiddenWorkspaces ?? []).map(normalizePath))
-      const restored = prefs.openSessions.map((session) => ({
-        path: session.cwd,
-        engine: session.engine
-      }))
-      const candidates = [
-        ...restored,
-        ...discovered.workspaces,
-        ...(prefs.activeWorkspace ? [{ path: prefs.activeWorkspace, engine: undefined }] : [])
-      ].filter(({ path }) => !!path)
-      const current = new Set(candidates.map(({ path }) => normalizePath(path)))
-      // A folder that was only ever found through its history leaves once a complete scan no longer
-      // finds it (its folder or its last session is gone); folders the user opened or pinned stay.
-      const workspaces = prefs.workspaces.filter(
-        (workspace) =>
-          !discovered.complete ||
-          workspace.lastOpenedAt > 0 ||
-          workspace.pinned ||
-          current.has(normalizePath(workspace.path))
-      )
-      const known = new Set(workspaces.map((workspace) => normalizePath(workspace.path)))
-      for (const { path, engine } of candidates) {
-        const key = normalizePath(path)
-        if (known.has(key) || hidden.has(key)) continue
-        known.add(key)
-        workspaces.push({
-          path,
-          name: basename(path),
-          lastOpenedAt: 0,
-          engine: normalizeEngineId(engine)
-        })
-      }
-      const changed =
-        workspaces.length !== prefs.workspaces.length ||
-        workspaces.some((workspace, index) => workspace !== prefs.workspaces[index])
-      if (changed) get().update({ workspaces })
+      const workspaces = reconcileWorkspaces(prefs, discovery, normalizePath)
+      if (workspaces !== prefs.workspaces) get().update({ workspaces })
       if (!quiet) set({ workspaceDiscovery: 'ready' })
     } catch (error) {
       // A failed quiet re-scan keeps the list it has; the next one tries again.
@@ -204,7 +171,10 @@ export const useApp = create<AppStore>()((set, get) => ({
     get().update({
       workspaces: known
         ? workspaces.map((workspace) =>
-            samePath(workspace.path, path) ? { ...workspace, engine } : workspace
+            // Choosing an engine for a discovered folder keeps it like opening it does.
+            samePath(workspace.path, path)
+              ? { ...workspace, engine, lastOpenedAt: workspace.lastOpenedAt || Date.now() }
+              : workspace
           )
         : [...workspaces, { path, name: basename(path), engine, lastOpenedAt: Date.now() }]
     })

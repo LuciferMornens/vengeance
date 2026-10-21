@@ -62,10 +62,16 @@ export interface WorkspaceDiscovery {
   engine?: EngineId
 }
 
-/** Existing folders with saved history. `complete` is false when an engine's history was unreadable. */
-export interface WorkspaceDiscoveryResult {
+/** Folders with saved history. */
+export interface WorkspaceScan {
   workspaces: WorkspaceDiscovery[]
+  /** False when some saved history could not be read, so a folder with history may be missing. */
   complete: boolean
+}
+
+export interface WorkspaceDiscoveryResult extends WorkspaceScan {
+  /** Known workspace folders that were deleted: missing from a parent folder that is still there. */
+  gone: string[]
 }
 
 export interface SessionIdentity {

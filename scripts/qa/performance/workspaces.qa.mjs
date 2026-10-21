@@ -129,6 +129,7 @@ try {
         const otherCwd = agentDir.path(join('..', 'workspace-discovery-other'))
         const deletedCwd = agentDir.path(join('..', 'workspace-discovery-deleted'))
         const staleCwd = agentDir.path(join('..', 'workspace-discovery-stale'))
+        const removedCwd = agentDir.path(join('..', 'workspace-discovery-removed'))
         const folders = [activeCwd, historyCwd, otherCwd]
         for (const folder of folders) {
           await agentDir.writeText(
@@ -324,6 +325,7 @@ try {
             ok: true,
             value: {
               workspaces: folders.map((path) => ({ path, lastActivityAt: Date.now() })),
+              gone: [],
               complete: true
             }
           })
@@ -371,12 +373,13 @@ try {
                 })
               },
               {
-                first: { workspaces: known, complete: true },
+                first: { workspaces: known, gone: [], complete: true },
                 next: {
                   workspaces: [
                     ...known,
                     { path: nextCwd, lastActivityAt: Date.now(), engine: 'pi' }
                   ],
+                  gone: [],
                   complete: true
                 }
               }
@@ -493,6 +496,38 @@ try {
           assert.equal(await workspaceChoice(current, staleCwd).count(), 0)
           await current.screenshot('workspaces-stale-history-removed')
           await current.page.keyboard.press('Escape')
+        })
+
+        await step('an opened folder leaves the switcher once it is deleted', async () => {
+          const hasRemoved = (prefs) =>
+            prefs.workspaces.some(
+              (workspace) => normalizedPath(workspace.path) === normalizedPath(removedCwd)
+            )
+          await agentDir.writeText(
+            join('..', basename(removedCwd), 'README.md'),
+            '# Removed workspace QA\n'
+          )
+          await savedSession(agentDir, removedCwd, 'History that outlives its folder')
+          const { workspaces } = (await current.appState()).prefs
+          await current.test('setPrefs', {
+            workspaces: [
+              ...workspaces,
+              { path: removedCwd, name: 'removed', lastOpenedAt: Date.now(), engine: 'pi' }
+            ]
+          })
+          await waitForPersistence(current, hasRemoved)
+          // The folder goes; its saved history stays, as when a project folder is deleted.
+          await rm(removedCwd, { recursive: true })
+          await notifySessionChange(current, agentDir.path('sessions'))
+          const prefs = await waitForPreferences(
+            current,
+            (value) => !hasRemoved(value),
+            'deleted folder removal'
+          )
+          const paths = new Set(prefs.workspaces.map((workspace) => normalizedPath(workspace.path)))
+          for (const folder of folders) {
+            assert.ok(paths.has(normalizedPath(folder)), `${folder} stays after the scan`)
+          }
         })
 
         await step(

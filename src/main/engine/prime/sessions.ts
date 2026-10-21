@@ -12,7 +12,8 @@ import type {
   SessionLineage,
   SessionListQuery,
   SessionListResult,
-  WorkspaceDiscovery
+  WorkspaceDiscovery,
+  WorkspaceScan
 } from '@shared/api/sessions'
 import type { FlatSessionTree } from '@shared/engine-types'
 import { mapSessionFiles, SessionIndex, sessionFilesIn } from '../../features/sessions/index'
@@ -62,7 +63,7 @@ export function primeCreatePayload(args: CreateAgentArgs): PrimeRecord {
 const sessionIndex = new SessionIndex('prime')
 const knownRoots = new Set<string>()
 const pendingListings = new Map<string, Promise<SessionListResult>>()
-const pendingDiscoveries = new Map<string, Promise<WorkspaceDiscovery[]>>()
+const pendingDiscoveries = new Map<string, Promise<WorkspaceScan>>()
 const pendingLineage = new Map<string, Promise<PrimeSavedLineage>>()
 
 async function savedLineage(directories: string[]): Promise<PrimeSavedLineage> {
@@ -215,7 +216,7 @@ async function loadPrimeSessions(query: SessionListQuery): Promise<SessionListRe
 export async function discoverPrimeWorkspaces(
   _overridePath?: string | null,
   knownCwds: string[] = []
-): Promise<WorkspaceDiscovery[]> {
+): Promise<WorkspaceScan> {
   const directories = await primeSessionRoots(knownCwds)
   const key = JSON.stringify(directories.map(comparablePath).sort())
   const pending = pendingDiscoveries.get(key)
@@ -229,9 +230,14 @@ export async function discoverPrimeWorkspaces(
   }
 }
 
-async function loadPrimeWorkspaces(directories: string[]): Promise<WorkspaceDiscovery[]> {
+async function loadPrimeWorkspaces(directories: string[]): Promise<WorkspaceScan> {
+  let unreadable = false
   const [rootFiles, lineage] = await Promise.all([
-    mapSessionFiles(directories, sessionFilesIn),
+    mapSessionFiles(directories, (directory) =>
+      sessionFilesIn(directory, () => {
+        unreadable = true
+      })
+    ),
     savedLineage(directories)
   ])
   const files = [
@@ -262,9 +268,13 @@ async function loadPrimeWorkspaces(directories: string[]): Promise<WorkspaceDisc
       })
     }
   })
-  return [...workspaces.values()].sort(
-    (first, second) => second.lastActivityAt - first.lastActivityAt
-  )
+  return {
+    workspaces: [...workspaces.values()].sort(
+      (first, second) => second.lastActivityAt - first.lastActivityAt
+    ),
+    // Without the helper's lineage, saved child sessions (and folders only they used) are left out.
+    complete: !unreadable && !lineage.warning
+  }
 }
 
 export async function primeSessionCwd(path: string): Promise<string> {
