@@ -12,7 +12,7 @@ body:
     attributes:
       label: Vengeance version
       description: Settings → General → About Vengeance shows it. For a source build, the commit.
-      placeholder: 0.3.6
+      placeholder: 0.3.7
     validations:
       required: true
   - type: dropdown

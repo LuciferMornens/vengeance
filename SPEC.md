@@ -791,7 +791,7 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   establish Dock behavior.
   Since 0.3.3, both macOS and both Linux architectures also qualify the official same-platform
   0.3.2 package's Engine 2 `0.10.0+vengeance.10` to the packaged candidate's build (`.12` in 0.3.3,
-  `.13` in 0.3.4 to 0.3.6).
+  `.13` in 0.3.4 to 0.3.6, and `0.10.1+vengeance.1` in 0.3.7).
   `scripts/qa/engines/release-baseline.mjs` verifies pinned public `SHA256SUMS` and asset hashes,
   extracts the complete baseline package, verifies native inventories and macOS signatures, and
   writes `release-baseline-env.json`. Run `platform-qualification.mjs` with `QA_PLATFORM_GROUP=upgrade`
@@ -806,7 +806,7 @@ macOS traffic lights or Electron's Linux caption buttons. Gate 4 is not part of 
   without that constraint or a Python override and load the bundled wheel in its refreshed environment.
   Windows's `.10` to `.11` transition evidence is retained in the prior PR qualification report;
   the Intel wheel path does not change Windows dependency resolution. pi is `1.3.0+vengeance.2` in
-  0.3.2 and 0.3.3, `.3` in 0.3.4 and `.4` in 0.3.5 and 0.3.6, on the same `v1.3.0` base; its historical 1.2 to 1.3 transition
+  0.3.2 and 0.3.3, `.3` in 0.3.4 and `.4` in 0.3.5 and 0.3.6, on the same `v1.3.0` base, then `1.4.0+vengeance.1` in 0.3.7; its historical 1.2 to 1.3 transition
   fixture is not a release gate.
   After packaged and applicable upgrade qualification, run
   `scripts/perf/first-navigation.mjs --label <platform> --runs 3`
