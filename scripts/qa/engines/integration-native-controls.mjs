@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { inspectRequest, turn } from '../lib/fake-llm.mjs'
 import { closeSettings, openSettings } from '../settings/settings-ui.mjs'
 import { PRIME_HEADER_VALUE } from './integration-fixture.mjs'
+import { PYTHON_TOOLS } from '../lib/native-kernel.mjs'
 
 const WAIT_TIMEOUT_MS = 60_000
 const POLL_INTERVAL_MS = 50
@@ -66,7 +67,7 @@ export async function checkNativeSubagents(
 ) {
   const toolName =
     runtimeToolName ??
-    inspectRequest(server.requests[0]).tools.find((name) => name === 'ipython' || name === 'python')
+    inspectRequest(server.requests[0]).tools.find((name) => PYTHON_TOOLS.includes(name))
   await checkStep(
     'native subagent controls message a resident and cancel an initial running task',
     async () => {
@@ -245,7 +246,7 @@ export async function checkNativeSubagents(
 
 export async function checkNativeControls(application, server, agentId, checkStep) {
   const runtimeToolName = inspectRequest(server.requests[0]).tools.find(
-    (name) => name === 'ipython' || name === 'python'
+    (name) => PYTHON_TOOLS.includes(name)
   )
   const check = (label, action) =>
     checkStep(label, async () => {

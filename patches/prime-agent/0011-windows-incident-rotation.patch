@@ -1,5 +1,5 @@
 diff --git a/crates/pa-tui/src/incident_notices.rs b/crates/pa-tui/src/incident_notices.rs
-index 56e26bd..42787af 100644
+index 56e26bd02..42787af25 100644
 --- a/crates/pa-tui/src/incident_notices.rs
 +++ b/crates/pa-tui/src/incident_notices.rs
 @@ -67,7 +67,7 @@ pub struct IncidentNoticeState {

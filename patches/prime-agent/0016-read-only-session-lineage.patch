@@ -1,8 +1,8 @@
 diff --git a/crates/pa-daemon/src/rlm_ledger.rs b/crates/pa-daemon/src/rlm_ledger.rs
-index 3bf550d..952cc6b 100644
+index 0b81c1c49..71209a1ea 100644
 --- a/crates/pa-daemon/src/rlm_ledger.rs
 +++ b/crates/pa-daemon/src/rlm_ledger.rs
-@@ -153,6 +153,19 @@ impl RlmSpawnLedger {
+@@ -256,6 +256,19 @@ impl RlmSpawnLedger {
          &self.path
      }
  
@@ -22,7 +22,7 @@ index 3bf550d..952cc6b 100644
      fn log(&self, message: &str) {
          (self.log)(message);
      }
-@@ -533,6 +546,41 @@ impl RlmSpawnLedger {
+@@ -662,6 +675,45 @@ impl RlmSpawnLedger {
              .collect())
      }
  
@@ -35,30 +35,34 @@ index 3bf550d..952cc6b 100644
 +    pub fn edges_with_resolved_paths(&self, include_deleted: bool) -> Result<Vec<RlmLedgerEdge>> {
 +        self.seed_once()?;
 +        let state = self.replay_cached()?;
-+        let mut resolver =
-+            LivePathResolver::new(self.agent_dir.clone(), self.canonical_sessions_dir.clone());
-+        Ok(state
++        let mut resolver = LivePathResolver::new(
++            self.agent_dir.clone(),
++            self.canonical_sessions_dir.clone(),
++            &state.artifact_index,
++        );
++        let mut resolve = |recorded: &String| -> Result<String> {
++            Ok(resolver
++                .resolve(recorded)?
++                .map_or_else(|| recorded.clone(), |path| path.to_string_lossy().into()))
++        };
++        let mut edges = Vec::new();
++        for edge in state
 +            .edges
 +            .iter()
 +            .filter(|edge| include_deleted || edge.deleted.is_none())
-+            .map(|edge| RlmLedgerEdge {
-+                parent: if edge.deleted.is_some() {
-+                    edge.parent.clone()
-+                } else {
-+                    resolver
-+                        .resolve(&edge.parent)
-+                        .map_or_else(|| edge.parent.clone(), |path| path.to_string_lossy().into())
-+                },
-+                child: if edge.deleted.is_some() {
-+                    edge.child.clone()
-+                } else {
-+                    resolver
-+                        .resolve(&edge.child)
-+                        .map_or_else(|| edge.child.clone(), |path| path.to_string_lossy().into())
-+                },
-+                ..edge.clone()
-+            })
-+            .collect())
++        {
++            // Tombstones keep their recorded endpoints even when transcripts survive.
++            edges.push(if edge.deleted.is_some() {
++                edge.clone()
++            } else {
++                RlmLedgerEdge {
++                    parent: resolve(&edge.parent)?,
++                    child: resolve(&edge.child)?,
++                    ..edge.clone()
++                }
++            });
++        }
++        Ok(edges)
 +    }
 +
      /// Live edges reconciled by liveness of their recorded endpoints: a dead endpoint drops the
@@ -66,7 +70,7 @@ index 3bf550d..952cc6b 100644
      ///
 diff --git a/crates/pa-daemon/tests/read_only_roster.rs b/crates/pa-daemon/tests/read_only_roster.rs
 new file mode 100644
-index 0000000..2cacd04
+index 000000000..2cacd0461
 --- /dev/null
 +++ b/crates/pa-daemon/tests/read_only_roster.rs
 @@ -0,0 +1,174 @@

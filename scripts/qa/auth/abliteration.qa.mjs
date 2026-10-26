@@ -16,7 +16,14 @@ import {
 } from './helpers.mjs'
 
 const PROVIDER = 'abliteration'
-const MODEL_IDS = ['abliterated-model', 'abliterated-model-large-v2', 'abliterated-model-large']
+const MODEL_IDS = [
+  'abliterated-model',
+  'abliterated-model-large-v2',
+  'abliterated-model-large',
+  'abliterated-model-large-flash'
+]
+/** The models that take images. */
+const VISION = new Set(['abliterated-model', 'abliterated-model-large-flash'])
 const LIVE = process.env.VENGEANCE_LIVE_ABLITERATION_QA === '1'
 const API_KEY = LIVE ? process.env.ABLIT_KEY : FAKE_API_KEY
 const LIVE_OUTPUT_LIMIT = 1024
@@ -98,7 +105,7 @@ await runSuite(
       const auth = await readTempAuth(agentDir)
       assert.ok(auth[PROVIDER]?.key === API_KEY, 'native auth saved only in the temp account')
       const catalog = await app.invoke('settings:catalog')
-      assert.equal(catalog.providers.find((entry) => entry.id === PROVIDER).availableCount, 3)
+      assert.equal(catalog.providers.find((entry) => entry.id === PROVIDER).availableCount, MODEL_IDS.length)
       assert.ok(!JSON.stringify(catalog).includes(API_KEY), 'catalog masks the key')
       assert.ok(!(await page.locator('body').innerText()).includes(API_KEY), 'UI masks the key')
       await row.scrollIntoViewIfNeeded()
@@ -107,7 +114,7 @@ await runSuite(
     })
 
     await step(
-      'all three models appear in a new native session and the composer picker',
+      'every model appears in a new native session and the composer picker',
       async () => {
         await openModel(app, MODEL_IDS[0])
         const { models } = await app.rpc({ type: 'get_available_models' })
@@ -136,11 +143,11 @@ await runSuite(
       await step(`${modelId}: native streaming, reasoning and read-tool continuation`, async () => {
         await openModel(app, modelId)
         const { levels } = await app.rpc({ type: 'get_available_thinking_levels' })
-        const reasoning = modelId === 'abliterated-model-large' ? 'high' : 'low'
+        const reasoning = 'low'
         assert.ok(levels.includes(reasoning))
         await app.rpc({ type: 'set_thinking_level', level: reasoning })
         const state = await app.rpc({ type: 'get_state' })
-        assert.equal(state.model.input.includes('image'), modelId === MODEL_IDS[0])
+        assert.equal(state.model.input.includes('image'), VISION.has(modelId))
         const from = server.requests.length
         if (!LIVE) {
           server.queue(
@@ -201,7 +208,7 @@ await runSuite(
           await app.rpc({
             type: 'prompt',
             message: 'Reply with just: ok',
-            ...(!LIVE && modelId === MODEL_IDS[0] ? { images: [IMAGE] } : {})
+            ...(!LIVE && VISION.has(modelId) ? { images: [IMAGE] } : {})
           })
           await waitUntil(async () => (await app.agentState()).entries.length > entryCount, {
             label: 'native prompt accepted'
@@ -214,7 +221,7 @@ await runSuite(
           } else {
             const request = await server.waitForRequest(undefined, { from })
             assert.equal(request.body.reasoning_effort, level === 'off' ? 'none' : level)
-            assert.equal(inspectRequest(request).imageCount > 0, modelId === MODEL_IDS[0])
+            assert.equal(inspectRequest(request).imageCount > 0, VISION.has(modelId))
           }
         }
       }

@@ -1,5 +1,5 @@
 diff --git a/crates/pa-ai/src/lib.rs b/crates/pa-ai/src/lib.rs
-index 18d4cc7..3d4b975 100644
+index e9151481b..3f3de13c9 100644
 --- a/crates/pa-ai/src/lib.rs
 +++ b/crates/pa-ai/src/lib.rs
 @@ -16,7 +16,9 @@ pub mod types;
@@ -13,7 +13,7 @@ index 18d4cc7..3d4b975 100644
  #[cfg(test)]
  mod prime_inference_differential_test;
 diff --git a/crates/pa-ai/src/providers/openai_codex_responses/errors.rs b/crates/pa-ai/src/providers/openai_codex_responses/errors.rs
-index e47a7b4..f33e4b8 100644
+index e47a7b452..f33e4b841 100644
 --- a/crates/pa-ai/src/providers/openai_codex_responses/errors.rs
 +++ b/crates/pa-ai/src/providers/openai_codex_responses/errors.rs
 @@ -482,6 +482,7 @@ fn normalize_codex_status(status: &Value) -> Option<&'static str> {
@@ -37,7 +37,7 @@ index e47a7b4..f33e4b8 100644
          return request_service_tier;
      }
 diff --git a/crates/pa-ai/src/providers/openai_codex_responses/mod.rs b/crates/pa-ai/src/providers/openai_codex_responses/mod.rs
-index 712bab1..c625b18 100644
+index 712bab182..c625b18a4 100644
 --- a/crates/pa-ai/src/providers/openai_codex_responses/mod.rs
 +++ b/crates/pa-ai/src/providers/openai_codex_responses/mod.rs
 @@ -63,10 +63,10 @@ pub struct OpenAICodexResponsesOptions {
@@ -93,7 +93,7 @@ index 712bab1..c625b18 100644
          reasoning_effort,
          ..Default::default()
 diff --git a/crates/pa-ai/src/providers/openai_responses.rs b/crates/pa-ai/src/providers/openai_responses.rs
-index d37a329..6fb32da 100644
+index d37a329a4..6fb32da2e 100644
 --- a/crates/pa-ai/src/providers/openai_responses.rs
 +++ b/crates/pa-ai/src/providers/openai_responses.rs
 @@ -91,10 +91,10 @@ pub struct OpenAIResponsesOptions {
@@ -143,7 +143,7 @@ index d37a329..6fb32da 100644
      stream_openai_responses(model, context, Some(&stream_options))
  }
 diff --git a/crates/pa-ai/src/providers/openai_responses_hooks.rs b/crates/pa-ai/src/providers/openai_responses_hooks.rs
-index 836641b..52b07ff 100644
+index 836641b4f..52b07ff8e 100644
 --- a/crates/pa-ai/src/providers/openai_responses_hooks.rs
 +++ b/crates/pa-ai/src/providers/openai_responses_hooks.rs
 @@ -39,6 +39,7 @@ pub struct ResponsesStreamHooks {
@@ -156,7 +156,7 @@ index 836641b..52b07ff 100644
                  2.5
 diff --git a/crates/pa-ai/src/service_tiers.rs b/crates/pa-ai/src/service_tiers.rs
 new file mode 100644
-index 0000000..502eec3
+index 000000000..502eec3a5
 --- /dev/null
 +++ b/crates/pa-ai/src/service_tiers.rs
 @@ -0,0 +1,233 @@
@@ -395,7 +395,7 @@ index 0000000..502eec3
 +}
 diff --git a/crates/pa-ai/tests/service_tiers.rs b/crates/pa-ai/tests/service_tiers.rs
 new file mode 100644
-index 0000000..4208877
+index 000000000..420887759
 --- /dev/null
 +++ b/crates/pa-ai/tests/service_tiers.rs
 @@ -0,0 +1,157 @@
@@ -558,7 +558,7 @@ index 0000000..4208877
 +}
 diff --git a/crates/pa-ai/tests/service_tiers_transport.rs b/crates/pa-ai/tests/service_tiers_transport.rs
 new file mode 100644
-index 0000000..10fcbce
+index 000000000..10fcbce56
 --- /dev/null
 +++ b/crates/pa-ai/tests/service_tiers_transport.rs
 @@ -0,0 +1,150 @@
@@ -713,18 +713,18 @@ index 0000000..10fcbce
 +    server.await.unwrap();
 +}
 diff --git a/crates/pa-core/src/settings/manager.rs b/crates/pa-core/src/settings/manager.rs
-index 49a7c6e..5d44946 100644
+index 6e9af35b5..e2bf53e2b 100644
 --- a/crates/pa-core/src/settings/manager.rs
 +++ b/crates/pa-core/src/settings/manager.rs
-@@ -613,6 +613,7 @@ impl SettingsManager {
+@@ -619,6 +619,7 @@ impl SettingsManager {
              ServiceTier::Flex => "flex",
              ServiceTier::Scale => "scale",
              ServiceTier::Priority => "priority",
 +            ServiceTier::Ultrafast => "ultrafast",
          };
          self.global.default_service_tier = Some(name.to_string());
-         self.save_global()
-@@ -631,6 +632,7 @@ impl SettingsManager {
+         self.save_global(&["defaultServiceTier"])
+@@ -637,6 +638,7 @@ impl SettingsManager {
                  "flex" => Some(ServiceTier::Flex),
                  "scale" => Some(ServiceTier::Scale),
                  "priority" => Some(ServiceTier::Priority),
@@ -733,10 +733,10 @@ index 49a7c6e..5d44946 100644
                  _ => None,
              })
 diff --git a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
-index f9bf903..046c647 100644
+index c2fffb77d..50e014a20 100644
 --- a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
 +++ b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
-@@ -326,6 +326,22 @@ impl SessionEngine for AgentSessionEngine {
+@@ -372,6 +372,22 @@ impl SessionEngine for AgentSessionEngine {
          }
      }
  
@@ -760,10 +760,10 @@ index f9bf903..046c647 100644
          // Merge like the TS runtime config: explicit wire flags replace; absent fields keep.
          {
 diff --git a/crates/pa-daemon/src/engine.rs b/crates/pa-daemon/src/engine.rs
-index a8b7a9f..f08f093 100644
+index 7451f58f2..a5ace06bf 100644
 --- a/crates/pa-daemon/src/engine.rs
 +++ b/crates/pa-daemon/src/engine.rs
-@@ -265,6 +265,13 @@ pub trait SessionEngine: Send + Sync {
+@@ -271,6 +271,13 @@ pub trait SessionEngine: Send + Sync {
      /// Set the session's resolved service-tier preference before the next request.
      fn configure_service_tier(&self, _tier: Option<pa_types::ai::ServiceTier>) {}
  
@@ -778,7 +778,7 @@ index a8b7a9f..f08f093 100644
      /// the create-config flag (else the settings default, else `"medium"`),
      /// clamped to the model's supported levels; `None` records `"off"`.
 diff --git a/crates/pa-daemon/src/setting_switches.rs b/crates/pa-daemon/src/setting_switches.rs
-index 20e1523..7f89750 100644
+index 20e1523a5..7f89750fe 100644
 --- a/crates/pa-daemon/src/setting_switches.rs
 +++ b/crates/pa-daemon/src/setting_switches.rs
 @@ -42,6 +42,7 @@ pub(crate) fn service_tier_wire_name(tier: ServiceTier) -> &'static str {
@@ -803,10 +803,10 @@ index 20e1523..7f89750 100644
              .then_some(tier)
              .or(Some(ServiceTier::Default)),
 diff --git a/crates/pa-daemon/src/worker/commands.rs b/crates/pa-daemon/src/worker/commands.rs
-index 2a791cb..005ed7c 100644
+index 8aef0523f..d720269d8 100644
 --- a/crates/pa-daemon/src/worker/commands.rs
 +++ b/crates/pa-daemon/src/worker/commands.rs
-@@ -102,7 +102,22 @@ impl Worker {
+@@ -106,7 +106,22 @@ impl Worker {
              "clear_queue" => self.handle_clear_queue(),
              "abort_and_clear_queue" => self.handle_abort_and_clear_queue(),
              "get_last_assistant_text" => self.handle_get_last_assistant_text(),
@@ -831,10 +831,10 @@ index 2a791cb..005ed7c 100644
              "set_mcp_static_token" => self.handle_set_mcp_static_token(payload).await,
              "remove_mcp_connection" => self.handle_remove_mcp_connection(payload).await,
 diff --git a/crates/pa-tui/src/tree_display.rs b/crates/pa-tui/src/tree_display.rs
-index 6962e24..dda731f 100644
+index d1627e4b9..096d29f4e 100644
 --- a/crates/pa-tui/src/tree_display.rs
 +++ b/crates/pa-tui/src/tree_display.rs
-@@ -310,6 +310,7 @@ fn tier_name(tier: pa_types::ai::ServiceTier) -> &'static str {
+@@ -324,6 +324,7 @@ fn tier_name(tier: pa_types::ai::ServiceTier) -> &'static str {
          pa_types::ai::ServiceTier::Flex => "flex",
          pa_types::ai::ServiceTier::Scale => "scale",
          pa_types::ai::ServiceTier::Priority => "priority",
@@ -843,7 +843,7 @@ index 6962e24..dda731f 100644
  }
  
 diff --git a/crates/pa-types/src/ai/mod.rs b/crates/pa-types/src/ai/mod.rs
-index 938b700..0fe1e1a 100644
+index 2bdaa04f5..0dd606a42 100644
 --- a/crates/pa-types/src/ai/mod.rs
 +++ b/crates/pa-types/src/ai/mod.rs
 @@ -172,7 +172,7 @@ pub enum Transport {
@@ -863,7 +863,7 @@ index 938b700..0fe1e1a 100644
  }
  
  /// HTTP response metadata handed to the `onResponse` hook.
-@@ -746,8 +747,14 @@ pub fn supports_service_tier_fields(
+@@ -753,8 +754,14 @@ pub fn supports_service_tier_fields(
      let eligible_id = model_id == "gpt-5.4"
          || model_id == "gpt-5.5"
          || model_id == "gpt-5.6"
@@ -879,7 +879,7 @@ index 938b700..0fe1e1a 100644
      if tier == ServiceTier::Priority {
          return eligible_id;
      }
-@@ -768,6 +775,14 @@ pub fn supports_service_tier(model: &Model, tier: ServiceTier) -> bool {
+@@ -775,6 +782,14 @@ pub fn supports_service_tier(model: &Model, tier: ServiceTier) -> bool {
  pub fn clamp_service_tier(model: Option<&Model>, tier: Option<ServiceTier>) -> Option<ServiceTier> {
      match tier {
          None | Some(ServiceTier::Default) => tier,

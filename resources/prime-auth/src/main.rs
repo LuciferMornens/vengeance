@@ -25,7 +25,7 @@ use serde_json::{json, Value};
 use tokio::sync::{mpsc, oneshot, Notify};
 
 const PROTOCOL_VERSION: u32 = 1;
-const UPSTREAM_REVISION: &str = "763094e1b6a7c17450ee8399b06cda1853847ca5";
+const UPSTREAM_REVISION: &str = "8aac8692456c00c01d4e53e60e6d3347a3506559";
 const MAX_INPUT_BYTES: usize = 64 * 1024;
 const INPUT_QUEUE_CAPACITY: usize = 8;
 const PROVIDERS: [&str; 6] = [

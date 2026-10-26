@@ -1,12 +1,3 @@
-From 4040a6b63e31f77a2bdf8ba7488f421b4085549c Mon Sep 17 00:00:00 2001
-From: Vengeance <126121081+LuciferMornens@users.noreply.github.com>
-Date: Mon, 12 Oct 2026 11:20:17 +0200
-Subject: [PATCH] fix: compare release archive paths portably on Windows
-
----
- scripts/package_release.py | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
-
 diff --git a/scripts/package_release.py b/scripts/package_release.py
 index f60a1ad4d..df5b2e897 100644
 --- a/scripts/package_release.py

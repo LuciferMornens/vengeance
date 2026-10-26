@@ -25,7 +25,7 @@ export interface PrimeResidentSelection {
 const HELPER_TIMEOUT_MS = 15_000
 const MAX_HELPER_OUTPUT_BYTES = 64 * 1024
 const HELPER_PROTOCOL = 1
-const HELPER_REVISION = '763094e1b6a7c17450ee8399b06cda1853847ca5'
+const HELPER_REVISION = '8aac8692456c00c01d4e53e60e6d3347a3506559'
 const executeFile = promisify(execFile)
 
 export async function checkPrimeRestartHelper(): Promise<void> {

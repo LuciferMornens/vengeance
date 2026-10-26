@@ -1,5 +1,5 @@
 diff --git a/crates/pa-core/src/auth/manager.rs b/crates/pa-core/src/auth/manager.rs
-index d741ce4..23351c8 100644
+index d741ce429..23351c8cf 100644
 --- a/crates/pa-core/src/auth/manager.rs
 +++ b/crates/pa-core/src/auth/manager.rs
 @@ -15,6 +15,9 @@ use super::types::{
@@ -24,7 +24,7 @@ index d741ce4..23351c8 100644
      static FLIGHTS: std::sync::OnceLock<
          std::sync::Mutex<std::collections::HashMap<String, &'static std::sync::Mutex<()>>>,
 diff --git a/crates/pa-core/src/auth/manager/lookup.rs b/crates/pa-core/src/auth/manager/lookup.rs
-index 9e6f315..4998bdc 100644
+index 9e6f3157a..4998bdc36 100644
 --- a/crates/pa-core/src/auth/manager/lookup.rs
 +++ b/crates/pa-core/src/auth/manager/lookup.rs
 @@ -146,9 +146,9 @@ impl AuthStorage {
@@ -55,7 +55,7 @@ index 9e6f315..4998bdc 100644
              let content = self.storage.read().unwrap_or_default();
 diff --git a/crates/pa-core/src/auth/manager/refresh_flight_tests.rs b/crates/pa-core/src/auth/manager/refresh_flight_tests.rs
 new file mode 100644
-index 0000000..16f24ff
+index 000000000..16f24ff2a
 --- /dev/null
 +++ b/crates/pa-core/src/auth/manager/refresh_flight_tests.rs
 @@ -0,0 +1,112 @@

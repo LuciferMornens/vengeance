@@ -1,5 +1,5 @@
 diff --git a/crates/pa-cli/tests/acp_mode_e2e.rs b/crates/pa-cli/tests/acp_mode_e2e.rs
-index 41ffadd..0163d6d 100644
+index a08dadff6..87bd6b57c 100644
 --- a/crates/pa-cli/tests/acp_mode_e2e.rs
 +++ b/crates/pa-cli/tests/acp_mode_e2e.rs
 @@ -34,7 +34,7 @@ struct AcpChild {
@@ -189,7 +189,7 @@ index 41ffadd..0163d6d 100644
 +    });
 +}
 diff --git a/crates/pa-daemon/src/supervisor/clients.rs b/crates/pa-daemon/src/supervisor/clients.rs
-index a21a01a..88bb31c 100644
+index eb88e96f8..9d7a221d6 100644
 --- a/crates/pa-daemon/src/supervisor/clients.rs
 +++ b/crates/pa-daemon/src/supervisor/clients.rs
 @@ -142,8 +142,9 @@ impl Supervisor {
@@ -204,25 +204,25 @@ index a21a01a..88bb31c 100644
          let mut events = self.events.subscribe();
          // Session events ride this per-connection queue (the subscriber
          // registry resolves delivery at publish time, TS `handleWorkerFrame`
-@@ -172,14 +173,10 @@ impl Supervisor {
-             crate::backpressure::CLIENT_DISPATCH_CONCURRENCY,
-         ));
-         loop {
+@@ -174,14 +175,10 @@ impl Supervisor {
+         // The loop yields the connection's result; a write failure parks the
+         // error and falls through the shared exit tail below.
+         let served: Result<()> = 'serve: loop {
 -            line.clear();
              tokio::select! {
                  biased;
 -                read = reader.read_line(&mut line), if dispatch_slots.available_permits() > 0 => {
--                    let Ok(read) = read else { break };
+-                    let Ok(read) = read else { break 'serve Ok(()) };
 -                    if read == 0 {
--                        break;
+-                        break 'serve Ok(());
 -                    }
 +                read = reader.next_line(), if dispatch_slots.available_permits() > 0 => {
-+                    let Ok(Some(line)) = read else { break };
++                    let Ok(Some(line)) = read else { break 'serve Ok(()) };
                      let trimmed = line.trim().to_string();
                      if trimmed.is_empty() {
                          continue;
 diff --git a/crates/pa-types/src/platform/windows_pipe.rs b/crates/pa-types/src/platform/windows_pipe.rs
-index 7338f32..e758a22 100644
+index 7338f323d..f6997e4f7 100644
 --- a/crates/pa-types/src/platform/windows_pipe.rs
 +++ b/crates/pa-types/src/platform/windows_pipe.rs
 @@ -3,15 +3,16 @@
@@ -246,31 +246,61 @@ index 7338f32..e758a22 100644
  use tokio::sync::Mutex as AsyncMutex;
  
  use super::transport::BlockingTransportStream;
-@@ -48,16 +49,19 @@ impl NamedPipeListener {
+@@ -25,13 +26,13 @@ const BUSY_RETRY_INTERVAL: Duration = Duration::from_millis(50);
+ /// error instead of hanging the caller.
+ const BUSY_RETRY_DEADLINE: Duration = Duration::from_secs(10);
+ 
+-/// A listening named-pipe endpoint. One instance waits for the next client at all times; `accept`
+-/// connects that instance and has already created its replacement, so the pipe name stays
+-/// connectable - the named-pipe equivalent of a backlog.
++/// A listening named-pipe endpoint. Two instances listen at all times, so a client arriving while
++/// `accept` hands off the previous connection never meets a busy pipe - the named-pipe equivalent
++/// of a backlog.
+ pub(crate) struct NamedPipeListener {
+     name: String,
+-    /// The instance currently listening for the next client.
+-    pending: AsyncMutex<Option<NamedPipeServer>>,
++    /// The instances listening for the next clients.
++    pending: AsyncMutex<[NamedPipeServer; 2]>,
+ }
+ 
+ impl NamedPipeListener {
+@@ -42,23 +43,25 @@ impl NamedPipeListener {
+         let first = ServerOptions::new()
+             .first_pipe_instance(true)
+             .create(name)?;
++        let second = ServerOptions::new().create(name)?;
+         Ok(Self {
+             name: name.to_string(),
+-            pending: AsyncMutex::new(Some(first)),
++            pending: AsyncMutex::new([first, second]),
          })
      }
  
 -    /// Hand the next client a connected server instance. The next instance is created before
 -    /// waiting, so a creation failure surfaces first; two instances listen while this call waits,
 -    /// keeping clients off the busy path.
-+    /// Keep one accepting instance until it connects. Cancellation leaves that instance in
-+    /// place; creating a second listener early lets a client bypass the awaited instance.
++    /// Hand the next client whichever listening instance it reached. Both instances are awaited,
++    /// so no client waits on an instance nobody accepts; cancellation leaves both in place. The
++    /// connected (or failed) instance is replaced before returning.
      pub(crate) async fn accept(&self) -> io::Result<NamedPipeServer> {
          let mut pending = self.pending.lock().await;
-+        pending
-+            .as_ref()
-+            .expect("a listening instance is always kept ready")
-+            .connect()
-+            .await?;
++        let (index, connected) = tokio::select! {
++            connected = pending[0].connect() => (0, connected),
++            connected = pending[1].connect() => (1, connected),
++        };
          let next = ServerOptions::new().create(&self.name)?;
-         let server = pending
-             .replace(next)
-             .expect("a listening instance is always kept ready");
+-        let server = pending
+-            .replace(next)
+-            .expect("a listening instance is always kept ready");
 -        server.connect().await?;
-         Ok(server)
+-        Ok(server)
++        let server = std::mem::replace(&mut pending[index], next);
++        connected.map(|()| server)
      }
  }
-@@ -82,16 +86,49 @@ pub(crate) async fn connect(name: &str) -> io::Result<NamedPipeClient> {
+ 
+@@ -82,16 +85,49 @@ pub(crate) async fn connect(name: &str) -> io::Result<NamedPipeClient> {
      }
  }
  
@@ -325,7 +355,7 @@ index 7338f32..e758a22 100644
  /// A blocking named-pipe client for one-shot command surfaces (the CLI
  /// daemon client). Cloning shares the underlying connection.
  pub(crate) struct BlockingPipeClient {
-@@ -110,15 +147,25 @@ impl std::fmt::Debug for BlockingPipeClient {
+@@ -110,15 +146,25 @@ impl std::fmt::Debug for BlockingPipeClient {
  impl BlockingPipeClient {
      /// Connect to the pipe at `name`, blocking until connected.
      pub(crate) fn connect(name: &str) -> io::Result<Self> {
@@ -357,7 +387,7 @@ index 7338f32..e758a22 100644
                  read_timeout: Mutex::new(None),
              }),
          })
-@@ -135,25 +182,46 @@ impl BlockingPipeClient {
+@@ -135,25 +181,46 @@ impl BlockingPipeClient {
  
      /// One blocking read, bounded by the configured deadline when present.
      fn read_bounded(&self, buf: &mut [u8]) -> io::Result<usize> {
@@ -419,7 +449,7 @@ index 7338f32..e758a22 100644
          }
      }
  }
-@@ -167,14 +235,18 @@ impl std::io::Read for BlockingPipeClient {
+@@ -167,14 +234,18 @@ impl std::io::Read for BlockingPipeClient {
  impl std::io::Write for BlockingPipeClient {
      fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
          self.state
@@ -444,7 +474,7 @@ index 7338f32..e758a22 100644
  
 diff --git a/crates/pa-types/tests/windows_transport.rs b/crates/pa-types/tests/windows_transport.rs
 new file mode 100644
-index 0000000..4b7558e
+index 000000000..4b7558ef5
 --- /dev/null
 +++ b/crates/pa-types/tests/windows_transport.rs
 @@ -0,0 +1,93 @@

@@ -7,6 +7,7 @@ import { inspectRequest, turn } from '../lib/fake-llm.mjs'
 import { waitFor } from '../settings/settings-ui.mjs'
 import { createEngineFixture, PRIME_MODELS, PRIME_PROVIDER } from './integration-fixture.mjs'
 import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-target.mjs'
+import { PYTHON_TOOLS } from '../lib/native-kernel.mjs'
 
 const outputDirectory = reportShotsDir('restart-safety')
 const refusalObservationMilliseconds = 250
@@ -242,7 +243,7 @@ async function parkedPiQueue(agentId) {
 
 function nativePythonTool(server) {
   const toolName = inspectRequest(server.requests.at(-1)).tools.find(
-    (name) => name === 'ipython' || name === 'python'
+    (name) => PYTHON_TOOLS.includes(name)
   )
   assert.ok(toolName, 'the native provider advertises its Python tool')
   return toolName

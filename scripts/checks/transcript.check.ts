@@ -105,6 +105,24 @@ await check('parseProviderError: an HTML error page keeps its headline, the mark
   assert.equal(parseProviderError('<html><body>oops</body></html>').title, 'The provider returned an error page')
 })
 
+await check('parseProviderError: a provider overload is not the account’s rate limit, whatever its status', () => {
+  // Kimi Code answers an overloaded model (K3.1 Pro Highspeed) with 429 while the plan has quota left.
+  const kimi = '429 {"error":{"message":"The engine is currently overloaded, please try again later","type":"engine_overloaded_error"}}'
+  const parsed = parseProviderError(kimi)
+  assert.equal(parsed.title, 'The provider is overloaded')
+  assert.equal(parsed.status, 429)
+  assert.equal(parsed.code, 'engine_overloaded_error')
+  assert.ok(parsed.detail && !/\bengine\b/i.test(parsed.detail), 'Moonshot’s “engine” would read as Vengeance’s Engine')
+  assert.match(parsed.detail, /usage limits are not the cause/)
+  assert.equal(parsed.raw, kimi, 'the provider’s own words stay under Details')
+  assert.equal(parsed.overloaded, true, 'the card offers another model')
+  assert.equal(parseProviderError('429 Too Many Requests').overloaded, undefined)
+  assert.equal(parseProviderError('529 Overloaded').detail, parsed.detail)
+  assert.equal(parseProviderError('429 {"error":{"message":"slow down","type":"rate_limit_reached_error"}}').title, 'Rate limit reached')
+  assert.equal(parseProviderError('429 {"error":{"message":"pay up","type":"exceeded_current_quota_error"}}').title, 'Out of credits for this provider')
+  assert.equal(parseProviderError('429 Too Many Requests').title, 'Rate limit reached')
+})
+
 await check('parseProviderError: a sign-in the provider refused to renew reads as in Providers, whatever the token endpoint said', () => {
   const failures: Array<[provider: string, raw: string]> = [
     // OpenAI: the token endpoint's JSON body (its `error` alone used to be the title).

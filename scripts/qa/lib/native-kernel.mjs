@@ -62,8 +62,11 @@ export async function nativePackageIdentity(executable) {
   return { executablePath: path, version: metadata.version, sha256: await hashFile(path) }
 }
 
+/** Engine 2's Python tool: `python_repl` since upstream 0.10.1, `ipython` (and `python`) before. */
+export const PYTHON_TOOLS = ['python_repl', 'ipython', 'python']
+
 export async function runNativePythonProbe(application, server, agentId, options) {
-  const { toolCallId, code, prompt, toolName = 'ipython', timeoutMs = KERNEL_TIMEOUT_MS } = options
+  const { toolCallId, code, prompt, toolName = PYTHON_TOOLS[0], timeoutMs = KERNEL_TIMEOUT_MS } = options
   const from = server.requests.length
   server.queue(
     turn.toolCalls([{ id: toolCallId, name: toolName, args: { code } }]),

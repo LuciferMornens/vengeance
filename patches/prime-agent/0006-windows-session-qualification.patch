@@ -1,5 +1,5 @@
 diff --git a/crates/pa-core/src/cron/store/state.rs b/crates/pa-core/src/cron/store/state.rs
-index 30e85e7..9082376 100644
+index 30e85e71b..9082376cb 100644
 --- a/crates/pa-core/src/cron/store/state.rs
 +++ b/crates/pa-core/src/cron/store/state.rs
 @@ -113,7 +113,9 @@ pub(crate) fn resolve_path(path: &str) -> String {
@@ -14,7 +14,7 @@ index 30e85e7..9082376 100644
  
  pub(crate) fn compare_optional_iso(left: Option<&str>, right: Option<&str>) -> std::cmp::Ordering {
 diff --git a/crates/pa-core/src/session/window.rs b/crates/pa-core/src/session/window.rs
-index 4f43f82..761ab05 100644
+index 4f43f827c..761ab057c 100644
 --- a/crates/pa-core/src/session/window.rs
 +++ b/crates/pa-core/src/session/window.rs
 @@ -204,13 +204,33 @@ impl WindowedSessionStore {
@@ -57,7 +57,7 @@ index 4f43f82..761ab05 100644
          let mut reads = WindowReadStats::default();
          if let Some(snapshot) = window_cache::load(path, &file, &mut reads) {
 diff --git a/crates/pa-core/src/session/window_cache.rs b/crates/pa-core/src/session/window_cache.rs
-index 5fff3f2..f04e562 100644
+index 5fff3f2ed..f04e562af 100644
 --- a/crates/pa-core/src/session/window_cache.rs
 +++ b/crates/pa-core/src/session/window_cache.rs
 @@ -2,7 +2,9 @@
@@ -214,7 +214,7 @@ index 5fff3f2..f04e562 100644
  pub(super) mod float_bits {
 diff --git a/crates/pa-core/tests/windows_session_window.rs b/crates/pa-core/tests/windows_session_window.rs
 new file mode 100644
-index 0000000..0df0bb9
+index 000000000..0df0bb972
 --- /dev/null
 +++ b/crates/pa-core/tests/windows_session_window.rs
 @@ -0,0 +1,112 @@
@@ -331,7 +331,7 @@ index 0000000..0df0bb9
 +    );
 +}
 diff --git a/crates/pa-daemon/src/lease.rs b/crates/pa-daemon/src/lease.rs
-index cd01924..9cb1643 100644
+index 874ddfac7..3266689ea 100644
 --- a/crates/pa-daemon/src/lease.rs
 +++ b/crates/pa-daemon/src/lease.rs
 @@ -69,14 +69,9 @@ impl SessionAlreadyActiveError {
@@ -351,7 +351,7 @@ index cd01924..9cb1643 100644
  }
  
  /// `proc:<starttime>` start identity (TS `getProcessStartId`); shared with
-@@ -578,11 +573,12 @@ mod tests {
+@@ -606,11 +601,12 @@ mod tests {
  
      #[test]
      fn process_start_id_reflects_the_platform_ladder() {
@@ -368,7 +368,7 @@ index cd01924..9cb1643 100644
      }
 diff --git a/crates/pa-daemon/tests/session_lease_paths.rs b/crates/pa-daemon/tests/session_lease_paths.rs
 new file mode 100644
-index 0000000..fe6e621
+index 000000000..fe6e6210f
 --- /dev/null
 +++ b/crates/pa-daemon/tests/session_lease_paths.rs
 @@ -0,0 +1,21 @@
@@ -394,7 +394,7 @@ index 0000000..fe6e621
 +    drop(successor);
 +}
 diff --git a/crates/pa-types/src/platform/mod.rs b/crates/pa-types/src/platform/mod.rs
-index 2fb6e61..7c4ab23 100644
+index 2fb6e6132..7c4ab23a4 100644
 --- a/crates/pa-types/src/platform/mod.rs
 +++ b/crates/pa-types/src/platform/mod.rs
 @@ -5,11 +5,14 @@
@@ -414,7 +414,7 @@ index 2fb6e61..7c4ab23 100644
  pub use dirs::{agent_dir, home_dir};
 diff --git a/crates/pa-types/src/platform/paths.rs b/crates/pa-types/src/platform/paths.rs
 new file mode 100644
-index 0000000..4d1d7a4
+index 000000000..4d1d7a408
 --- /dev/null
 +++ b/crates/pa-types/src/platform/paths.rs
 @@ -0,0 +1,31 @@
@@ -451,7 +451,7 @@ index 0000000..4d1d7a4
 +}
 diff --git a/crates/pa-types/src/platform/windows_file.rs b/crates/pa-types/src/platform/windows_file.rs
 new file mode 100644
-index 0000000..6f163c6
+index 000000000..6f163c677
 --- /dev/null
 +++ b/crates/pa-types/src/platform/windows_file.rs
 @@ -0,0 +1,87 @@

@@ -19,18 +19,19 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 
 ## Reconstructing and changing our builds
 
-`engines.lock.json` is the source of truth. Current stable bases are pi `v1.3.0` at
-`71023aec1546d6d677a65669c5665c0927ce0dd0` and Prime `v0.10.0` at
-`763094e1b6a7c17450ee8399b06cda1853847ca5`. The builds identify as `1.3.0+vengeance.4` and
-`0.10.0+vengeance.13`. Never reuse a Vengeance build version for different shipped behavior.
+`engines.lock.json` is the source of truth. Current stable bases are pi `v1.4.0` at
+`4a080252f06caf63a525d7873c5d94d3c23887e0` and Prime `v0.10.1` at
+`8aac8692456c00c01d4e53e60e6d3347a3506559`. The builds identify as `1.4.0+vengeance.1` and
+`0.10.1+vengeance.1`. Never reuse a Vengeance build version for different shipped behavior.
 
-The current stable-release verification and Prime patch decisions are recorded in
-[ENGINE-STABLE-AUDIT-2026-10-18.md](docs/ENGINE-STABLE-AUDIT-2026-10-18.md), with the preceding
+The current stable-release verification and patch decisions are recorded in
+[ENGINE-STABLE-AUDIT-2026-10-26.md](docs/ENGINE-STABLE-AUDIT-2026-10-26.md), following
+[ENGINE-STABLE-AUDIT-2026-10-18.md](docs/ENGINE-STABLE-AUDIT-2026-10-18.md) and the
 source comparison in [PRIME-STABLE-AUDIT-2026-10-16.md](docs/PRIME-STABLE-AUDIT-2026-10-16.md).
-The [pi patch guide](patches/pi/README.md) records the 1.3.0 reconciliation and retired catalog
+The [pi patch guide](patches/pi/README.md) records the 1.4.0 rebase and retired catalog
 fallback. The [14 October audit](docs/ENGINE-AUDIT-2026-10-14.md) records earlier integration
-evidence and gaps. Engine 2 settings preservation and rustls maintenance are identified upstream
-backports; its native base remains the latest stable release.
+evidence and gaps. Engine 2 settings preservation and rustls maintenance, former backports, are
+now upstream; both native bases are the latest stable releases.
 
 The [prompt and restart qualification report](docs/ENGINE-PROMPTS-QUALIFICATION-2026-10-18.md) records
 the current reconstructed artifacts and completed or pending gates. The
@@ -42,7 +43,7 @@ compatibility policy and regressions for Prime patch `0015` and the Engine bridg
 Responses transports, both authentication routes, cancellation and saved-session replay on upgrades.
 
 pi's package version and extension-facing SDK `VERSION` stay at the upstream release, currently
-`1.3.0`. Extensions can reject build suffixes even when all required APIs exist. The separate
+`1.4.0`. Extensions can reject build suffixes even when all required APIs exist. The separate
 `vengeance.version` metadata, native CLI `--version` and Vengeance engine descriptor report our build
 identity. Native install-change detection uses that identity so a same-base patch upgrade is visible.
 Qualify both forms through the native loader and repeat startup/restart with compatibility packages;

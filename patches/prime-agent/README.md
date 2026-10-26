@@ -2,42 +2,48 @@
 
 Follow [UPSTREAM.md](../../UPSTREAM.md) for reconstruction and qualification.
 
-Vengeance ships a source build of stable `v0.10.0`, upstream commit
-`763094e1b6a7c17450ee8399b06cda1853847ca5`, identified as `0.10.0+vengeance.13`.
+Vengeance ships a source build of stable `v0.10.1`, upstream commit
+`8aac8692456c00c01d4e53e60e6d3347a3506559`, identified as `0.10.1+vengeance.1`.
 The exact source, catalog revision, toolchain and patch order live in
 [engines.lock.json](../../engines.lock.json). The native helper links this same stable base.
 
 | Patch | Purpose                                                                                                   |
 | ----- | --------------------------------------------------------------------------------------------------------- |
-| 0001  | Cancel provider HTTP streams when compaction is aborted.                                                  |
+| 0001  | Regression test only: aborting compaction cancels its provider HTTP streams (fixed upstream).             |
 | 0002  | Synchronize durable user-shell output with live model context and guard replacement admission.            |
 | 0003  | Compare release archive paths portably on Windows.                                                        |
 | 0004  | Identify the Vengeance build and refuse independent native self-updates, including CLI and TUI paths.     |
 | 0005  | Preserve Fast/Ultrafast preferences and enforce native account tier eligibility at the provider boundary. |
 | 0006  | Qualify Windows session caches and file leases.                                                           |
-| 0007  | Preserve fragmented daemon commands across interleaved events and qualify named-pipe cancellation.        |
+| 0007  | Preserve fragmented daemon commands; keep a cancellation-safe two-instance named-pipe backlog.            |
 | 0008  | Isolate and qualify native test fixtures on Windows.                                                      |
 | 0009  | Launch npm package operations correctly on Windows.                                                       |
 | 0010  | Report Windows edit failures without hiding the native error.                                             |
 | 0011  | Rotate Windows incident logs without retaining an open file handle.                                       |
 | 0012  | Refresh native prompt and kernel image capabilities after changing models.                                |
 | 0013  | Pin the resolved creation model to its session so another worker's default changes cannot alter it.       |
-| 0014  | Backport upstream settings/MCP save preservation, retaining concurrent and unknown settings.              |
 | 0015  | Carry validated OpenAI native compaction checkpoints through transport and saved-session replay.          |
 | 0016  | Read native lineage without legacy migration; resolve endpoints and tombstones from one ledger snapshot.  |
-| 0017  | Backport the upstream rustls 0.23.46 lockfile maintenance without changing other dependency pins.         |
 | 0018  | Keep each OAuth refresh flight through credential persistence so waiting callers reuse its token.         |
 | 0019  | Coordinate native timing/lifecycle fixtures and expose a private receive seam for piped-input tests.      |
-| 0020  | Include native APPEND_SYSTEM sources in session prompts and prompt dumps, preserving raw text.            |
+| 0020  | Include native APPEND_SYSTEM sources in the CLI prompt dump, preserving raw text.                         |
 | 0021  | Bound ACP fixture shutdown and collect stderr without waiting for inherited Windows pipe handles.         |
-| 0022  | Backport upstream's bounded-lock concurrency fixture while asserting all 80 writes land.                  |
 | 0023  | Verify and explicitly install the bundled Intel macOS cryptography wheel; refresh kernel identity.        |
 | 0024  | Report each open session's live MCP server state from its kernel and reconnect one server on request.     |
 
-Patch 0014 comes from upstream commit
-[`7b89c111da0f1d9e67849b34f10552bbb4bd1bd1`](https://github.com/PrimeIntellect-ai/prime-agent/commit/7b89c111da0f1d9e67849b34f10552bbb4bd1bd1).
-Its service-tier hunk is rebased around patch 0005's `Ultrafast` variant; that variant remains intact.
-The upstream persistence and CLI MCP regression tests travel with the patch. Patch 0013 has a native
+`v0.10.1` retires four patches. Its source contains the upstream commits our backports came from:
+settings/MCP save preservation [`7b89c111`](https://github.com/PrimeIntellect-ai/prime-agent/commit/7b89c111da0f1d9e67849b34f10552bbb4bd1bd1)
+(0014; its `Ultrafast` service-tier mapping now comes from patch 0005 alone), rustls 0.23.46
+[`d4b36cc2`](https://github.com/PrimeIntellect-ai/prime-agent/commit/d4b36cc27) (0017) and the
+bounded-lock fixture [`f0d9c096`](https://github.com/PrimeIntellect-ai/prime-agent/commit/f0d9c09676a1e6bb2782ad73eb3025ffdf2061d4)
+(0022). Upstream [`7e86390e`](https://github.com/PrimeIntellect-ai/prime-agent/commit/7e86390ea99550f04fc706fac54c8f9ce0161327)
+cancels summary provider streams when compaction is dropped, so 0001 keeps only its
+`compaction_http_abort` regression; retire it once that passes on the next base. Upstream's
+rewrite of the user shell ([`53e13b89`](https://github.com/PrimeIntellect-ai/prime-agent/commit/53e13b89e))
+keeps its own layout: patch 0002 no longer moves output handling or tests into modules, and only
+adds the live-context persistence, the replacement gate and its context tests. Patch 0012 follows
+upstream's file-based model prompts: a live switch reloads the new model's prompt files from the
+agent directory, and upstream's `update_model_facts` remains for provider fallback. Patch 0013 has a native
 session/default isolation regression and app coverage in `scripts/qa/engines/model-isolation.qa.mjs`.
 See [the October 2026 audit](../../docs/ENGINE-AUDIT-2026-10-14.md) for selection and qualification evidence.
 
@@ -58,15 +64,12 @@ Piped-input collection accepts a private receive function so its reset test can 
 production still calls the standard receiver's `recv_timeout` with the full idle window on every read.
 Assertions keep their behavioral contracts rather than relying on provider speed or scheduler timing.
 
-Patch 0020 adapts upstream
-[`b1d71636710b0ea1b86380dfe3923b3c03fe2948`](https://github.com/PrimeIntellect-ai/prime-agent/commit/b1d71636710b0ea1b86380dfe3923b3c03fe2948):
-the session engine passes explicit append sources through the native resource loader and includes its
-resolved text in the native prompt builder. The stable builder's direct `prompt_guidelines` API remains
-available. The patch also includes discovered append sources in the CLI's `prompt` breakdown. Native
-provider regressions cover independent SYSTEM/APPEND scope precedence, explicit literals and files,
-empty overrides, raw Markdown and whitespace, default foundation layers, and a live model switch.
-Retirement requires those regressions and the CLI diagnostic case to pass on the candidate upstream
-base; the newer core fix alone does not qualify the CLI dump or the app's saved-worker restart path.
+Patch 0020 once adapted upstream
+[`b1d71636710b0ea1b86380dfe3923b3c03fe2948`](https://github.com/PrimeIntellect-ai/prime-agent/commit/b1d71636710b0ea1b86380dfe3923b3c03fe2948),
+which `v0.10.1` contains with its own session-prompt regressions. What remains includes discovered
+append sources in the CLI's `prompt` breakdown, with its raw-text regression. Retire it when the
+upstream dump includes them; the core fix alone does not qualify the CLI dump or the app's
+saved-worker restart path.
 
 Patch 0021 is test-only. The ACP fixture captures stderr in an anonymous temporary file, so
 descendants holding inherited Windows handles cannot stall its diagnostic reader. Cleanup requires
@@ -75,17 +78,6 @@ within a bounded asynchronous operation. Its child cleanup is also bounded. Clea
 test visibly, or print alongside an active assertion failure without causing a second panic. The
 session/new and successful ACP EOF-exit assertions remain intact. The regression must pass without
 external process intervention before this fixture is qualified on a new upstream base.
-
-Patch 0022 backports only the refinement-test hunk from upstream
-[`f0d9c09676a1e6bb2782ad73eb3025ffdf2061d4`](https://github.com/PrimeIntellect-ai/prime-agent/commit/f0d9c09676a1e6bb2782ad73eb3025ffdf2061d4);
-its unrelated abort-boundary fixture hunk is excluded. The runtime lock intentionally has a bounded,
-unfair wait: repeated writer reacquisition can exhaust a waiter's retry budget without losing an
-accepted update. The stable fixture failed five isolated runs on Windows; the logs remain in
-`.cache/prime-refinement-repeat-{1..5}.log`. The upstream fixture races two fresh writers in each of
-40 rounds and still asserts all 80 updates, avoiding repeated reacquisition by one writer within a
-round. This is a test-only backport, not a runtime lock fix; lock behavior and timeouts do not change.
-Retire it when a candidate upstream base incorporates the hunk and passes repeated isolated runs
-and the full native suite. Qualification of this local backport is recorded with the release checks.
 
 Patch 0023 supports the source-built Intel macOS cryptography wheel shipped by Vengeance. Current
 cryptography releases no longer publish Intel macOS wheels; installing the kernel must not require
@@ -125,8 +117,8 @@ Retire the patch when upstream offers live per-server MCP status and reconnect f
 moves to them.
 
 The first three patches originated on development commit
-`fa20be8e487b1889c2395ea33906149aef983ca0`. Patch 0002 was rebased onto stable source:
-the user-shell tests are extracted into modules and the stable configuration type is used.
+`fa20be8e487b1889c2395ea33906149aef983ca0`. Patch 0002 was rebased onto each stable source since;
+on `v0.10.1` its context tests sit beside upstream's in-file user-shell tests.
 Historical verification for the development build does not qualify this stable build.
 
 Run `npm run engines:prepare` or `npm run build:engines -- --engine=prime` from Vengeance.

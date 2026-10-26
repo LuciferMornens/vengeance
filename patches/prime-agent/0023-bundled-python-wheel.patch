@@ -1,18 +1,18 @@
 diff --git a/crates/pa-core/src/kernel/bootstrap/mod.rs b/crates/pa-core/src/kernel/bootstrap/mod.rs
-index f3b598b..1c37d3b 100644
+index 29a714b59..fbcb98ca9 100644
 --- a/crates/pa-core/src/kernel/bootstrap/mod.rs
 +++ b/crates/pa-core/src/kernel/bootstrap/mod.rs
-@@ -219,6 +219,8 @@ async fn ensure_kernel_python_uncached(
+@@ -217,6 +217,8 @@ async fn ensure_kernel_python_uncached(
          }
      }
  
 +    // Validate packaged dependencies even when an earlier kernel environment is already ready.
 +    venv::runtime_wheel_requirement().map_err(|error| format_bootstrap_failure(&error))?;
      let venv = resolve_writable_kernel_venv_dir()?;
-     let python = kernel_venv_python(&venv);
-     let python_str = python.to_string_lossy().to_string();
+     ensure_kernel_venv(options, python_skills, venv).await
+ }
 diff --git a/crates/pa-core/src/kernel/bootstrap/venv.rs b/crates/pa-core/src/kernel/bootstrap/venv.rs
-index 9ff8e29..1ae1a61 100644
+index c5ff3a190..3882eb185 100644
 --- a/crates/pa-core/src/kernel/bootstrap/venv.rs
 +++ b/crates/pa-core/src/kernel/bootstrap/venv.rs
 @@ -17,6 +17,7 @@ use super::{
@@ -31,22 +31,17 @@ index 9ff8e29..1ae1a61 100644
  use layout::home_dir;
  pub(crate) use layout::{expand_home, resolve_writable_kernel_venv_dir};
  pub use layout::{kernel_venv_dir, kernel_venv_python};
-@@ -107,10 +109,11 @@ pub(crate) async fn bootstrap_venv(
+@@ -113,6 +115,7 @@ pub(crate) async fn bootstrap_venv(
      python_skills: &[BootstrapPythonSkill],
      options: &EnsureKernelPythonOptions,
  ) -> anyhow::Result<()> {
-+    let source_dir = resolve_runtime_source_dir();
 +    let bundled_wheel = runtime_wheel_requirement()?;
      std::fs::create_dir_all(venv.parent().unwrap_or(Path::new("/")))?;
      let uv = ensure_uv()?;
      let python = kernel_venv_python(venv);
--    let source_dir = resolve_runtime_source_dir();
-     let runtime_requirement = source_dir.as_ref().map_or_else(
-         || RUNTIME_REQUIREMENT.to_string(),
-         |p| p.to_string_lossy().to_string(),
 @@ -126,6 +129,10 @@ pub(crate) async fn bootstrap_venv(
          python_str,
-         runtime_requirement,
+         source_dir.to_string_lossy().to_string(),
      ];
 +    if let Some(wheel) = bundled_wheel {
 +        // A direct requirement prevents the resolver choosing an index source distribution.
@@ -57,17 +52,17 @@ index 9ff8e29..1ae1a61 100644
          install_args.push(uv_arg.to_string());
 diff --git a/crates/pa-core/src/kernel/bootstrap/venv/bundled_wheels.rs b/crates/pa-core/src/kernel/bootstrap/venv/bundled_wheels.rs
 new file mode 100644
-index 0000000..de219c6
+index 000000000..6ad07b0ad
 --- /dev/null
 +++ b/crates/pa-core/src/kernel/bootstrap/venv/bundled_wheels.rs
-@@ -0,0 +1,189 @@
+@@ -0,0 +1,191 @@
 +use std::path::{Path, PathBuf};
 +
 +use anyhow::{bail, Context};
 +use serde::Deserialize;
 +use sha2::Digest;
 +
-+use super::runtime_source::{packaged_runtime_dir, resolve_runtime_source_dir};
++use super::runtime_source::{packaged_runtime_dir, require_runtime_source_dir};
 +
 +const WHEEL_MANIFEST_SCHEMA: u32 = 1;
 +const WHEEL_PLATFORM: &str = "darwin-x64";
@@ -95,11 +90,13 @@ index 0000000..de219c6
 +    {
 +        return Ok(None);
 +    }
-+    let source_dir = resolve_runtime_source_dir()
++    let source_dir = require_runtime_source_dir()
 +        .context("cannot find the bundled Python runtime; reinstall Vengeance")?;
 +    // Native source-checkout bootstraps use upstream's developer dependency resolution.
++    // Runtime sources resolve to canonical paths, so the checkout candidate is canonicalized too.
 +    if crate::packages::source_checkout_root()
-+        .is_some_and(|root| source_dir == root.join("prime-agent-runtime"))
++        .and_then(|root| root.join("prime-agent-runtime").canonicalize().ok())
++        .is_some_and(|checkout| source_dir == checkout)
 +        || packaged_runtime_dir().as_deref() != Some(source_dir.as_path())
 +    {
 +        return Ok(None);
@@ -251,21 +248,20 @@ index 0000000..de219c6
 +    }
 +}
 diff --git a/crates/pa-core/src/kernel/bootstrap/venv/runtime_source.rs b/crates/pa-core/src/kernel/bootstrap/venv/runtime_source.rs
-index 7e92a92..0c6f128 100644
+index 7271a9d88..95346fd65 100644
 --- a/crates/pa-core/src/kernel/bootstrap/venv/runtime_source.rs
 +++ b/crates/pa-core/src/kernel/bootstrap/venv/runtime_source.rs
-@@ -49,7 +49,9 @@ pub(super) fn resolve_runtime_source_dir() -> Option<PathBuf> {
- /// Content identity of the runtime: a hash of every `rlm/*.py` file, the
- /// packaged machine library under `src/rlm/machines` (wheel package data:
- /// machine changes are runtime changes), and `pyproject.toml`, so any
--/// runtime change invalidates an existing venv. Falls back to the bare
+@@ -59,7 +59,8 @@ pub(in crate::kernel::bootstrap) fn require_runtime_source_dir() -> anyhow::Resu
+ }
+ 
+ /// Hash the manifest, Python sources, and packaged machine library so any
+-/// runtime change invalidates an existing venv.
 +/// runtime change invalidates an existing venv. Bundled wheel files and their
 +/// manifest also participate so dependency updates refresh the environment.
-+/// Falls back to the bare
- /// package name when the runtime resolves to a registry install (no local
- /// source).
- ///
-@@ -74,6 +76,7 @@ fn hash_runtime_source(source_dir: &Path) -> anyhow::Result<String> {
+ pub(in crate::kernel::bootstrap) fn hash_runtime_source(
+     source_dir: &Path,
+ ) -> anyhow::Result<String> {
+@@ -67,6 +68,7 @@ pub(in crate::kernel::bootstrap) fn hash_runtime_source(
      let mut files = vec![source_dir.join("pyproject.toml")];
      collect_python_files(&rlm_dir, &mut files)?;
      collect_package_data_files(&rlm_dir.join("machines"), &mut files)?;
@@ -273,11 +269,10 @@ index 7e92a92..0c6f128 100644
      files.sort();
      let mut hasher = sha2::Sha256::new();
      for file in &files {
-@@ -167,4 +170,30 @@ version: 2
-         assert_ne!(bare, after);
+@@ -135,6 +137,32 @@ mod tests {
          Ok(())
      }
-+
+ 
 +    #[test]
 +    fn bundled_wheel_changes_invalidate_the_runtime_identity() -> anyhow::Result<()> {
 +        let temp = tempfile::tempdir()?;
@@ -303,4 +298,7 @@ index 7e92a92..0c6f128 100644
 +        assert_ne!(updated_wheel, hash_runtime_source(temp.path())?);
 +        Ok(())
 +    }
- }
++
+     #[test]
+     fn missing_or_incomplete_runtime_sources_are_not_resolved() -> anyhow::Result<()> {
+         let temp = tempfile::tempdir()?;

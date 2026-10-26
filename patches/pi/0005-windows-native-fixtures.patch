@@ -1,5 +1,5 @@
 diff --git a/packages/chord/test/boundary.test.ts b/packages/chord/test/boundary.test.ts
-index 2c044ba..4997a1d 100644
+index 8819a01c..5cfffe4f 100644
 --- a/packages/chord/test/boundary.test.ts
 +++ b/packages/chord/test/boundary.test.ts
 @@ -1,5 +1,5 @@
@@ -9,10 +9,10 @@ index 2c044ba..4997a1d 100644
  import { fileURLToPath } from "node:url";
  import { describe, expect, test } from "vitest";
  
-@@ -24,7 +24,10 @@ describe("package boundary", () => {
- 			for (const match of source.matchAll(IMPORT_SPECIFIER)) {
- 				const specifier = match[1]!;
- 				if (specifier.startsWith("@earendil-works/pi-")) violations.push(`${path}: ${specifier}`);
+@@ -31,7 +31,10 @@ describe("package boundary", () => {
+ 				const pkg = specifier.split("/").slice(0, 2).join("/");
+ 				if (specifier.startsWith("@earendil-works/pi-") && !ALLOWED.has(pkg))
+ 					violations.push(`${path}: ${specifier}`);
 -				if (specifier.startsWith(".") && !resolve(dirname(file), specifier).startsWith(`${sourceDirectory}/`)) {
 +				if (
 +					specifier.startsWith(".") &&
@@ -22,7 +22,7 @@ index 2c044ba..4997a1d 100644
  				}
  			}
 diff --git a/packages/codemode/test/worker-lifetime.test.ts b/packages/codemode/test/worker-lifetime.test.ts
-index 67ac4b2..22ee7c9 100644
+index 67ac4b2b..22ee7c9e 100644
 --- a/packages/codemode/test/worker-lifetime.test.ts
 +++ b/packages/codemode/test/worker-lifetime.test.ts
 @@ -1,10 +1,11 @@
@@ -163,7 +163,7 @@ index 67ac4b2..22ee7c9 100644
  		25000,
  	);
 diff --git a/packages/coding-agent/test/config.test.ts b/packages/coding-agent/test/config.test.ts
-index ff652ca..5d58af8 100644
+index ff652cae..5d58af8a 100644
 --- a/packages/coding-agent/test/config.test.ts
 +++ b/packages/coding-agent/test/config.test.ts
 @@ -1,7 +1,8 @@
@@ -252,7 +252,7 @@ index ff652ca..5d58af8 100644
  		expect(getSelfUpdateCommand("@earendil-works/pi-coding-agent")).toBeUndefined();
  		expect(getSelfUpdateUnavailableInstruction("@earendil-works/pi-coding-agent")).toContain(
 diff --git a/packages/coding-agent/test/external-editor.test.ts b/packages/coding-agent/test/external-editor.test.ts
-index 5cbbc93..d51fead 100644
+index 5cbbc93b..d51feadc 100644
 --- a/packages/coding-agent/test/external-editor.test.ts
 +++ b/packages/coding-agent/test/external-editor.test.ts
 @@ -1,6 +1,6 @@
@@ -287,7 +287,7 @@ index 5cbbc93..d51fead 100644
  		expect(basename(capture.filePath)).toBe("prompt.md");
  		expect(capture.entries).toEqual(["prompt.md"]);
 diff --git a/packages/coding-agent/test/file-mutation-queue.test.ts b/packages/coding-agent/test/file-mutation-queue.test.ts
-index 8e13a45..071e971 100644
+index 8e13a45e..071e971c 100644
 --- a/packages/coding-agent/test/file-mutation-queue.test.ts
 +++ b/packages/coding-agent/test/file-mutation-queue.test.ts
 @@ -1,7 +1,8 @@
@@ -312,7 +312,7 @@ index 8e13a45..071e971 100644
  		const order: string[] = [];
  		await Promise.all([
 diff --git a/packages/coding-agent/test/footer-width.test.ts b/packages/coding-agent/test/footer-width.test.ts
-index 12c074d..7a134ae 100644
+index 12c074d0..7a134aed 100644
 --- a/packages/coding-agent/test/footer-width.test.ts
 +++ b/packages/coding-agent/test/footer-width.test.ts
 @@ -1,3 +1,4 @@
@@ -330,7 +330,7 @@ index 12c074d..7a134ae 100644
  });
  
 diff --git a/packages/coding-agent/test/interactive-mode-suspend.test.ts b/packages/coding-agent/test/interactive-mode-suspend.test.ts
-index 996d2f1..045c8d7 100644
+index 996d2f1a..045c8d7b 100644
 --- a/packages/coding-agent/test/interactive-mode-suspend.test.ts
 +++ b/packages/coding-agent/test/interactive-mode-suspend.test.ts
 @@ -24,8 +24,10 @@ function callHandleCtrlZ(context: HandleCtrlZThis): void {
@@ -361,7 +361,7 @@ index 996d2f1..045c8d7 100644
  			start: vi.fn(),
  			stop: vi.fn(),
 diff --git a/packages/coding-agent/test/mcp-command.test.ts b/packages/coding-agent/test/mcp-command.test.ts
-index 7bde1e1..8b0c29c 100644
+index 7bde1e11..8b0c29cb 100644
 --- a/packages/coding-agent/test/mcp-command.test.ts
 +++ b/packages/coding-agent/test/mcp-command.test.ts
 @@ -41,9 +41,12 @@ describe("pi mcp", () => {
@@ -379,7 +379,7 @@ index 7bde1e1..8b0c29c 100644
  		expect(output).toContain("config error: ");
  		expect(output).toContain('server "bad" needs either "command"');
 diff --git a/packages/coding-agent/test/package-command-paths.test.ts b/packages/coding-agent/test/package-command-paths.test.ts
-index c97fbe9..feae09f 100644
+index 68949f9a..87f70f3b 100644
 --- a/packages/coding-agent/test/package-command-paths.test.ts
 +++ b/packages/coding-agent/test/package-command-paths.test.ts
 @@ -24,6 +24,13 @@ import { initTheme } from "../src/modes/interactive/theme/theme.ts";
@@ -396,7 +396,7 @@ index c97fbe9..feae09f 100644
  describe("package commands", () => {
  	let tempDir: string;
  	let agentDir: string;
-@@ -942,7 +949,7 @@ else {
+@@ -960,7 +967,7 @@ else {
  		writeFileSync(join(selfPackageDir, "package.json"), JSON.stringify({ name: PACKAGE_NAME, version: VERSION }));
  		const fakePnpmScript =
  			process.platform === "win32"
@@ -406,7 +406,7 @@ index c97fbe9..feae09f 100644
  		writeFileSync(fakePnpmPath, fakePnpmScript);
  		chmodSync(fakePnpmPath, 0o755);
 diff --git a/packages/coding-agent/test/package-manager.test.ts b/packages/coding-agent/test/package-manager.test.ts
-index 8aedd93..5179f7d 100644
+index 8aedd93c..5179f7d5 100644
 --- a/packages/coding-agent/test/package-manager.test.ts
 +++ b/packages/coding-agent/test/package-manager.test.ts
 @@ -1,9 +1,10 @@
@@ -441,7 +441,7 @@ index 8aedd93..5179f7d 100644
  					delete process.env.HOME;
  				} else {
 diff --git a/packages/coding-agent/test/paths.test.ts b/packages/coding-agent/test/paths.test.ts
-index fbdb4f5..0928ec9 100644
+index fbdb4f56..0928ec96 100644
 --- a/packages/coding-agent/test/paths.test.ts
 +++ b/packages/coding-agent/test/paths.test.ts
 @@ -1,8 +1,9 @@
@@ -476,7 +476,7 @@ index fbdb4f5..0928ec9 100644
  		expect(canonicalizePath(link)).toBe(link);
  	});
 diff --git a/packages/coding-agent/test/resource-loader.test.ts b/packages/coding-agent/test/resource-loader.test.ts
-index bba3fc9..dab31b3 100644
+index bba3fc95..dab31b3d 100644
 --- a/packages/coding-agent/test/resource-loader.test.ts
 +++ b/packages/coding-agent/test/resource-loader.test.ts
 @@ -1,8 +1,9 @@
@@ -546,7 +546,7 @@ index bba3fc9..dab31b3 100644
  		it("should still inherit the main repo's context when the worktree root has none", () => {
  			const { main, worktreeSrc } = setupNestedWorktree();
 diff --git a/packages/coding-agent/test/sdk-session-manager.test.ts b/packages/coding-agent/test/sdk-session-manager.test.ts
-index cf1349f..846aa2c 100644
+index cf1349f5..846aa2c6 100644
 --- a/packages/coding-agent/test/sdk-session-manager.test.ts
 +++ b/packages/coding-agent/test/sdk-session-manager.test.ts
 @@ -1,6 +1,6 @@
@@ -588,7 +588,7 @@ index cf1349f..846aa2c 100644
  		session.dispose();
  	});
 diff --git a/packages/coding-agent/test/session-manager/load-entries.test.ts b/packages/coding-agent/test/session-manager/load-entries.test.ts
-index 463dfad..6c0ea06 100644
+index 463dfadf..6c0ea069 100644
 --- a/packages/coding-agent/test/session-manager/load-entries.test.ts
 +++ b/packages/coding-agent/test/session-manager/load-entries.test.ts
 @@ -1,3 +1,4 @@
@@ -606,7 +606,7 @@ index 463dfad..6c0ea06 100644
  
  	it("generates a session id when the options carry none", () => {
 diff --git a/packages/coding-agent/test/session-selector-path-delete.test.ts b/packages/coding-agent/test/session-selector-path-delete.test.ts
-index 4a0ed36..43fd8a6 100644
+index 4a0ed364..43fd8a69 100644
 --- a/packages/coding-agent/test/session-selector-path-delete.test.ts
 +++ b/packages/coding-agent/test/session-selector-path-delete.test.ts
 @@ -1,8 +1,9 @@
@@ -632,7 +632,7 @@ index 4a0ed36..43fd8a6 100644
  	const parentRealPath = join(sharedDir, "parent.jsonl");
  	const childRealPath = join(sharedDir, "child.jsonl");
 diff --git a/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts b/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts
-index 61b0918..032dacc 100644
+index 61b0918e..032dacc2 100644
 --- a/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts
 +++ b/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts
 @@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
@@ -653,7 +653,7 @@ index 61b0918..032dacc 100644
  
  		// Script that sets up the watcher and emits a synthetic error on it.
 diff --git a/packages/coding-agent/test/tools.test.ts b/packages/coding-agent/test/tools.test.ts
-index ae16443..d89f45c 100644
+index 91432623..c1a520c3 100644
 --- a/packages/coding-agent/test/tools.test.ts
 +++ b/packages/coding-agent/test/tools.test.ts
 @@ -1,5 +1,6 @@
@@ -709,7 +709,7 @@ index ae16443..d89f45c 100644
  
  			const result = await computeEditsDiff(unreadableFile, [{ oldText: "hello", newText: "world" }], testDir);
  
-@@ -919,6 +930,7 @@ describe("Coding Agent Tools", () => {
+@@ -944,6 +955,7 @@ describe("Coding Agent Tools", () => {
  			const result = await grepTool.execute("test-call-grep-injection", {
  				pattern: `--pre=${payload}`,
  				path: testDir,
@@ -717,7 +717,7 @@ index ae16443..d89f45c 100644
  			});
  
  			expect(getTextOutput(result)).toContain("No matches found");
-@@ -1101,7 +1113,8 @@ describe("tool cwd resolution", () => {
+@@ -1126,7 +1138,8 @@ describe("tool cwd resolution", () => {
  			fakeCtx(testDir),
  		);
  		const output = getTextOutput(result);
@@ -728,7 +728,7 @@ index ae16443..d89f45c 100644
  });
  
 diff --git a/packages/coding-agent/test/trust-selector.test.ts b/packages/coding-agent/test/trust-selector.test.ts
-index c465900..a3c3a76 100644
+index c4659001..a3c3a76c 100644
 --- a/packages/coding-agent/test/trust-selector.test.ts
 +++ b/packages/coding-agent/test/trust-selector.test.ts
 @@ -1,3 +1,4 @@
@@ -833,7 +833,7 @@ index c465900..a3c3a76 100644
  		});
  	});
 diff --git a/packages/coding-agent/test/version-check.test.ts b/packages/coding-agent/test/version-check.test.ts
-index ffe2150..07584f7 100644
+index ffe21508..07584f70 100644
 --- a/packages/coding-agent/test/version-check.test.ts
 +++ b/packages/coding-agent/test/version-check.test.ts
 @@ -11,6 +11,12 @@ import { allowNetwork } from "./test-network-env.ts";
@@ -850,7 +850,7 @@ index ffe2150..07584f7 100644
  	allowNetwork();
  });
 diff --git a/packages/durable/test/env-node.test.ts b/packages/durable/test/env-node.test.ts
-index 37410f0..38e143f 100644
+index 4287987d..039319c8 100644
 --- a/packages/durable/test/env-node.test.ts
 +++ b/packages/durable/test/env-node.test.ts
 @@ -6,6 +6,7 @@ import { delimiter, join } from "node:path";
@@ -918,7 +918,7 @@ index 37410f0..38e143f 100644
  		const entries = getOrThrow(await env.listDir(".", BACKGROUND_CONTEXT));
  		expect(
 diff --git a/packages/durable/test/tools.test.ts b/packages/durable/test/tools.test.ts
-index dba4d7c..bb0b47e 100644
+index dba4d7c9..bb0b47eb 100644
 --- a/packages/durable/test/tools.test.ts
 +++ b/packages/durable/test/tools.test.ts
 @@ -1,7 +1,6 @@
@@ -974,7 +974,7 @@ index dba4d7c..bb0b47e 100644
  		});
  
 diff --git a/packages/tui/test/autocomplete.test.ts b/packages/tui/test/autocomplete.test.ts
-index 9f18baa..b818264 100644
+index 67a5511a..674442ff 100644
 --- a/packages/tui/test/autocomplete.test.ts
 +++ b/packages/tui/test/autocomplete.test.ts
 @@ -1,9 +1,10 @@
@@ -989,7 +989,7 @@ index 9f18baa..b818264 100644
  import { CombinedAutocompleteProvider } from "../src/autocomplete.ts";
  
  const resolveFdPath = (): string | null => {
-@@ -436,7 +437,7 @@ describe("CombinedAutocompleteProvider", () => {
+@@ -461,7 +462,7 @@ describe("CombinedAutocompleteProvider", () => {
  					"some_file.txt": "symlinked",
  				},
  			});
@@ -998,7 +998,7 @@ index 9f18baa..b818264 100644
  
  			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
  			const line = "@some";
-@@ -453,7 +454,7 @@ describe("CombinedAutocompleteProvider", () => {
+@@ -478,7 +479,7 @@ describe("CombinedAutocompleteProvider", () => {
  					"nested/file.txt": "symlinked",
  				},
  			});
@@ -1007,7 +1007,7 @@ index 9f18baa..b818264 100644
  
  			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
  			const line = "@symlinked";
-@@ -463,14 +464,14 @@ describe("CombinedAutocompleteProvider", () => {
+@@ -488,14 +489,14 @@ describe("CombinedAutocompleteProvider", () => {
  			assert.ok(values.includes("@symlinked_dir/"));
  		});
  
@@ -1025,10 +1025,10 @@ index 9f18baa..b818264 100644
  			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
  			const line = "@link";
 diff --git a/packages/tui/test/terminal-image.test.ts b/packages/tui/test/terminal-image.test.ts
-index aa28c75..ba628b6 100644
+index 6fd05f43..9c394fe4 100644
 --- a/packages/tui/test/terminal-image.test.ts
 +++ b/packages/tui/test/terminal-image.test.ts
-@@ -793,7 +793,7 @@ describe("imageFallback", () => {
+@@ -806,7 +806,7 @@ describe("imageFallback", () => {
  		try {
  			const abs = join(homedir(), ".pi", "agent", "shot.png");
  			const result = imageFallback("image/png", { widthPx: 1280, heightPx: 720 }, abs);
@@ -1037,7 +1037,7 @@ index aa28c75..ba628b6 100644
  		} finally {
  			resetCapabilitiesCache();
  		}
-@@ -811,7 +811,7 @@ describe("imageFallback", () => {
+@@ -824,7 +824,7 @@ describe("imageFallback", () => {
  			);
  			// Visible text must use ~/... not the expanded home path.
  			const visible = result.replace(/\x1b\]8;;.*?\x1b\\/g, "");
@@ -1046,8 +1046,31 @@ index aa28c75..ba628b6 100644
  		} finally {
  			resetCapabilitiesCache();
  		}
+diff --git a/scripts/check-entry-graphs.mjs b/scripts/check-entry-graphs.mjs
+index f53303d9..288c0d61 100644
+--- a/scripts/check-entry-graphs.mjs
++++ b/scripts/check-entry-graphs.mjs
+@@ -12,7 +12,7 @@
+  */
+ 
+ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+-import { dirname, relative, resolve } from "node:path";
++import { dirname, relative, resolve, sep } from "node:path";
+ import { fileURLToPath } from "node:url";
+ 
+ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+@@ -150,7 +150,8 @@ for (const [pkgDir, budgets] of Object.entries(BUDGETS)) {
+ 				failures += 1;
+ 				continue;
+ 			}
+-			const graph = [...walk(source)].map((file) => relative(ROOT, file));
++			// Budget patterns use "/", so Windows paths are compared in that form too.
++			const graph = [...walk(source)].map((file) => relative(ROOT, file).split(sep).join("/"));
+ 			if (graph.length > budget.maxFiles) {
+ 				console.error(
+ 					`${pkgDir} export "${name}" reaches ${graph.length} files, budget ${budget.maxFiles}\n` +
 diff --git a/scripts/local-package-install.test.mjs b/scripts/local-package-install.test.mjs
-index fe467d0..9a58baf 100644
+index fe467d0f..9a58baf0 100644
 --- a/scripts/local-package-install.test.mjs
 +++ b/scripts/local-package-install.test.mjs
 @@ -7,6 +7,7 @@ import test from "node:test";
@@ -1069,7 +1092,7 @@ index fe467d0..9a58baf 100644
  	assert.match(manifest.dependencies["@pi-package-test/target"], /^file:/);
 diff --git a/scripts/test-filesystem.ts b/scripts/test-filesystem.ts
 new file mode 100644
-index 0000000..c6c44d0
+index 00000000..c6c44d0f
 --- /dev/null
 +++ b/scripts/test-filesystem.ts
 @@ -0,0 +1,38 @@
@@ -1112,7 +1135,7 @@ index 0000000..c6c44d0
 +/** File-link metadata tests require Windows symlink privilege; directory/alias tests always run. */
 +export const fileSymlinksAvailable = probeFileSymlinks();
 diff --git a/test.sh b/test.sh
-index 574b5cd..2296ef4 100755
+index 574b5cdd..2296ef4f 100755
 --- a/test.sh
 +++ b/test.sh
 @@ -12,6 +12,13 @@ mkdir -p "$test_root/home/.config" "$test_root/tmp" "$test_root/cache/npm"

@@ -761,7 +761,8 @@ export class PrimeEngineProcess extends Emitter<EngineHandleEvents> implements E
     if (active.length === 0) {
       await this.nativeCommand('get_system_prompt')
       // The native desktop runtime exposes Python; shell, editing, and connections run through it.
-      active.push('ipython')
+      // Upstream 0.10.1 renamed it from `ipython` (still accepted for saved tool calls).
+      active.push('python_repl')
     }
     const tools = await Promise.all(
       active.map(async (name) => {

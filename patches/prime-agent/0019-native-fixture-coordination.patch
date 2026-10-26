@@ -1,5 +1,5 @@
 diff --git a/crates/pa-cli/src/piped_stdin.rs b/crates/pa-cli/src/piped_stdin.rs
-index a4de0b3..d87b133 100644
+index a4de0b334..d87b133fd 100644
 --- a/crates/pa-cli/src/piped_stdin.rs
 +++ b/crates/pa-cli/src/piped_stdin.rs
 @@ -68,10 +68,17 @@ pub fn read_piped_stdin(idle_timeout_ms: u64) -> Option<String> {
@@ -59,11 +59,130 @@ index a4de0b3..d87b133 100644
 +        );
      }
  }
+diff --git a/crates/pa-daemon/src/worker/tests/goal_tests.rs b/crates/pa-daemon/src/worker/tests/goal_tests.rs
+index f8591a8fb..be7df0822 100644
+--- a/crates/pa-daemon/src/worker/tests/goal_tests.rs
++++ b/crates/pa-daemon/src/worker/tests/goal_tests.rs
+@@ -321,11 +321,13 @@ async fn goal_turn_end_loop_runs_to_completion() {
+ #[allow(clippy::await_holding_lock)] // the faux registry is process-global: the guard must span the async flow
+ #[tokio::test]
+ async fn goal_pause_withdraws_the_queued_continuation() {
++    const BARRIER_TIMEOUT: Duration = Duration::from_secs(30);
++
+     let _faux = crate::agent_engine::tests::FAUX_TEST_LOCK
+         .lock()
+         .unwrap_or_else(std::sync::PoisonError::into_inner);
+-    let dir = std::env::temp_dir().join(format!("pa-worker-goal-pause-{}", uuid::Uuid::new_v4()));
+-    std::fs::create_dir_all(&dir).unwrap();
++    let directory = tempfile::TempDir::new().unwrap();
++    let dir = directory.path();
+     let config = WorkerConfig {
+         socket_path: dir.join("worker.sock"),
+         supervisor_socket_path: PathBuf::new(),
+@@ -347,13 +349,39 @@ async fn goal_pause_withdraws_the_queued_continuation() {
+     let created = worker
+         .dispatch(
+             "create",
+-            &json!({ "noSession": true, "cwd": "/tmp", "name": "goal-pause" }),
++            &json!({ "noSession": true, "cwd": dir, "name": "goal-pause" }),
+         )
+         .await;
+     assert!(created.success, "create failed: {created:?}");
++    let engine = worker
++        .agent_engine
++        .as_ref()
++        .expect("the native goal engine");
++    let probe = engine.goal_input_probe.lock().unwrap().clone().unwrap();
++    let sink = engine.goal_admission_sink.lock().unwrap().clone().unwrap();
++    let purge = engine.goal_queue_purge.lock().unwrap().clone().unwrap();
++    let (queued, mut observed) = tokio::sync::mpsc::unbounded_channel();
++    let (proceed, release) = std::sync::mpsc::channel();
++    let release = std::sync::Mutex::new(release);
++    engine.set_goal_admission(
++        probe,
++        std::sync::Arc::new(move |work| {
++            const BARRIER_TIMEOUT: Duration = Duration::from_secs(30);
++            sink(work);
++            queued.send(()).expect("the goal queue observer");
++            // Hold the admitting turn until the public pause command is ahead of its continuation.
++            release
++                .lock()
++                .unwrap()
++                .recv_timeout(BARRIER_TIMEOUT)
++                .expect("the observer releases goal admission");
++        }),
++        purge,
++    );
++    let mut subscription = worker.events.subscribe();
+     let start = worker
+         .dispatch(
+-            "prompt_and_wait",
++            "prompt",
+             &json!({
+                 "activeSessionId": "goal-pause-session",
+                 "message": "/goal pause right after the start",
+@@ -361,13 +389,37 @@ async fn goal_pause_withdraws_the_queued_continuation() {
+         )
+         .await;
+     assert!(start.success, "the goal start failed: {start:?}");
++    tokio::time::timeout(BARRIER_TIMEOUT, observed.recv())
++        .await
++        .expect("the native goal queues a continuation")
++        .expect("the goal admission observer stays connected");
++    let queued = worker.dispatch("get_queue", &json!({})).await;
++    assert!(queued.success, "queue read failed: {queued:?}");
++    assert_eq!(
++        queued.data.as_ref().unwrap()["followUp"]
++            .as_array()
++            .unwrap()
++            .len(),
++        1,
++        "the native continuation waits in the worker queue"
++    );
++    let admitted_events = session_events_since(&mut subscription);
++    assert!(
++        admitted_events.iter().any(|event| {
++            event["type"] == "goal_update" && event["goal"]["continuationsUsed"] == 1
++        }),
++        "the queued continuation has a native goal update: {admitted_events:?}"
++    );
+     let pause = worker
+         .dispatch(
+-            "prompt_and_wait",
++            "prompt",
+             &json!({ "activeSessionId": "goal-pause-session", "message": "/goal pause" }),
+         )
+         .await;
+     assert!(pause.success, "the pause never ran: {pause:?}");
++    proceed
++        .send(())
++        .expect("the admitting turn receives its release");
+     // The loop is quiet: the idle wait settles without consuming
+     // further turns (a live continuation would starve it).
+     let idle = worker.dispatch("wait_for_idle", &json!({})).await;
+@@ -378,6 +430,17 @@ async fn goal_pause_withdraws_the_queued_continuation() {
+         goal["continuationsUsed"].as_u64().unwrap_or(0) <= 2,
+         "the pause never withdrew the loop: {goal}"
+     );
++    let queued = worker.dispatch("get_queue", &json!({})).await;
++    assert_eq!(queued.data, Some(json!({ "steering": [], "followUp": [] })));
++    let events = session_events_since(&mut subscription);
++    assert!(
++        !events.iter().any(|event| {
++            event["type"] == "message_start" && event["message"]["customType"] == "goal_context"
++        }),
++        "the withdrawn continuation never reaches the provider: {events:?}"
++    );
++    let closed = worker.dispatch("shutdown", &json!({})).await;
++    assert!(closed.success, "shutdown failed: {closed:?}");
+ }
+ 
+ /// A scripted goal session's dispatch worker with a durable session
 diff --git a/crates/pa-daemon/src/worker/turn_stream_tests.rs b/crates/pa-daemon/src/worker/turn_stream_tests.rs
-index ba610ab..c78b530 100644
+index 572fca1dd..1f3a55efb 100644
 --- a/crates/pa-daemon/src/worker/turn_stream_tests.rs
 +++ b/crates/pa-daemon/src/worker/turn_stream_tests.rs
-@@ -79,6 +79,13 @@ fn burst_runner(engine: Arc<dyn SessionEngine>) -> TurnRunner {
+@@ -80,6 +80,13 @@ fn burst_runner(engine: Arc<dyn SessionEngine>) -> TurnRunner {
  
  async fn turn_session_events(engine: Arc<dyn SessionEngine>) -> Vec<Value> {
      let runner = burst_runner(Arc::clone(&engine));
@@ -78,7 +197,7 @@ index ba610ab..c78b530 100644
      runner
          .run_turn(
 diff --git a/crates/pa-daemon/src/worker/turn_stream_tests/broadcast.rs b/crates/pa-daemon/src/worker/turn_stream_tests/broadcast.rs
-index f796e98..e00cd16 100644
+index f796e9867..e00cd1644 100644
 --- a/crates/pa-daemon/src/worker/turn_stream_tests/broadcast.rs
 +++ b/crates/pa-daemon/src/worker/turn_stream_tests/broadcast.rs
 @@ -320,24 +320,22 @@ async fn a_retried_turn_broadcasts_one_agent_end_per_run() {
@@ -138,7 +257,7 @@ index f796e98..e00cd16 100644
          if frame.outbound_type != "session_event" {
              continue;
 diff --git a/crates/pa-daemon/src/worker/turn_stream_tests/burst.rs b/crates/pa-daemon/src/worker/turn_stream_tests/burst.rs
-index 405bd59..711e363 100644
+index 405bd59d6..711e3633b 100644
 --- a/crates/pa-daemon/src/worker/turn_stream_tests/burst.rs
 +++ b/crates/pa-daemon/src/worker/turn_stream_tests/burst.rs
 @@ -2,12 +2,15 @@
@@ -276,127 +395,8 @@ index 405bd59..711e363 100644
      });
      let events = turn_session_events(engine).await;
  
-diff --git a/crates/pa-daemon/src/worker/tests/goal_tests.rs b/crates/pa-daemon/src/worker/tests/goal_tests.rs
-index c4e8d8e..05755f7 100644
---- a/crates/pa-daemon/src/worker/tests/goal_tests.rs
-+++ b/crates/pa-daemon/src/worker/tests/goal_tests.rs
-@@ -321,11 +321,13 @@ async fn goal_turn_end_loop_runs_to_completion() {
- #[allow(clippy::await_holding_lock)] // the faux registry is process-global: the guard must span the async flow
- #[tokio::test]
- async fn goal_pause_withdraws_the_queued_continuation() {
-+    const BARRIER_TIMEOUT: Duration = Duration::from_secs(30);
-+
-     let _faux = crate::agent_engine::tests::FAUX_TEST_LOCK
-         .lock()
-         .unwrap_or_else(std::sync::PoisonError::into_inner);
--    let dir = std::env::temp_dir().join(format!("pa-worker-goal-pause-{}", uuid::Uuid::new_v4()));
--    std::fs::create_dir_all(&dir).unwrap();
-+    let directory = tempfile::TempDir::new().unwrap();
-+    let dir = directory.path();
-     let config = WorkerConfig {
-         socket_path: dir.join("worker.sock"),
-         supervisor_socket_path: PathBuf::new(),
-@@ -347,13 +349,39 @@ async fn goal_pause_withdraws_the_queued_continuation() {
-     let created = worker
-         .dispatch(
-             "create",
--            &json!({ "noSession": true, "cwd": "/tmp", "name": "goal-pause" }),
-+            &json!({ "noSession": true, "cwd": dir, "name": "goal-pause" }),
-         )
-         .await;
-     assert!(created.success, "create failed: {created:?}");
-+    let engine = worker
-+        .agent_engine
-+        .as_ref()
-+        .expect("the native goal engine");
-+    let probe = engine.goal_input_probe.lock().unwrap().clone().unwrap();
-+    let sink = engine.goal_admission_sink.lock().unwrap().clone().unwrap();
-+    let purge = engine.goal_queue_purge.lock().unwrap().clone().unwrap();
-+    let (queued, mut observed) = tokio::sync::mpsc::unbounded_channel();
-+    let (proceed, release) = std::sync::mpsc::channel();
-+    let release = std::sync::Mutex::new(release);
-+    engine.set_goal_admission(
-+        probe,
-+        std::sync::Arc::new(move |work| {
-+            const BARRIER_TIMEOUT: Duration = Duration::from_secs(30);
-+            sink(work);
-+            queued.send(()).expect("the goal queue observer");
-+            // Hold the admitting turn until the public pause command is ahead of its continuation.
-+            release
-+                .lock()
-+                .unwrap()
-+                .recv_timeout(BARRIER_TIMEOUT)
-+                .expect("the observer releases goal admission");
-+        }),
-+        purge,
-+    );
-+    let mut subscription = worker.events.subscribe();
-     let start = worker
-         .dispatch(
--            "prompt_and_wait",
-+            "prompt",
-             &json!({
-                 "activeSessionId": "goal-pause-session",
-                 "message": "/goal pause right after the start",
-@@ -361,13 +389,37 @@ async fn goal_pause_withdraws_the_queued_continuation() {
-         )
-         .await;
-     assert!(start.success, "the goal start failed: {start:?}");
-+    tokio::time::timeout(BARRIER_TIMEOUT, observed.recv())
-+        .await
-+        .expect("the native goal queues a continuation")
-+        .expect("the goal admission observer stays connected");
-+    let queued = worker.dispatch("get_queue", &json!({})).await;
-+    assert!(queued.success, "queue read failed: {queued:?}");
-+    assert_eq!(
-+        queued.data.as_ref().unwrap()["followUp"]
-+            .as_array()
-+            .unwrap()
-+            .len(),
-+        1,
-+        "the native continuation waits in the worker queue"
-+    );
-+    let admitted_events = session_events_since(&mut subscription);
-+    assert!(
-+        admitted_events.iter().any(|event| {
-+            event["type"] == "goal_update" && event["goal"]["continuationsUsed"] == 1
-+        }),
-+        "the queued continuation has a native goal update: {admitted_events:?}"
-+    );
-     let pause = worker
-         .dispatch(
--            "prompt_and_wait",
-+            "prompt",
-             &json!({ "activeSessionId": "goal-pause-session", "message": "/goal pause" }),
-         )
-         .await;
-     assert!(pause.success, "the pause never ran: {pause:?}");
-+    proceed
-+        .send(())
-+        .expect("the admitting turn receives its release");
-     // The loop is quiet: the idle wait settles without consuming
-     // further turns (a live continuation would starve it).
-     let idle = worker.dispatch("wait_for_idle", &json!({})).await;
-@@ -378,6 +430,17 @@ async fn goal_pause_withdraws_the_queued_continuation() {
-         goal["continuationsUsed"].as_u64().unwrap_or(0) <= 2,
-         "the pause never withdrew the loop: {goal}"
-     );
-+    let queued = worker.dispatch("get_queue", &json!({})).await;
-+    assert_eq!(queued.data, Some(json!({ "steering": [], "followUp": [] })));
-+    let events = session_events_since(&mut subscription);
-+    assert!(
-+        !events.iter().any(|event| {
-+            event["type"] == "message_start" && event["message"]["customType"] == "goal_context"
-+        }),
-+        "the withdrawn continuation never reaches the provider: {events:?}"
-+    );
-+    let closed = worker.dispatch("shutdown", &json!({})).await;
-+    assert!(closed.success, "shutdown failed: {closed:?}");
- }
- 
- /// A scripted goal session's dispatch worker with a durable session
 diff --git a/crates/pa-telemetry/Cargo.toml b/crates/pa-telemetry/Cargo.toml
-index 3a5b920..06ce782 100644
+index d1ebea6cc..3e48fafb4 100644
 --- a/crates/pa-telemetry/Cargo.toml
 +++ b/crates/pa-telemetry/Cargo.toml
 @@ -19,6 +19,7 @@ rustix = { version = "1", features = ["system", "fs"] }
@@ -408,7 +408,7 @@ index 3a5b920..06ce782 100644
  [lints]
  workspace = true
 diff --git a/crates/pa-telemetry/src/client.rs b/crates/pa-telemetry/src/client.rs
-index b15056a..147d51f 100644
+index b15056a1b..147d51f1f 100644
 --- a/crates/pa-telemetry/src/client.rs
 +++ b/crates/pa-telemetry/src/client.rs
 @@ -498,356 +498,4 @@ impl TelemetryClientConfig {
@@ -771,6 +771,7 @@ index b15056a..147d51f 100644
 +mod tests;
 diff --git a/crates/pa-telemetry/src/client/tests.rs b/crates/pa-telemetry/src/client/tests.rs
 new file mode 100644
+index 000000000..04f4dcc65
 --- /dev/null
 +++ b/crates/pa-telemetry/src/client/tests.rs
 @@ -0,0 +1,358 @@

@@ -1,5 +1,5 @@
 diff --git a/crates/pa-core/src/platform/perms.rs b/crates/pa-core/src/platform/perms.rs
-index f4e34c1..647284a 100644
+index f4e34c16c..647284a0e 100644
 --- a/crates/pa-core/src/platform/perms.rs
 +++ b/crates/pa-core/src/platform/perms.rs
 @@ -113,7 +113,16 @@ pub fn is_readable_writable(path: &Path) -> bool {
@@ -21,7 +21,7 @@ index f4e34c1..647284a 100644
  
  /// True when the current user may read the file, mirroring Node
 diff --git a/crates/pa-core/src/tools/edit.rs b/crates/pa-core/src/tools/edit.rs
-index cc5922c..26b4da3 100644
+index cc5922c10..26b4da315 100644
 --- a/crates/pa-core/src/tools/edit.rs
 +++ b/crates/pa-core/src/tools/edit.rs
 @@ -86,7 +86,17 @@ pub struct LocalEditOperations;
@@ -44,7 +44,7 @@ index cc5922c..26b4da3 100644
  
      fn write_file(&self, absolute_path: &str, content: &str) -> std::io::Result<()> {
 diff --git a/crates/pa-core/src/tools/edit_diff.rs b/crates/pa-core/src/tools/edit_diff.rs
-index 1387f46..420f421 100644
+index 1387f4689..420f421d2 100644
 --- a/crates/pa-core/src/tools/edit_diff.rs
 +++ b/crates/pa-core/src/tools/edit_diff.rs
 @@ -533,6 +533,7 @@ pub fn apply_edits_with_diff(
@@ -71,7 +71,7 @@ index 1387f46..420f421 100644
  
 diff --git a/crates/pa-core/tests/windows_edit_tool.rs b/crates/pa-core/tests/windows_edit_tool.rs
 new file mode 100644
-index 0000000..1f30026
+index 000000000..1f300262c
 --- /dev/null
 +++ b/crates/pa-core/tests/windows_edit_tool.rs
 @@ -0,0 +1,54 @@
