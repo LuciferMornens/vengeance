@@ -65,11 +65,20 @@ export async function nativePackageIdentity(executable) {
 /** Engine 2's Python tool: `python_repl` since upstream 0.10.1, `ipython` (and `python`) before. */
 export const PYTHON_TOOLS = ['python_repl', 'ipython', 'python']
 
+/** Calls the Python tool the running Engine 2 declares unless `toolName` is given (an upgrade
+ * baseline may predate the rename). */
 export async function runNativePythonProbe(application, server, agentId, options) {
-  const { toolCallId, code, prompt, toolName = PYTHON_TOOLS[0], timeoutMs = KERNEL_TIMEOUT_MS } = options
+  const { toolCallId, code, prompt, toolName, timeoutMs = KERNEL_TIMEOUT_MS } = options
   const from = server.requests.length
+  const call = { id: toolCallId, name: toolName, args: { code } }
   server.queue(
-    turn.toolCalls([{ id: toolCallId, name: toolName, args: { code } }]),
+    turn.toolCalls([call], {
+      when: (entry) => {
+        call.name ??=
+          inspectRequest(entry).tools.find((name) => PYTHON_TOOLS.includes(name)) ?? PYTHON_TOOLS[0]
+        return true
+      }
+    }),
     turn.text(`The ${toolCallId} probe settled.`)
   )
   await application.send(prompt)

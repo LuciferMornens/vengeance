@@ -64,7 +64,7 @@ function capabilityLine(systemPrompt) {
 
 function readModelInfo(result) {
   const line = result.text.split('\n').find((value) => value.startsWith(MODEL_INFO_PREFIX))
-  assert.ok(line, `The native ipython result has no ${MODEL_INFO_PREFIX} line`)
+  assert.ok(line, `The native Python result has no ${MODEL_INFO_PREFIX} line`)
   return JSON.parse(line.slice(MODEL_INFO_PREFIX.length))
 }
 
