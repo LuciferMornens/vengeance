@@ -1,8 +1,8 @@
 diff --git a/crates/pa-agent/src/agent.rs b/crates/pa-agent/src/agent.rs
-index 57f6ba8..ca3eb6d 100644
+index eb859b3f0..a9589fc46 100644
 --- a/crates/pa-agent/src/agent.rs
 +++ b/crates/pa-agent/src/agent.rs
-@@ -845,6 +845,19 @@ impl Agent {
+@@ -879,6 +879,19 @@ impl Agent {
          shared.state.thinking_level = thinking_level;
      }
  
@@ -22,7 +22,7 @@ index 57f6ba8..ca3eb6d 100644
      /// Per-run model override: `None` returns to the session model.
      pub fn set_model_override(&self, model_override: Option<AgentModelOverride>) {
          *self
-@@ -1427,7 +1440,7 @@ mod tests {
+@@ -1520,7 +1533,7 @@ mod tests {
      }
  
      #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -31,7 +31,7 @@ index 57f6ba8..ca3eb6d 100644
          fn model(id: &str) -> Model {
              Model {
                  id: id.to_string(),
-@@ -1443,13 +1456,12 @@ mod tests {
+@@ -1536,13 +1549,12 @@ mod tests {
              }
          }
  
@@ -47,7 +47,7 @@ index 57f6ba8..ca3eb6d 100644
                  ..Default::default()
              },
              ..Default::default()
-@@ -1458,15 +1470,17 @@ mod tests {
+@@ -1551,15 +1563,17 @@ mod tests {
          let switcher = tokio::spawn(async move {
              for _ in 0..2_000 {
                  writer
@@ -67,7 +67,7 @@ index 57f6ba8..ca3eb6d 100644
                      )
                      .await;
              }
-@@ -1478,9 +1492,11 @@ mod tests {
+@@ -1571,9 +1585,11 @@ mod tests {
              while samples < 20_000 {
                  let state = reader.state().await;
                  let mixed_state = (state.model.id == "model-a"
@@ -81,7 +81,7 @@ index 57f6ba8..ca3eb6d 100644
                  mixed += u64::from(mixed_state);
                  samples += 1;
              }
-@@ -1490,7 +1506,7 @@ mod tests {
+@@ -1583,7 +1599,7 @@ mod tests {
          let mixed = observed.await.unwrap();
          assert_eq!(
              mixed, 0,
@@ -91,19 +91,20 @@ index 57f6ba8..ca3eb6d 100644
      }
  }
 diff --git a/crates/pa-core/src/prompts/system_prompt.rs b/crates/pa-core/src/prompts/system_prompt.rs
-index 0a407a8..e3ea493 100644
+index a6824eccd..290a97015 100644
 --- a/crates/pa-core/src/prompts/system_prompt.rs
 +++ b/crates/pa-core/src/prompts/system_prompt.rs
-@@ -60,6 +60,59 @@ pub struct SystemPromptBreakdown {
+@@ -60,6 +60,60 @@ pub struct SystemPromptBreakdown {
      pub cached_prefix_len: usize,
  }
  
 +impl SystemPromptBreakdown {
-+    pub(crate) fn update_model(&mut self, selector: &str, vision_capable: bool) {
-+        self.segments.retain(|segment| segment.name != "per-model");
++    /// Follow a live model switch: the model's prompt files and its image input.
++    pub(crate) fn update_model(&mut self, model_prompt_extras: Option<&str>, vision_capable: bool) {
++        self.segments
++            .retain(|segment| segment.name != "model-prompts");
 +        if !self.segments.iter().any(|segment| segment.name == "custom") {
-+            let per_model = layers::per_model_text(Some(selector));
-+            if !per_model.is_empty() {
++            if let Some(extras) = model_prompt_extras {
 +                let prefix_end = self
 +                    .segments
 +                    .iter()
@@ -112,9 +113,9 @@ index 0a407a8..e3ea493 100644
 +                self.segments.insert(
 +                    prefix_end,
 +                    PromptSegment::static_segment(
-+                        "per-model",
-+                        layers::layer_source("per-model").unwrap_or_default(),
-+                        per_model.join("\n\n"),
++                        "model-prompts",
++                        layers::layer_source("model-prompts").unwrap_or_default(),
++                        extras.to_string(),
 +                    ),
 +                );
 +            }
@@ -151,10 +152,10 @@ index 0a407a8..e3ea493 100644
 +    }
 +}
 +
- /// Inputs for one session's prompt. Static inputs (`custom_prompt`, `model`)
- /// select the cached prefix; everything else feeds the dynamic tail.
- #[derive(Debug, Default)]
-@@ -137,14 +190,8 @@ pub fn system_prompt_breakdown(options: &BuildSystemPromptOptions) -> SystemProm
+ /// Inputs for one session's prompt. Static inputs (`custom_prompt`,
+ /// `model_prompt_extras`) select the cached prefix; everything else feeds
+ /// the dynamic tail.
+@@ -143,14 +197,8 @@ pub fn system_prompt_breakdown(options: &BuildSystemPromptOptions) -> SystemProm
              }
          }
      }
@@ -170,7 +171,7 @@ index 0a407a8..e3ea493 100644
      // additional guidance -> appended prompt.
      let tools: Vec<&str> = options
          .selected_tools
-@@ -198,6 +245,9 @@ pub fn system_prompt_breakdown(options: &BuildSystemPromptOptions) -> SystemProm
+@@ -204,6 +252,9 @@ pub fn system_prompt_breakdown(options: &BuildSystemPromptOptions) -> SystemProm
          "session configuration",
          environment_section(options),
      ));
@@ -180,7 +181,7 @@ index 0a407a8..e3ea493 100644
  
      let role = session_role_section(options, has_ipython);
      if !role.is_empty() {
-@@ -231,16 +281,13 @@ pub fn system_prompt_breakdown(options: &BuildSystemPromptOptions) -> SystemProm
+@@ -224,16 +275,13 @@ pub fn system_prompt_breakdown(options: &BuildSystemPromptOptions) -> SystemProm
          }
      }
  
@@ -203,7 +204,7 @@ index 0a407a8..e3ea493 100644
  }
  
  fn packages_section() -> String {
-@@ -279,22 +326,21 @@ fn environment_section(options: &BuildSystemPromptOptions) -> String {
+@@ -272,22 +320,21 @@ fn environment_section(options: &BuildSystemPromptOptions) -> String {
          .clone()
          .unwrap_or_else(|| "not persisted".to_string())
          .replace('\\', "/");
@@ -239,10 +240,10 @@ index 0a407a8..e3ea493 100644
  
  fn session_role_section(options: &BuildSystemPromptOptions, has_ipython: bool) -> String {
 diff --git a/crates/pa-core/src/session_engine/engine.rs b/crates/pa-core/src/session_engine/engine.rs
-index 4d0fa4a..3a59c31 100644
+index 684ba6e28..8c22bcea3 100644
 --- a/crates/pa-core/src/session_engine/engine.rs
 +++ b/crates/pa-core/src/session_engine/engine.rs
-@@ -95,7 +95,9 @@ pub struct SessionEngine {
+@@ -116,7 +116,11 @@ pub struct SessionEngine {
      pub skill_diagnostics: Vec<crate::skills::ResourceDiagnostic>,
      pub prompt_templates: Vec<PromptTemplate>,
      pub agents_files: Vec<crate::resources::ContextFile>,
@@ -250,19 +251,21 @@ index 4d0fa4a..3a59c31 100644
 +    pub(super) prompt_breakdown:
 +        std::sync::RwLock<crate::prompts::system_prompt::SystemPromptBreakdown>,
 +    pub(super) model_selection: tokio::sync::Mutex<()>,
++    /// Where a live model switch reloads the new model's prompt files from.
++    pub(super) agent_dir: std::path::PathBuf,
      /// The same instance the kernel `goal.*` host handlers reach, so `/goal`
      /// and `goal.complete()` observe one state machine.
      pub goal_driver: std::sync::Arc<tokio::sync::Mutex<super::goal_driver::GoalDriver>>,
-@@ -465,7 +467,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
- 
-     let prompt_model_selector = Some(format!("{}/{}", model_info.provider, model_info.id));
-     let prompt_vision_capable = Some(model_info.input.contains(&pa_types::ai::ModelInput::Image));
+@@ -563,7 +567,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
+                 &model_prompts.errors,
+             ));
+     }
 -    let system_prompt = crate::prompts::system_prompt::build_system_prompt(
 +    let prompt_breakdown = crate::prompts::system_prompt::system_prompt_breakdown(
          &crate::prompts::system_prompt::BuildSystemPromptOptions {
              custom_prompt: resources.system_prompt.clone(),
-             model: prompt_model_selector.as_deref(),
-@@ -582,7 +584,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
+             model_prompt_extras: model_prompts.extras.as_deref(),
+@@ -689,7 +693,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
      };
      let agent = Agent::new(AgentOptions {
          initial_state: AgentInitialState {
@@ -271,42 +274,35 @@ index 4d0fa4a..3a59c31 100644
              model: Some(model),
              thinking_level: Some(thinking_level),
              tools: Some(tools),
-@@ -765,7 +767,8 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
+@@ -911,7 +915,9 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
          skill_diagnostics: resources.skill_diagnostics,
          prompt_templates: resources.prompts,
          agents_files: resources.agents_files,
 -        system_prompt,
 +        prompt_breakdown: std::sync::RwLock::new(prompt_breakdown),
 +        model_selection: tokio::sync::Mutex::new(()),
++        agent_dir: config.agent_dir.clone(),
          goal_driver,
          queued_goal_context_purge: config.queued_goal_context_purge.clone(),
          mcp_manager,
-@@ -778,20 +781,6 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
- }
- 
- impl SessionEngine {
--    /// After a model switch, the `model.info` handler and the usage
--    /// estimate's context window follow the model the session now runs.
--    pub fn update_model_facts(&self, model: &pa_types::ai::Model) {
--        super::turn_boundary::TurnBoundaryRequests::rebind_model_facts(
--            &self.turn_boundary,
--            super::turn_boundary::ModelInfo {
--                id: model.id.clone(),
--                provider: model.provider.clone(),
--                input: model.input.clone(),
--            },
--            (model.context_window > 0).then_some(model.context_window),
--        );
--    }
--
-     /// A weak reference for lock-free kernel liveness probes without
-     /// joining the strong ownership graph.
-     pub fn kernel_provisioner_weak(
+diff --git a/crates/pa-core/src/session_engine/engine/append_system_tests.rs b/crates/pa-core/src/session_engine/engine/append_system_tests.rs
+index 433b48de1..bbfcea0fa 100644
+--- a/crates/pa-core/src/session_engine/engine/append_system_tests.rs
++++ b/crates/pa-core/src/session_engine/engine/append_system_tests.rs
+@@ -63,7 +63,7 @@ async fn assert_prompt_case(case: PromptCase) {
+         let calls = provider.calls();
+         assert_eq!(calls.len(), 1);
+         let prompt = calls[0].system_prompt.as_deref().unwrap();
+-        assert_eq!(prompt, engine.system_prompt);
++        assert_eq!(prompt, engine.system_prompt());
+         if case.custom_system {
+             assert!(prompt.starts_with("CUSTOM_SYSTEM_SENTINEL"));
+         } else {
 diff --git a/crates/pa-core/src/session_engine/engine/tests.rs b/crates/pa-core/src/session_engine/engine/tests.rs
-index 46ee099..9b943bd 100644
+index a69e04252..5aae94780 100644
 --- a/crates/pa-core/src/session_engine/engine/tests.rs
 +++ b/crates/pa-core/src/session_engine/engine/tests.rs
-@@ -92,9 +92,9 @@ async fn engine_runs_tool_loop_and_persists() {
+@@ -97,9 +97,9 @@ async fn engine_runs_tool_loop_and_persists() {
  
      // The system prompt is the layered assembly: static core layer
      // first, dynamic tail after.
@@ -318,7 +314,7 @@ index 46ee099..9b943bd 100644
          .contains("Recursive agent depth: 0 (root)"));
  
      let outcome = engine
-@@ -190,9 +190,9 @@ async fn spawned_child_prompt_stamps_its_depth() {
+@@ -200,9 +200,9 @@ async fn spawned_child_prompt_stamps_its_depth() {
      .unwrap();
  
      assert!(engine
@@ -330,7 +326,7 @@ index 46ee099..9b943bd 100644
  }
  
  /// The login chain's prompt-gating end to end: a settings-declared OAuth
-@@ -281,7 +281,7 @@ async fn oauth_creds_unlock_generic_mcp_gating_in_new_sessions() {
+@@ -296,7 +296,7 @@ async fn oauth_creds_unlock_generic_mcp_gating_in_new_sessions() {
      let engine = create_session(config(&cwd, &agent_dir, provider.stream_fn()))
          .await
          .unwrap();
@@ -339,7 +335,7 @@ index 46ee099..9b943bd 100644
  
      // The persisted credential begin_login leaves behind (the TS
      // McpCredentials shape, endpoint-bound).
-@@ -310,14 +310,14 @@ async fn oauth_creds_unlock_generic_mcp_gating_in_new_sessions() {
+@@ -325,14 +325,14 @@ async fn oauth_creds_unlock_generic_mcp_gating_in_new_sessions() {
      let engine = create_session(config(&cwd, &agent_dir, provider.stream_fn()))
          .await
          .unwrap();
@@ -357,11 +353,20 @@ index 46ee099..9b943bd 100644
  }
  
  #[tokio::test]
+@@ -547,7 +547,7 @@ async fn engine_over(
+ 
+ fn prompt_lists_skill(engine: &SessionEngine, name: &str) -> bool {
+     engine
+-        .system_prompt
++        .system_prompt()
+         .contains(&format!("<name>{name}</name>"))
+ }
+ 
 diff --git a/crates/pa-core/src/session_engine/mod.rs b/crates/pa-core/src/session_engine/mod.rs
-index e1c1e2b..81f2c67 100644
+index bf78c6284..42de34607 100644
 --- a/crates/pa-core/src/session_engine/mod.rs
 +++ b/crates/pa-core/src/session_engine/mod.rs
-@@ -47,6 +47,7 @@ pub mod turn_boundary;
+@@ -50,6 +50,7 @@ pub mod turn_boundary;
  
  mod admission;
  mod compaction_arms;
@@ -371,10 +376,10 @@ index e1c1e2b..81f2c67 100644
  use std::sync::Arc;
 diff --git a/crates/pa-core/src/session_engine/model_selection.rs b/crates/pa-core/src/session_engine/model_selection.rs
 new file mode 100644
-index 0000000..0787f34
+index 000000000..bd7490bbd
 --- /dev/null
 +++ b/crates/pa-core/src/session_engine/model_selection.rs
-@@ -0,0 +1,178 @@
+@@ -0,0 +1,181 @@
 +//! Live model selection and the prompt facts derived from the full model descriptor.
 +
 +use pa_agent::types::ThinkingLevel;
@@ -411,7 +416,13 @@ index 0000000..0787f34
 +            .unwrap_or_else(std::sync::PoisonError::into_inner)
 +            .clone();
 +        let selector = format!("{}/{}", model.provider, model.id);
-+        breakdown.update_model(&selector, model.input.contains(&ModelInput::Image));
++        // Load errors were reported when the session started; a switch keeps the prompt usable.
++        let model_prompts =
++            crate::prompts::model_prompts::load_model_prompts(Some(&selector), &self.agent_dir);
++        breakdown.update_model(
++            model_prompts.extras.as_deref(),
++            model.input.contains(&ModelInput::Image),
++        );
 +        self.session
 +            .agent()
 +            .set_model_and_thinking_level_with_prompt(
@@ -505,10 +516,7 @@ index 0000000..0787f34
 +            },
 +        );
 +        let model_info = handlers.get("model.info").unwrap();
-+        let request = || HostRequestPayload {
-+            data: json!({}),
-+            cell_source_code: None,
-+        };
++        let request = || HostRequestPayload { data: json!({}) };
 +        let initial_prompt = engine.system_prompt();
 +        assert_eq!(
 +            model_info(request()).await.unwrap(),
@@ -554,10 +562,10 @@ index 0000000..0787f34
 +    }
 +}
 diff --git a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
-index 046c647..2229da9 100644
+index 50e014a20..9ea3dd91f 100644
 --- a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
 +++ b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
-@@ -418,16 +418,10 @@ impl SessionEngine for AgentSessionEngine {
+@@ -472,20 +472,12 @@ impl SessionEngine for AgentSessionEngine {
          }
          let session = self.session.blocking_lock();
          if let Some(core) = session.as_deref() {
@@ -571,13 +579,19 @@ index 046c647..2229da9 100644
 -                core.session
 -                    .set_model_and_thinking_level(&model, &provider, &model_id, level),
 -            );
+-            // The turn-boundary model facts follow the switch: `model.info`
+-            // and the usage estimate's context window report the model now
+-            // running. A core that is not built yet rebinds at its build.
+-            core.update_model_facts(&model);
++            // The live switch rebinds the turn-boundary model facts too (`model.info`
++            // and the usage estimate's context window), with the refreshed prompt.
 +            let _ = self
 +                .runtime
 +                .block_on(core.set_model_and_thinking_level(&model, level));
          }
          if let Some(children) = &self.children {
              children.set_model(format!("{}/{}", model.provider, model.id));
-@@ -470,7 +464,9 @@ impl SessionEngine for AgentSessionEngine {
+@@ -528,7 +520,9 @@ impl SessionEngine for AgentSessionEngine {
      /// The built session's assembled prompt (the export embeds it); best-effort.
      fn export_system_prompt(&self) -> Option<String> {
          let session = self.session.try_lock().ok()?;
@@ -588,7 +602,7 @@ index 046c647..2229da9 100644
      }
  
      /// The built session's live tool registry mapped to the export's tools
-@@ -535,6 +531,11 @@ impl SessionEngine for AgentSessionEngine {
+@@ -595,6 +589,11 @@ impl SessionEngine for AgentSessionEngine {
              "api": model.api,
              "provider": model.provider,
              "reasoning": model.reasoning,
@@ -600,7 +614,7 @@ index 046c647..2229da9 100644
          }))
      }
  
-@@ -1155,7 +1156,7 @@ impl SessionEngine for AgentSessionEngine {
+@@ -1215,7 +1214,7 @@ impl SessionEngine for AgentSessionEngine {
              self.ensure_core_session_async(&model).await?;
              let guard = self.session.lock().await;
              let engine = guard.as_deref().expect("session built above");
@@ -610,7 +624,7 @@ index 046c647..2229da9 100644
      }
  
 diff --git a/crates/pa-daemon/src/rpc/model_commands.rs b/crates/pa-daemon/src/rpc/model_commands.rs
-index 6c47045..ab4fd16 100644
+index 6c470457e..ab4fd1628 100644
 --- a/crates/pa-daemon/src/rpc/model_commands.rs
 +++ b/crates/pa-daemon/src/rpc/model_commands.rs
 @@ -5,7 +5,7 @@ use std::sync::Arc;
@@ -657,7 +671,7 @@ index 6c47045..ab4fd16 100644
      let mut settings =
          pa_core::settings::SettingsManager::create(&state.settings_cwd().await, &state.agent_dir);
 diff --git a/crates/pa-daemon/src/rpc/session_commands.rs b/crates/pa-daemon/src/rpc/session_commands.rs
-index 190e275..ed470f1 100644
+index 190e27586..ed470f1d4 100644
 --- a/crates/pa-daemon/src/rpc/session_commands.rs
 +++ b/crates/pa-daemon/src/rpc/session_commands.rs
 @@ -443,7 +443,7 @@ async fn export_html(state: &Arc<RpcState>, payload: &Value) -> Result<ResponseD
@@ -671,7 +685,7 @@ index 190e275..ed470f1 100644
      };
 diff --git a/crates/pa-daemon/tests/model_capabilities.rs b/crates/pa-daemon/tests/model_capabilities.rs
 new file mode 100644
-index 0000000..2b0b909
+index 000000000..2b0b909ab
 --- /dev/null
 +++ b/crates/pa-daemon/tests/model_capabilities.rs
 @@ -0,0 +1,99 @@

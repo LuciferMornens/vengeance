@@ -1,7 +1,7 @@
 # Vengeance's pi build
 
-Vengeance builds stable `v1.3.0`, commit `71023aec1546d6d677a65669c5665c0927ce0dd0`,
-as `1.3.0+vengeance.4`. See [UPSTREAM.md](../../UPSTREAM.md) and
+Vengeance builds stable `v1.4.0`, commit `4a080252f06caf63a525d7873c5d94d3c23887e0`,
+as `1.4.0+vengeance.1`. See [UPSTREAM.md](../../UPSTREAM.md) and
 [engines.lock.json](../../engines.lock.json) for the source and maintenance contract.
 
 The active series includes distribution policy (0001), extension runtime version identity (0002),
@@ -10,7 +10,14 @@ native session sharing (0007), POSIX shell test paths (0008), MCP host state (00
 refresh rejection (0010).
 Patch `0005` normalizes the external-editor fixture's temporary path on Windows. Patch `0006`
 also supplies Abliteration's native default model, required by the 1.3 provider-selection contract.
-The series applies to the stable base without source conflict.
+Rebasing onto 1.4.0 needed two reviewed resolutions: the chord package-boundary test, where 1.4.0's
+allow-list and patch `0005`'s portable separator now combine, and the default-model table, where
+`0006` adds Abliteration after 1.4.0's `mimo-v2.6-pro` Xiaomi defaults.
+
+Upstream's `check:entry-graphs` compared its `allow` and `forbid` patterns with backslash paths on
+Windows, so the stable base fails it there, and `forbid` never matched. Patch `0005` compares the
+graph in `/` form. Patch `0010` raises the `./models` budget from 20 to 21 files for
+`auth/oauth-error.ts`, which rejected-refresh recognition adds to that entry.
 
 Patch `0005` also separates Bun result settlement from process exit in the real-worker fixture.
 Upstream [issue 10748](https://github.com/earendil-works/pi/issues/10748) documents that Bun can keep
@@ -26,8 +33,11 @@ Claude Sonnet 5.5 with the qualified cache-read price. Upstream commit
 Off thinking level. The native catalog supplies these values directly.
 
 Patch `0006` adds the Abliteration provider through native provider and catalog APIs without changing
-the pinned catalog files. It supports native API-key login and `ABLIT_KEY`, all three models,
-session-affinity headers, current prices and model-specific thinking and image capabilities.
+the pinned catalog files. It supports native API-key login and `ABLIT_KEY`, all four models (Abliterated Model, Large Flash,
+Large v2 and the deprecated Large), session-affinity headers, current prices and model-specific
+thinking and image capabilities. Chat Completions accepts every `reasoning_effort` from `none` to
+`max` on all four (checked against the live API on 26 October 2026); Large v2 cannot turn reasoning
+off. Names, limits, image input and prices follow `GET /v1/models`.
 The native `abliteration.test.ts` and `scripts/qa/auth/abliteration.qa.mjs` qualify the integration;
 see `UPSTREAM.md` for the provider documentation and retirement criteria.
 
@@ -105,7 +115,7 @@ Extension/package updates and model catalog refreshes remain native operations. 
 the CLI, RPC entry and the SDK all come from our source checkout. Internal runtime packages are
 packed locally and substituted into upstream's installation lock; external dependencies stay pinned.
 
-The compatibility patch keeps the native package version and SDK `VERSION` at `1.3.0`.
+The compatibility patch keeps the native package version and SDK `VERSION` at `1.4.0`.
 Some extensions require a dotted upstream release and reject SemVer build metadata. Distribution
 identity lives in `package.json`'s `vengeance.version`, the engine manifest and CLI `--version`.
 Install-change detection compares the distribution identity, including builds on the same upstream base.

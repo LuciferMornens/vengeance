@@ -8,6 +8,7 @@ import { launchApp, reportShotsDir, ROOT, shutdownOwnedPrimeDaemons } from '../l
 import { executableName } from '../lib/platform.mjs'
 import { processTable } from '../lib/processes.mjs'
 import { assertOutsideRealHome, isInside, tempRoot } from '../lib/tmp.mjs'
+import { PYTHON_TOOLS } from '../lib/native-kernel.mjs'
 
 const SUITE_NAME = 'engines-live-provider'
 const PROVIDER = 'openrouter'
@@ -22,7 +23,7 @@ const COST_DISPLAY_PRECISION = 4
 const PROMPT_MAX_CHARACTERS = 80
 const PROMPT = 'Reply with just: ok'
 const TOOL_MARKER = 'tool-ok'
-const TOOL_PROMPT = 'Use ipython once to print("tool-ok"), then reply with just: ok'
+const TOOL_PROMPT = 'Use python_repl once to print("tool-ok"), then reply with just: ok'
 const CONTEXT_MARKER = 'LIVE_CONTEXT_OK'
 const SECRET_VARIABLE = /(API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/i
 const PRIME_VARIABLE = /^PRIME_AGENT_/
@@ -295,7 +296,7 @@ async function resumeFirstTurn(application, fixture, saved, report) {
   await application.screenshot('engine2-live-session-reopened')
   await tinyTurn(application, 'prime', MODEL_IDS[0], TOOL_PROMPT, report)
   const tools = Object.values((await application.agentState(agentId)).tools)
-  const pythonTool = tools.find((tool) => ['ipython', 'python'].includes(tool.toolName))
+  const pythonTool = tools.find((tool) => PYTHON_TOOLS.includes(tool.toolName))
   assert.ok(pythonTool, 'the live model called the native Python tool')
   assert.equal(pythonTool.status, 'done')
   assert.notEqual(pythonTool.isError, true)

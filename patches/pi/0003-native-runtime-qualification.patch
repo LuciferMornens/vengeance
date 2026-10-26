@@ -1,5 +1,5 @@
 diff --git a/packages/coding-agent/src/config.ts b/packages/coding-agent/src/config.ts
-index 1940d1f..14b24c5 100644
+index 1940d1f6..14b24c55 100644
 --- a/packages/coding-agent/src/config.ts
 +++ b/packages/coding-agent/src/config.ts
 @@ -586,6 +586,8 @@ export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
@@ -12,7 +12,7 @@ index 1940d1f..14b24c5 100644
  // e.g., PI_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
  export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
 diff --git a/packages/coding-agent/src/modes/interactive/components/config-selector.ts b/packages/coding-agent/src/modes/interactive/components/config-selector.ts
-index a805488..ceb910e 100644
+index a8054886..ceb910ec 100644
 --- a/packages/coding-agent/src/modes/interactive/components/config-selector.ts
 +++ b/packages/coding-agent/src/modes/interactive/components/config-selector.ts
 @@ -3,7 +3,7 @@
@@ -34,7 +34,7 @@ index a805488..ceb910e 100644
  }
  
 diff --git a/packages/coding-agent/src/modes/interactive/external-editor.ts b/packages/coding-agent/src/modes/interactive/external-editor.ts
-index d672d4e..0e46b9f 100644
+index d672d4e0..0e46b9fe 100644
 --- a/packages/coding-agent/src/modes/interactive/external-editor.ts
 +++ b/packages/coding-agent/src/modes/interactive/external-editor.ts
 @@ -1,7 +1,8 @@
@@ -68,7 +68,7 @@ index d672d4e..0e46b9f 100644
  			child.on("error", () => resolve(null));
  			child.on("close", (code) => resolve(code));
 diff --git a/packages/coding-agent/src/package-manager-cli.ts b/packages/coding-agent/src/package-manager-cli.ts
-index 34dcb0d..5ace1ea 100644
+index 48045afe..fc2a4601 100644
 --- a/packages/coding-agent/src/package-manager-cli.ts
 +++ b/packages/coding-agent/src/package-manager-cli.ts
 @@ -22,6 +22,7 @@ import {
@@ -79,7 +79,7 @@ index 34dcb0d..5ace1ea 100644
  	PACKAGE_NAME,
  	type SelfUpdateCommand,
  	type SelfUpdatePackageTarget,
-@@ -901,7 +902,11 @@ export async function handlePackageCommand(
+@@ -902,7 +903,11 @@ export async function handlePackageCommand(
  		return true;
  	}
  
@@ -93,7 +93,7 @@ index 34dcb0d..5ace1ea 100644
  		process.exitCode = 1;
  		return true;
 diff --git a/packages/coding-agent/src/utils/version-check.ts b/packages/coding-agent/src/utils/version-check.ts
-index ada78b9..edbf0de 100644
+index ada78b95..edbf0de0 100644
 --- a/packages/coding-agent/src/utils/version-check.ts
 +++ b/packages/coding-agent/src/utils/version-check.ts
 @@ -1,5 +1,5 @@
@@ -114,7 +114,7 @@ index ada78b9..edbf0de 100644
  	try {
 diff --git a/packages/coding-agent/test/vengeance-self-update.test.ts b/packages/coding-agent/test/vengeance-self-update.test.ts
 new file mode 100644
-index 0000000..3708dbf
+index 00000000..3708dbfd
 --- /dev/null
 +++ b/packages/coding-agent/test/vengeance-self-update.test.ts
 @@ -0,0 +1,50 @@

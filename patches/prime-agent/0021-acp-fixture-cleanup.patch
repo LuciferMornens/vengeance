@@ -1,5 +1,5 @@
 diff --git a/crates/pa-cli/tests/acp_mode_e2e.rs b/crates/pa-cli/tests/acp_mode_e2e.rs
-index 0163d6d..8daf816 100644
+index 87bd6b57c..4cf6297d4 100644
 --- a/crates/pa-cli/tests/acp_mode_e2e.rs
 +++ b/crates/pa-cli/tests/acp_mode_e2e.rs
 @@ -16,7 +16,7 @@

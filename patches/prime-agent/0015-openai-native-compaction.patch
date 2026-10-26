@@ -1,5 +1,5 @@
 diff --git a/crates/pa-ai/src/lib.rs b/crates/pa-ai/src/lib.rs
-index 3d4b975..81ff069 100644
+index 3f3de13c9..f04d2b39a 100644
 --- a/crates/pa-ai/src/lib.rs
 +++ b/crates/pa-ai/src/lib.rs
 @@ -10,6 +10,7 @@
@@ -12,7 +12,7 @@ index 3d4b975..81ff069 100644
  pub mod types;
 diff --git a/crates/pa-ai/src/native_compaction.rs b/crates/pa-ai/src/native_compaction.rs
 new file mode 100644
-index 0000000..e2e5061
+index 000000000..e2e506108
 --- /dev/null
 +++ b/crates/pa-ai/src/native_compaction.rs
 @@ -0,0 +1,127 @@
@@ -145,7 +145,7 @@ index 0000000..e2e5061
 +}
 diff --git a/crates/pa-ai/src/native_compaction/tests.rs b/crates/pa-ai/src/native_compaction/tests.rs
 new file mode 100644
-index 0000000..2175f6f
+index 000000000..2175f6f3a
 --- /dev/null
 +++ b/crates/pa-ai/src/native_compaction/tests.rs
 @@ -0,0 +1,93 @@
@@ -243,7 +243,7 @@ index 0000000..2175f6f
 +    }
 +}
 diff --git a/crates/pa-ai/src/providers/openai_responses_shared.rs b/crates/pa-ai/src/providers/openai_responses_shared.rs
-index d26d893..3c6a74c 100644
+index d26d893a9..3c6a74c09 100644
 --- a/crates/pa-ai/src/providers/openai_responses_shared.rs
 +++ b/crates/pa-ai/src/providers/openai_responses_shared.rs
 @@ -162,6 +162,12 @@ pub fn convert_responses_messages(
@@ -260,7 +260,7 @@ index d26d893..3c6a74c 100644
              Message::User(user) => match &user.content {
                  UserMessageContent::Text(text) => messages.push(json!({
 diff --git a/crates/pa-ai/src/providers/openai_responses_stream.rs b/crates/pa-ai/src/providers/openai_responses_stream.rs
-index ea68747..9d04b8b 100644
+index ea6874782..9d04b8b45 100644
 --- a/crates/pa-ai/src/providers/openai_responses_stream.rs
 +++ b/crates/pa-ai/src/providers/openai_responses_stream.rs
 @@ -81,6 +81,7 @@ impl<'a> ResponsesStreamProcessor<'a> {
@@ -272,10 +272,10 @@ index ea68747..9d04b8b 100644
              .get("type")
              .and_then(|value| value.as_str())
 diff --git a/crates/pa-core/src/session/mod.rs b/crates/pa-core/src/session/mod.rs
-index 87ff23d..45db15b 100644
+index 454e3f691..58f55f838 100644
 --- a/crates/pa-core/src/session/mod.rs
 +++ b/crates/pa-core/src/session/mod.rs
-@@ -451,6 +451,11 @@ pub fn build_session_context(entries: &[FileEntry], leaf_id: Option<&str>) -> Se
+@@ -453,6 +453,11 @@ pub fn build_session_context(entries: &[FileEntry], leaf_id: Option<&str>) -> Se
          };
          messages.push(AgentMessage::CompactionSummary(CompactionSummaryMessage {
              summary: payload.summary,
@@ -288,7 +288,7 @@ index 87ff23d..45db15b 100644
              retained_message_count: Some(retained.len() as u64),
              custom_instructions: payload.custom_instructions,
 diff --git a/crates/pa-core/src/session_engine/branch_summarization.rs b/crates/pa-core/src/session_engine/branch_summarization.rs
-index 673d5d2..ccd6483 100644
+index 94c9d36b1..14a9303b6 100644
 --- a/crates/pa-core/src/session_engine/branch_summarization.rs
 +++ b/crates/pa-core/src/session_engine/branch_summarization.rs
 @@ -133,6 +133,7 @@ fn get_message_from_entry(entry: &FileEntry) -> Option<AgentMessage> {
@@ -300,10 +300,10 @@ index 673d5d2..ccd6483 100644
                  retained_message_count: None,
                  custom_instructions: payload.custom_instructions.clone(),
 diff --git a/crates/pa-core/src/session_engine/compact_session.rs b/crates/pa-core/src/session_engine/compact_session.rs
-index d2e1ed0..d13113d 100644
+index 5a171a452..7651a11b0 100644
 --- a/crates/pa-core/src/session_engine/compact_session.rs
 +++ b/crates/pa-core/src/session_engine/compact_session.rs
-@@ -122,6 +122,7 @@ pub enum CompactOutcome {
+@@ -124,6 +124,7 @@ pub enum CompactOutcome {
  }
  
  pub(crate) struct CompactionAttempt {
@@ -311,7 +311,7 @@ index d2e1ed0..d13113d 100644
      /// The session leaf at prepare: the commit is valid while the active
      /// branch still grows through it with no compaction between.
      prefix_leaf: Option<String>,
-@@ -205,7 +206,24 @@ pub(crate) fn prepare_attempt(
+@@ -207,7 +208,24 @@ pub(crate) fn prepare_attempt(
      file_op_messages.extend(turn_prefix_messages.iter().cloned());
      let details: CompactionDetails =
          details_for(&file_op_messages, &entries, prev_compaction_index);
@@ -337,10 +337,10 @@ index d2e1ed0..d13113d 100644
          cut,
          previous_summary,
 diff --git a/crates/pa-core/src/session_engine/compaction.rs b/crates/pa-core/src/session_engine/compaction.rs
-index 01643f0..00fcac7 100644
+index 286d2b998..55139f649 100644
 --- a/crates/pa-core/src/session_engine/compaction.rs
 +++ b/crates/pa-core/src/session_engine/compaction.rs
-@@ -568,6 +568,7 @@ mod tests {
+@@ -598,6 +598,7 @@ mod tests {
      fn compaction_summary(timestamp: u64) -> AgentMessage {
          AgentMessage::CompactionSummary(pa_types::session::CompactionSummaryMessage {
              summary: "the story so far".to_string(),
@@ -349,14 +349,14 @@ index 01643f0..00fcac7 100644
              retained_message_count: None,
              custom_instructions: None,
 diff --git a/crates/pa-core/src/session_engine/compaction_arms.rs b/crates/pa-core/src/session_engine/compaction_arms.rs
-index df178ac..424c6db 100644
+index b2ef8d6ab..ce0cca9ea 100644
 --- a/crates/pa-core/src/session_engine/compaction_arms.rs
 +++ b/crates/pa-core/src/session_engine/compaction_arms.rs
-@@ -305,11 +305,18 @@ impl AgentSession {
+@@ -310,11 +310,18 @@ impl AgentSession {
                  summary_delta: options.summary_delta.clone(),
                  semantic_edges: options.semantic_edges.clone(),
              };
--            let prepared = crate::session_engine::compact_session::summarize_attempt(
+-            let mut prepared = crate::session_engine::compact_session::summarize_attempt(
 -                &attempt,
 -                &attempt_options,
 -            )
@@ -373,11 +373,11 @@ index df178ac..424c6db 100644
 +                }
 +            )?;
 +            super::native_compaction::attach(&mut prepared, checkpoint);
-             let committed = {
-                 let mut session = self.session.lock().await;
-                 crate::session_engine::compact_session::commit_attempt(
+             // A toggle during the summarizer request must not re-inject the captured digest.
+             if !self.harness_refinements_enabled() {
+                 prepared.entry.harness_digest = None;
 diff --git a/crates/pa-core/src/session_engine/headless.rs b/crates/pa-core/src/session_engine/headless.rs
-index 7adb48b..4b9bf18 100644
+index 7adb48b6f..4b9bf18ac 100644
 --- a/crates/pa-core/src/session_engine/headless.rs
 +++ b/crates/pa-core/src/session_engine/headless.rs
 @@ -332,6 +332,7 @@ mod tests {
@@ -389,10 +389,10 @@ index 7adb48b..4b9bf18 100644
                  retained_message_count: None,
                  custom_instructions: None,
 diff --git a/crates/pa-core/src/session_engine/messages.rs b/crates/pa-core/src/session_engine/messages.rs
-index cf34bbc..86d28ca 100644
+index 197759cb9..4196a4eb7 100644
 --- a/crates/pa-core/src/session_engine/messages.rs
 +++ b/crates/pa-core/src/session_engine/messages.rs
-@@ -357,11 +357,23 @@ pub fn convert_to_llm(messages: &[AgentMessage]) -> Vec<AgentMessage> {
+@@ -397,11 +397,23 @@ pub fn convert_to_llm(messages: &[AgentMessage]) -> Vec<AgentMessage> {
                          format!("{HARNESS_DIGEST_PREFIX}{digest}{HARNESS_DIGEST_SUFFIX}\n\n")
                      })
                      .unwrap_or_default();
@@ -420,7 +420,7 @@ index cf34bbc..86d28ca 100644
                      timestamp: summary.timestamp,
                      rest: serde_json::Map::default(),
                  })
-@@ -518,6 +530,7 @@ mod tests {
+@@ -585,6 +597,7 @@ mod tests {
              }),
              AgentMessage::CompactionSummary(pa_types::session::CompactionSummaryMessage {
                  summary: "the story".to_string(),
@@ -429,10 +429,10 @@ index cf34bbc..86d28ca 100644
                  retained_message_count: None,
                  custom_instructions: None,
 diff --git a/crates/pa-core/src/session_engine/mod.rs b/crates/pa-core/src/session_engine/mod.rs
-index 81f2c67..a5b8c74 100644
+index 42de34607..7ccd56163 100644
 --- a/crates/pa-core/src/session_engine/mod.rs
 +++ b/crates/pa-core/src/session_engine/mod.rs
-@@ -48,6 +48,7 @@ pub mod turn_boundary;
+@@ -51,6 +51,7 @@ pub mod turn_boundary;
  mod admission;
  mod compaction_arms;
  mod model_selection;
@@ -442,7 +442,7 @@ index 81f2c67..a5b8c74 100644
  use std::sync::Arc;
 diff --git a/crates/pa-core/src/session_engine/native_compaction.rs b/crates/pa-core/src/session_engine/native_compaction.rs
 new file mode 100644
-index 0000000..3705635
+index 000000000..370563562
 --- /dev/null
 +++ b/crates/pa-core/src/session_engine/native_compaction.rs
 @@ -0,0 +1,106 @@
@@ -552,8 +552,20 @@ index 0000000..3705635
 +    super::compaction_exec::add_assistant_usage(total, &usage);
 +    prepared.entry.usage = Some(*total);
 +}
+diff --git a/crates/pa-core/src/session_engine/refinement_gate.rs b/crates/pa-core/src/session_engine/refinement_gate.rs
+index 57b2700c3..02b306dd0 100644
+--- a/crates/pa-core/src/session_engine/refinement_gate.rs
++++ b/crates/pa-core/src/session_engine/refinement_gate.rs
+@@ -208,6 +208,7 @@ mod tests {
+             custom_instructions: None,
+             harness_digest: Some("saved memory".to_string()),
+             harness_state_fingerprint: Some("fp".to_string()),
++            native_compaction: None,
+             timestamp: 0,
+         };
+         let mut expected = summary.clone();
 diff --git a/crates/pa-types/src/session.rs b/crates/pa-types/src/session.rs
-index a9f0bfb..bbc1609 100644
+index 0f266c36b..7d98a9092 100644
 --- a/crates/pa-types/src/session.rs
 +++ b/crates/pa-types/src/session.rs
 @@ -116,6 +116,9 @@ pub struct BranchSummaryMessage {

@@ -10,7 +10,8 @@ import {
   assertFreshIntelKernel,
   nativeKernelCode,
   runNativePythonProbe,
-  verifyIntelKernel
+  verifyIntelKernel,
+  PYTHON_TOOLS
 } from '../lib/native-kernel.mjs'
 import { isAlive } from '../lib/processes.mjs'
 import { softSteps } from '../lib/steps.mjs'
@@ -242,7 +243,7 @@ try {
     async () => {
       const toolId = 'engine2-python-output'
       const toolName = inspectRequest(fixture.primeServer.requests[0]).tools.find(
-        (name) => name === 'ipython' || name === 'python'
+        (name) => PYTHON_TOOLS.includes(name)
       )
       assert.ok(toolName, 'the native model exposes its Python runtime tool')
       const { result } = await runNativePythonProbe(

@@ -1,5 +1,5 @@
 diff --git a/packages/coding-agent/docs/mcp.md b/packages/coding-agent/docs/mcp.md
-index 5d5eb33..07b99a8 100644
+index 5d5eb338..07b99a8b 100644
 --- a/packages/coding-agent/docs/mcp.md
 +++ b/packages/coding-agent/docs/mcp.md
 @@ -261,6 +261,47 @@ Extensions can add servers for the current session with `pi.registerMcpServer(na
@@ -51,10 +51,10 @@ index 5d5eb33..07b99a8 100644
  
  An installed extension that registers `/mcp`, such as `pi-mcp-adapter`, replaces the built-in MCP support for sessions. Pi then does not read `mcp.json` or connect its servers in a session, and `/mcp` belongs to the extension. Remove the extension to restore the built-in behavior. To disable built-in MCP support without a replacement, disable `mcp` under Built-in in `pi config`, or set `"extensions": ["-builtin:mcp"]` in [settings](settings.md#resources). `--no-mcp` disables it for one run.
 diff --git a/packages/coding-agent/src/extensions/mcp/config.ts b/packages/coding-agent/src/extensions/mcp/config.ts
-index 3dae93b..8d3036a 100644
+index d06fddfd..ea851859 100644
 --- a/packages/coding-agent/src/extensions/mcp/config.ts
 +++ b/packages/coding-agent/src/extensions/mcp/config.ts
-@@ -71,6 +71,13 @@ export interface LoadedMcpConfig {
+@@ -72,6 +72,13 @@ export interface LoadedMcpConfig {
  	projectConfig?: string;
  }
  
@@ -69,7 +69,7 @@ index 3dae93b..8d3036a 100644
  
  /** Whether an entry overrides a server defined elsewhere instead of defining one. */
 diff --git a/packages/coding-agent/src/extensions/mcp/index.ts b/packages/coding-agent/src/extensions/mcp/index.ts
-index 8a97d7f..db16580 100644
+index 8a97d7fb..db165805 100644
 --- a/packages/coding-agent/src/extensions/mcp/index.ts
 +++ b/packages/coding-agent/src/extensions/mcp/index.ts
 @@ -24,6 +24,11 @@
@@ -458,7 +458,7 @@ index 8a97d7f..db16580 100644
  		});
  
 diff --git a/packages/coding-agent/src/extensions/mcp/runtime.ts b/packages/coding-agent/src/extensions/mcp/runtime.ts
-index f13d21b..f11b3d0 100644
+index f13d21b1..f11b3d02 100644
 --- a/packages/coding-agent/src/extensions/mcp/runtime.ts
 +++ b/packages/coding-agent/src/extensions/mcp/runtime.ts
 @@ -31,7 +31,7 @@ import {
@@ -495,7 +495,7 @@ index f13d21b..f11b3d0 100644
  	oauthSettings(): McpOAuthSettings {
 diff --git a/packages/coding-agent/test/suite/agent-session-mcp-host-state.test.ts b/packages/coding-agent/test/suite/agent-session-mcp-host-state.test.ts
 new file mode 100644
-index 0000000..f3ec90d
+index 00000000..f3ec90da
 --- /dev/null
 +++ b/packages/coding-agent/test/suite/agent-session-mcp-host-state.test.ts
 @@ -0,0 +1,527 @@

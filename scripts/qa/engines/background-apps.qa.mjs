@@ -23,6 +23,7 @@ import {
   PRIME_MODELS,
   PRIME_PROVIDER
 } from './integration-fixture.mjs'
+import { PYTHON_TOOLS } from '../lib/native-kernel.mjs'
 
 const SUITE_NAME = 'macos-background-apps'
 const REPORT_DIRECTORY = reportShotsDir('background-apps')
@@ -301,7 +302,7 @@ async function checkNativeKernel(application, fixture, observer, agentId) {
   await application.waitForSettle()
   const firstRequest = fixture.primeServer.requests.find((request) => request.api)
   const toolName = inspectRequest(firstRequest).tools.find(
-    (name) => name === 'ipython' || name === 'python'
+    (name) => PYTHON_TOOLS.includes(name)
   )
   assert.ok(toolName, 'The native Python tool must be available')
   const from = fixture.primeServer.requests.length

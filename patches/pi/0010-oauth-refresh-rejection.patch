@@ -1,8 +1,8 @@
 diff --git a/packages/ai/README.md b/packages/ai/README.md
-index 7daa0ce..98a943f 100644
+index 7728ba6a..48b12340 100644
 --- a/packages/ai/README.md
 +++ b/packages/ai/README.md
-@@ -1719,6 +1719,8 @@ Several providers support OAuth authentication instead of static API keys:
+@@ -1794,6 +1794,8 @@ Several providers support OAuth authentication instead of static API keys:
  
  Each of these providers carries an `OAuthAuth` on `provider.auth.oauth` with three operations: `login(interaction)` uses the provider-neutral `AuthInteraction.prompt()`/`notify()` protocol and returns a credential, `refresh(credential, signal)` refreshes expiring credentials when applicable, and `toAuth(credential)` derives request auth (GitHub Copilot's per-account base URL comes from here). Provider login interactions and refresh calls always carry a concrete abort signal. Refresh is automatic: `models.getAuth(providerId)` and request paths refresh expired tokens under a credential-store lock, so concurrent requests and processes cannot double-refresh. OpenRouter's OAuth flow instead returns a permanent API key, so its refresh operation is a no-op.
  
@@ -13,7 +13,7 @@ index 7daa0ce..98a943f 100644
  import { anthropicProvider } from '@earendil-works/pi-ai/providers/anthropic';
 diff --git a/packages/ai/src/auth/oauth-error.ts b/packages/ai/src/auth/oauth-error.ts
 new file mode 100644
-index 0000000..10dbb97
+index 00000000..10dbb97a
 --- /dev/null
 +++ b/packages/ai/src/auth/oauth-error.ts
 @@ -0,0 +1,88 @@
@@ -106,7 +106,7 @@ index 0000000..10dbb97
 +	return credential?.type === "oauth" && typeof credential.refreshRejectedAt === "number";
 +}
 diff --git a/packages/ai/src/auth/oauth/anthropic.ts b/packages/ai/src/auth/oauth/anthropic.ts
-index b3d8499..c8a06d0 100644
+index b3d8499b..c8a06d0e 100644
 --- a/packages/ai/src/auth/oauth/anthropic.ts
 +++ b/packages/ai/src/auth/oauth/anthropic.ts
 @@ -6,6 +6,7 @@
@@ -143,7 +143,7 @@ index b3d8499..c8a06d0 100644
  
  	let data: { access_token: string; refresh_token: string; expires_in: number; scope?: string };
 diff --git a/packages/ai/src/auth/oauth/kimi-coding.ts b/packages/ai/src/auth/oauth/kimi-coding.ts
-index 6c5bd49..3aa222c 100644
+index 6c5bd495..3aa222c8 100644
 --- a/packages/ai/src/auth/oauth/kimi-coding.ts
 +++ b/packages/ai/src/auth/oauth/kimi-coding.ts
 @@ -8,6 +8,7 @@
@@ -181,7 +181,7 @@ index 6c5bd49..3aa222c 100644
  
  	throw lastError ?? new Error("Kimi Code token refresh failed");
 diff --git a/packages/ai/src/auth/oauth/openai-chatgpt.ts b/packages/ai/src/auth/oauth/openai-chatgpt.ts
-index 65e0371..ed54017 100644
+index 65e03713..ed54017f 100644
 --- a/packages/ai/src/auth/oauth/openai-chatgpt.ts
 +++ b/packages/ai/src/auth/oauth/openai-chatgpt.ts
 @@ -9,6 +9,7 @@ import { randomBytes } from "node:crypto";
@@ -206,7 +206,7 @@ index 65e0371..ed54017 100644
  	const data: unknown = await response.json();
  	if (typeof data !== "object" || data === null || Array.isArray(data)) {
 diff --git a/packages/ai/src/auth/oauth/openai-codex.ts b/packages/ai/src/auth/oauth/openai-codex.ts
-index 860ea75..0e6d2f4 100644
+index 860ea755..0e6d2f43 100644
 --- a/packages/ai/src/auth/oauth/openai-codex.ts
 +++ b/packages/ai/src/auth/oauth/openai-codex.ts
 @@ -14,6 +14,7 @@ if (typeof process !== "undefined" && (process.versions?.node || process.version
@@ -231,7 +231,7 @@ index 860ea75..0e6d2f4 100644
  
  	const rawJson = await response.json();
 diff --git a/packages/ai/src/auth/oauth/radius.ts b/packages/ai/src/auth/oauth/radius.ts
-index 0b82b9d..e53ca06 100644
+index 0b82b9d7..e53ca06a 100644
 --- a/packages/ai/src/auth/oauth/radius.ts
 +++ b/packages/ai/src/auth/oauth/radius.ts
 @@ -10,6 +10,7 @@
@@ -265,7 +265,7 @@ index 0b82b9d..e53ca06 100644
  }
  
 diff --git a/packages/ai/src/auth/oauth/xai.ts b/packages/ai/src/auth/oauth/xai.ts
-index bf999c3..4eb0a93 100644
+index bf999c34..4eb0a938 100644
 --- a/packages/ai/src/auth/oauth/xai.ts
 +++ b/packages/ai/src/auth/oauth/xai.ts
 @@ -2,6 +2,7 @@
@@ -290,7 +290,7 @@ index bf999c3..4eb0a93 100644
  
  function parseDeviceCode(body: JsonObject): XaiDeviceCode {
 diff --git a/packages/ai/src/auth/resolve.ts b/packages/ai/src/auth/resolve.ts
-index dfeb030..0ab6eb8 100644
+index dfeb0300..0ab6eb81 100644
 --- a/packages/ai/src/auth/resolve.ts
 +++ b/packages/ai/src/auth/resolve.ts
 @@ -1,6 +1,8 @@
@@ -381,7 +381,7 @@ index dfeb030..0ab6eb8 100644
  	const expiresSoon = (credential: OAuthCredential) => Date.now() + minimumValidityMs >= credential.expires;
  	let credential = stored;
 diff --git a/packages/ai/src/auth/types.ts b/packages/ai/src/auth/types.ts
-index 60fe4ff..cb566af 100644
+index 60fe4ff8..cb566af0 100644
 --- a/packages/ai/src/auth/types.ts
 +++ b/packages/ai/src/auth/types.ts
 @@ -31,6 +31,11 @@ export interface OAuthCredentials {
@@ -407,7 +407,7 @@ index 60fe4ff..cb566af 100644
  	refresh(credential: OAuthCredential, signal: AbortSignal): Promise<OAuthCredential>;
  
 diff --git a/packages/ai/src/index.ts b/packages/ai/src/index.ts
-index 0956052..9a2d78b 100644
+index d58b2a25..08a4cdd7 100644
 --- a/packages/ai/src/index.ts
 +++ b/packages/ai/src/index.ts
 @@ -21,6 +21,7 @@ export type { PiMessagesEvent, PiMessagesOptions, PiMessagesRewriteImpact } from
@@ -419,7 +419,7 @@ index 0956052..9a2d78b 100644
  export type {
  	OAuthAuthInfo,
 diff --git a/packages/ai/src/models.ts b/packages/ai/src/models.ts
-index 7c9be11..c2bbf58 100644
+index ac0396f9..8aa0dcff 100644
 --- a/packages/ai/src/models.ts
 +++ b/packages/ai/src/models.ts
 @@ -1,6 +1,7 @@
@@ -430,7 +430,7 @@ index 7c9be11..c2bbf58 100644
  import {
  	type AuthResolutionOverrides,
  	ModelsError,
-@@ -305,9 +306,10 @@ export interface Models {
+@@ -308,9 +309,10 @@ export interface Models {
  	 * model headers when passed a model. Includes a source label for status UI.
  	 * Resolves `undefined` when the provider is unknown or unconfigured.
  	 * Rejects with `ModelsError`: code "oauth" when a token refresh fails (the
@@ -444,7 +444,7 @@ index 7c9be11..c2bbf58 100644
  	 */
  	getAuth(providerId: string, overrides?: AuthResolutionOverrides): Promise<AuthResult | undefined>;
  	getAuth(model: AnyModel, overrides?: AuthResolutionOverrides): Promise<AuthResult | undefined>;
-@@ -624,7 +626,7 @@ class ModelsImpl implements MutableModels {
+@@ -631,7 +633,7 @@ class ModelsImpl implements MutableModels {
  	): Promise<Credential | undefined> {
  		if (stored?.type === "oauth") {
  			const oauth = provider.auth.oauth;
@@ -453,7 +453,7 @@ index 7c9be11..c2bbf58 100644
  			if (Date.now() < stored.expires) return stored;
  			if (signal.aborted) return undefined;
  			// A refresh that has started survives cancellation or a superseding model refresh, so a
-@@ -660,7 +662,10 @@ class ModelsImpl implements MutableModels {
+@@ -667,7 +669,10 @@ class ModelsImpl implements MutableModels {
  		signal: AbortSignal,
  	): Promise<AuthCheck | undefined> {
  		if (credential?.type === "oauth") {
@@ -467,7 +467,7 @@ index 7c9be11..c2bbf58 100644
  		if (!apiKey) return undefined;
 diff --git a/packages/ai/test/oauth-refresh-rejection.test.ts b/packages/ai/test/oauth-refresh-rejection.test.ts
 new file mode 100644
-index 0000000..dd6a513
+index 00000000..dd6a5136
 --- /dev/null
 +++ b/packages/ai/test/oauth-refresh-rejection.test.ts
 @@ -0,0 +1,322 @@
@@ -794,7 +794,7 @@ index 0000000..dd6a513
 +	});
 +});
 diff --git a/packages/coding-agent/docs/providers.md b/packages/coding-agent/docs/providers.md
-index 0da96dd..a073fda 100644
+index 0da96ddf..a073fda3 100644
 --- a/packages/coding-agent/docs/providers.md
 +++ b/packages/coding-agent/docs/providers.md
 @@ -13,6 +13,8 @@ Run `/login` and select a provider. Pi guides you through its OAuth or API-key f
@@ -807,7 +807,7 @@ index 0da96dd..a073fda 100644
  
  `auth.json` can contain API keys and OAuth tokens. Keep it private and do not commit it.
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index 8b330d5..a4517a2 100644
+index 3a9174cf..1eee0da9 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
 @@ -60,7 +60,11 @@ import { stripFrontmatter } from "../utils/frontmatter.ts";
@@ -823,7 +823,7 @@ index 8b330d5..a4517a2 100644
  import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
  import { generateBugReportSummary } from "./bug-report.ts";
  import type { CacheWarmer, CacheWarmingStatus } from "./cache-warmer.ts";
-@@ -2124,6 +2128,9 @@ export class AgentSession {
+@@ -2158,6 +2162,9 @@ export class AgentSession {
  			this._modelRuntime.hasConfiguredAuth(this.model.provider) ||
  			(await this._modelRuntime.checkAuth(this.model.provider)) !== undefined;
  		if (!hasConfiguredAuth) {
@@ -833,7 +833,7 @@ index 8b330d5..a4517a2 100644
  			const isOAuth = this._modelRuntime.isUsingOAuth(this.model.provider);
  			if (isOAuth) {
  				throw new Error(
-@@ -2506,6 +2513,9 @@ export class AgentSession {
+@@ -2540,6 +2547,9 @@ export class AgentSession {
  	 */
  	async setModel(model: Model<any>, options: ModelMutationOptions = {}): Promise<void> {
  		if (!(await this._modelRuntime.checkAuth(model.provider))) {
@@ -844,7 +844,7 @@ index 8b330d5..a4517a2 100644
  		}
  
 diff --git a/packages/coding-agent/src/core/auth-guidance.ts b/packages/coding-agent/src/core/auth-guidance.ts
-index 9782cda..3afd65f 100644
+index 9782cdaf..3afd65fd 100644
 --- a/packages/coding-agent/src/core/auth-guidance.ts
 +++ b/packages/coding-agent/src/core/auth-guidance.ts
 @@ -19,6 +19,10 @@ export function formatNoModelSelectedMessage(): string {
@@ -859,7 +859,7 @@ index 9782cda..3afd65f 100644
  	const providerDisplay = provider === UNKNOWN_PROVIDER ? "the selected model" : provider;
  	return `No API key found for ${providerDisplay}.\n\n${getProviderLoginHelp()}`;
 diff --git a/packages/coding-agent/src/core/model-registry.ts b/packages/coding-agent/src/core/model-registry.ts
-index ffd3175..f4f5fba 100644
+index ffd31756..f4f5fba0 100644
 --- a/packages/coding-agent/src/core/model-registry.ts
 +++ b/packages/coding-agent/src/core/model-registry.ts
 @@ -57,6 +57,16 @@ export class ModelRegistry {
@@ -880,10 +880,10 @@ index ffd3175..f4f5fba 100644
  		return this.runtime.getError();
  	}
 diff --git a/packages/coding-agent/src/core/model-runtime.ts b/packages/coding-agent/src/core/model-runtime.ts
-index 7c1dc82..466b9d2 100644
+index 8e03f4d1..4dc1fcd0 100644
 --- a/packages/coding-agent/src/core/model-runtime.ts
 +++ b/packages/coding-agent/src/core/model-runtime.ts
-@@ -29,6 +29,7 @@ import {
+@@ -30,6 +30,7 @@ import {
  	type ImageModel,
  	type ImagesContext,
  	type ImagesOptions,
@@ -891,7 +891,7 @@ index 7c1dc82..466b9d2 100644
  	type LoginOptions,
  	lazyStream,
  	type Message,
-@@ -191,6 +192,8 @@ export class ModelRuntime implements Models {
+@@ -192,6 +193,8 @@ export class ModelRuntime implements Models {
  		auth: new Map(),
  	};
  	private availabilityRefreshSeq = 0;
@@ -900,7 +900,7 @@ index 7c1dc82..466b9d2 100644
  	private availabilityErrorSeq = 0;
  	private readonly providerAvailabilitySeq = new Map<string, number>();
  	private availabilityError: string | undefined;
-@@ -339,7 +342,8 @@ export class ModelRuntime implements Models {
+@@ -340,7 +343,8 @@ export class ModelRuntime implements Models {
  		};
  	}
  
@@ -910,7 +910,7 @@ index 7c1dc82..466b9d2 100644
  		const providers = this.models.getProviders();
  		const [available, checks, credentials] = await Promise.all([
  			this.models.getAvailable(undefined, { signal }),
-@@ -353,7 +357,7 @@ export class ModelRuntime implements Models {
+@@ -354,7 +358,7 @@ export class ModelRuntime implements Models {
  			),
  			this.credentials.list({ signal }),
  		]);
@@ -919,7 +919,7 @@ index 7c1dc82..466b9d2 100644
  		const auth = new Map(checks);
  		const configuredProviders = new Set(
  			checks
-@@ -368,21 +372,54 @@ export class ModelRuntime implements Models {
+@@ -369,21 +373,54 @@ export class ModelRuntime implements Models {
  			auth,
  		};
  		if (errorSeq === this.availabilityErrorSeq) this.availabilityError = undefined;
@@ -976,7 +976,7 @@ index 7c1dc82..466b9d2 100644
  	}
  
  	private async refreshProviderAvailability(providerId: string, signal: AbortSignal): Promise<void> {
-@@ -486,6 +523,16 @@ export class ModelRuntime implements Models {
+@@ -487,6 +524,16 @@ export class ModelRuntime implements Models {
  		return this.models.checkAuth(providerId, options);
  	}
  
@@ -993,7 +993,7 @@ index 7c1dc82..466b9d2 100644
  	async getAvailable(providerId?: string, options?: AuthOperationOptions): Promise<readonly Model<Api>[]> {
  		if (providerId) {
  			const errorSeq = ++this.availabilityErrorSeq;
-@@ -552,14 +599,25 @@ export class ModelRuntime implements Models {
+@@ -553,14 +600,25 @@ export class ModelRuntime implements Models {
  		return this.snapshot.configuredProviders.has(providerId);
  	}
  
@@ -1021,7 +1021,7 @@ index 7c1dc82..466b9d2 100644
  		if (!resolution) return undefined;
  		const configuredHeaders = resolveConfiguredModelHeaders(
  			providerOrModel,
-@@ -576,6 +634,34 @@ export class ModelRuntime implements Models {
+@@ -577,6 +635,34 @@ export class ModelRuntime implements Models {
  		};
  	}
  
@@ -1058,7 +1058,7 @@ index 7c1dc82..466b9d2 100644
  		let markStarted: (() => void) | undefined;
 diff --git a/packages/coding-agent/test/model-runtime-oauth-rejection.test.ts b/packages/coding-agent/test/model-runtime-oauth-rejection.test.ts
 new file mode 100644
-index 0000000..09d5c87
+index 00000000..09d5c87b
 --- /dev/null
 +++ b/packages/coding-agent/test/model-runtime-oauth-rejection.test.ts
 @@ -0,0 +1,570 @@
@@ -1633,7 +1633,7 @@ index 0000000..09d5c87
 +	});
 +});
 diff --git a/packages/coding-agent/test/suite/agent-session-prompt.test.ts b/packages/coding-agent/test/suite/agent-session-prompt.test.ts
-index 8052fd6..9e83af5 100644
+index 8052fd64..9e83af56 100644
 --- a/packages/coding-agent/test/suite/agent-session-prompt.test.ts
 +++ b/packages/coding-agent/test/suite/agent-session-prompt.test.ts
 @@ -563,6 +563,24 @@ describe("AgentSession prompt characterization", () => {
@@ -1661,3 +1661,17 @@ index 8052fd6..9e83af5 100644
  	// Issue #10267, #5581: a run started by sendMessage(..., { triggerTurn: true }) skipped
  	// before_agent_start, so its second request patched away the sections handlers had added.
  	describe("runs started by a custom message", () => {
+diff --git a/scripts/check-entry-graphs.mjs b/scripts/check-entry-graphs.mjs
+index 288c0d61..93f70c15 100644
+--- a/scripts/check-entry-graphs.mjs
++++ b/scripts/check-entry-graphs.mjs
+@@ -38,7 +38,8 @@ const BUDGETS = {
+ 		"./models": {
+ 			// Request telemetry reaches pi-ai's telemetry.ts and pi-telemetry's root (index, noop, metrics, memory).
+ 			// Request identity reaches utils/identity.ts and its version constant.
+-			maxFiles: 20,
++			// Rejected-refresh recognition reaches auth/oauth-error.ts.
++			maxFiles: 21,
+ 			forbid: ["providers/", "models.generated.ts", "index.ts", "utils/validation.ts", "utils/typebox-helpers.ts"],
+ 			allow: ["packages/telemetry/src/index.ts"],
+ 		},

@@ -1,8 +1,8 @@
 diff --git a/packages/coding-agent/src/core/export-html/index.ts b/packages/coding-agent/src/core/export-html/index.ts
-index 3762c26..1fe6fcc 100644
+index 561e546b..c2388560 100644
 --- a/packages/coding-agent/src/core/export-html/index.ts
 +++ b/packages/coding-agent/src/core/export-html/index.ts
-@@ -241,10 +241,13 @@ export async function exportSessionToHtml(
+@@ -243,10 +243,13 @@ export async function exportSessionToHtml(
  	const opts: ExportOptions = typeof options === "string" ? { outputPath: options } : options || {};
  
  	const sessionFile = sm.getSessionFile();
@@ -19,7 +19,7 @@ index 3762c26..1fe6fcc 100644
  		throw new Error("Nothing to export yet - start a conversation first");
  	}
  
-@@ -271,12 +274,6 @@ export async function exportSessionToHtml(
+@@ -273,12 +276,6 @@ export async function exportSessionToHtml(
  
  	const html = generateHtml(sessionData, opts.themeName);
  
@@ -34,7 +34,7 @@ index 3762c26..1fe6fcc 100644
  }
 diff --git a/packages/coding-agent/src/core/saved-session-share.ts b/packages/coding-agent/src/core/saved-session-share.ts
 new file mode 100644
-index 0000000..cf38eb5
+index 00000000..cf38eb51
 --- /dev/null
 +++ b/packages/coding-agent/src/core/saved-session-share.ts
 @@ -0,0 +1,86 @@
@@ -126,7 +126,7 @@ index 0000000..cf38eb5
 +}
 diff --git a/packages/coding-agent/src/core/session-sharing.ts b/packages/coding-agent/src/core/session-sharing.ts
 new file mode 100644
-index 0000000..876f3c6
+index 00000000..876f3c61
 --- /dev/null
 +++ b/packages/coding-agent/src/core/session-sharing.ts
 @@ -0,0 +1,195 @@
@@ -326,7 +326,7 @@ index 0000000..876f3c6
 +	}
 +}
 diff --git a/packages/coding-agent/src/modes/interactive/session-share.ts b/packages/coding-agent/src/modes/interactive/session-share.ts
-index 6908131..a1f5bfa 100644
+index 69081319..a1f5bfac 100644
 --- a/packages/coding-agent/src/modes/interactive/session-share.ts
 +++ b/packages/coding-agent/src/modes/interactive/session-share.ts
 @@ -1,17 +1,11 @@
@@ -577,7 +577,7 @@ index 6908131..a1f5bfa 100644
 -	context.ui.setFocus(context.editor);
 -}
 diff --git a/packages/coding-agent/src/modes/rpc/rpc-mode.ts b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
-index 1c0995d..c6fbad3 100644
+index 1c0995d3..c6fbad33 100644
 --- a/packages/coding-agent/src/modes/rpc/rpc-mode.ts
 +++ b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
 @@ -12,6 +12,7 @@
@@ -624,7 +624,7 @@ index 1c0995d..c6fbad3 100644
  				const result = await runtimeHost.switchSession(command.sessionPath);
  				if (!result.cancelled) {
 diff --git a/packages/coding-agent/src/modes/rpc/rpc-types.ts b/packages/coding-agent/src/modes/rpc/rpc-types.ts
-index 7fc7151..93d64a3 100644
+index 7fc71516..93d64a3e 100644
 --- a/packages/coding-agent/src/modes/rpc/rpc-types.ts
 +++ b/packages/coding-agent/src/modes/rpc/rpc-types.ts
 @@ -11,6 +11,7 @@ import type { PromptDisposition, QueuedInputDisposition, SessionStats } from "..
@@ -667,7 +667,7 @@ index 7fc7151..93d64a3 100644
  	| { id?: string; type: "response"; command: "clone"; success: true; data: { cancelled: boolean } }
 diff --git a/packages/coding-agent/test/saved-session-share.test.ts b/packages/coding-agent/test/saved-session-share.test.ts
 new file mode 100644
-index 0000000..27f63d8
+index 00000000..27f63d86
 --- /dev/null
 +++ b/packages/coding-agent/test/saved-session-share.test.ts
 @@ -0,0 +1,191 @@
@@ -863,7 +863,7 @@ index 0000000..27f63d8
 +	});
 +});
 diff --git a/packages/coding-agent/test/session-share.test.ts b/packages/coding-agent/test/session-share.test.ts
-index d46835a..a027b6e 100644
+index d46835a0..a027b6e5 100644
 --- a/packages/coding-agent/test/session-share.test.ts
 +++ b/packages/coding-agent/test/session-share.test.ts
 @@ -123,12 +123,11 @@ describe("shareSession", () => {
@@ -886,7 +886,7 @@ index d46835a..a027b6e 100644
  
 diff --git a/packages/coding-agent/test/session-sharing-headless.test.ts b/packages/coding-agent/test/session-sharing-headless.test.ts
 new file mode 100644
-index 0000000..9e66d56
+index 00000000..9e66d56a
 --- /dev/null
 +++ b/packages/coding-agent/test/session-sharing-headless.test.ts
 @@ -0,0 +1,152 @@

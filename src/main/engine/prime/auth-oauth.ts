@@ -20,7 +20,7 @@ import { primeHelperPath } from './helper'
 import { getPrimeAgentDir } from './locate'
 
 const HELPER_PROTOCOL = 1
-const HELPER_REVISION = '763094e1b6a7c17450ee8399b06cda1853847ca5'
+const HELPER_REVISION = '8aac8692456c00c01d4e53e60e6d3347a3506559'
 const START_TIMEOUT_MS = 15_000
 const LOGIN_TIMEOUT_MS = 20 * 60_000
 const HELPER_STOP_TIMEOUT_MS = 1_000

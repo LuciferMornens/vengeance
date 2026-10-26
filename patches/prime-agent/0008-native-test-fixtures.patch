@@ -1,5 +1,5 @@
 diff --git a/crates/pa-cli/tests/eval_composition_e2e.rs b/crates/pa-cli/tests/eval_composition_e2e.rs
-index ec1ff5e..14fbc13 100644
+index ec1ff5e20..14fbc1339 100644
 --- a/crates/pa-cli/tests/eval_composition_e2e.rs
 +++ b/crates/pa-cli/tests/eval_composition_e2e.rs
 @@ -62,7 +62,7 @@ fn make_executable(path: &Path) {
@@ -63,7 +63,7 @@ index ec1ff5e..14fbc13 100644
          &script,
      );
 diff --git a/crates/pa-cli/tests/package_resources_e2e.rs b/crates/pa-cli/tests/package_resources_e2e.rs
-index 96cdc73..cebdbee 100644
+index 96cdc7309..cebdbee76 100644
 --- a/crates/pa-cli/tests/package_resources_e2e.rs
 +++ b/crates/pa-cli/tests/package_resources_e2e.rs
 @@ -112,8 +112,12 @@ fn package_provided_skill_appears_in_created_session_skill_list() {
@@ -81,7 +81,7 @@ index 96cdc73..cebdbee 100644
      );
  
 diff --git a/crates/pa-cli/tests/packaged_layout_e2e.rs b/crates/pa-cli/tests/packaged_layout_e2e.rs
-index 89aba70..74139fb 100644
+index 7433730dc..9b0ef03e3 100644
 --- a/crates/pa-cli/tests/packaged_layout_e2e.rs
 +++ b/crates/pa-cli/tests/packaged_layout_e2e.rs
 @@ -64,6 +64,10 @@ fn packaged_binary_name() -> &'static str {
@@ -155,7 +155,7 @@ index 89aba70..74139fb 100644
          .path()
          .join(format!("prime-agent-{version}-{host_platform}"));
 diff --git a/crates/pa-cli/tests/print_runtime_e2e.rs b/crates/pa-cli/tests/print_runtime_e2e.rs
-index 6a6f80a..5d9ee56 100644
+index c71ad9e0b..882051707 100644
 --- a/crates/pa-cli/tests/print_runtime_e2e.rs
 +++ b/crates/pa-cli/tests/print_runtime_e2e.rs
 @@ -16,12 +16,17 @@
@@ -193,7 +193,7 @@ index 6a6f80a..5d9ee56 100644
      let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
          .map(|entries| {
              entries
-@@ -158,7 +164,8 @@ fn read_entries(path: &std::path::Path) -> Vec<serde_json::Value> {
+@@ -187,7 +193,8 @@ fn print_mode_goal_cap_reports_the_reason_and_exits_one() {
  /// under the agent dir's `session-leases`).
  fn leased_session_files(home: &std::path::Path) -> Vec<String> {
      let mut leased = Vec::new();
@@ -203,7 +203,7 @@ index 6a6f80a..5d9ee56 100644
          return leased;
      };
      for entry in entries.flatten() {
-@@ -358,7 +365,7 @@ fn print_mode_thinking_clamps_to_off_for_non_reasoning_models() {
+@@ -387,7 +394,7 @@ fn print_mode_thinking_clamps_to_off_for_non_reasoning_models() {
  
  /// Compaction settings into the isolated home's agent dir.
  fn write_compaction_settings(home: &std::path::Path, settings: &serde_json::Value) {
@@ -212,7 +212,7 @@ index 6a6f80a..5d9ee56 100644
      std::fs::create_dir_all(&agent).unwrap();
      std::fs::write(agent.join("settings.json"), settings.to_string()).unwrap();
  }
-@@ -402,8 +409,8 @@ fn print_mode_overflow_compacts_retries_once_then_reports() {
+@@ -431,8 +438,8 @@ fn print_mode_overflow_compacts_retries_once_then_reports() {
              overflow_error(50),
          ]
      });
@@ -223,7 +223,7 @@ index 6a6f80a..5d9ee56 100644
      let (stdout, stderr, code) = run_in_home(home.path(), &["-p", &seed, &probe], &script);
      assert_eq!(code, 1, "stderr: {stderr}");
      assert!(stdout.is_empty(), "stdout: {stdout}");
-@@ -458,8 +465,8 @@ fn print_mode_overflow_retry_recovers_the_turn() {
+@@ -487,8 +494,8 @@ fn print_mode_overflow_retry_recovers_the_turn() {
              r#"{"shouldRefine": false, "rationale": "one-off tool output"}"#,
          ]
      });
@@ -234,7 +234,7 @@ index 6a6f80a..5d9ee56 100644
      let (stdout, stderr, code) = run_in_home(home.path(), &["-p", &seed, &probe], &script);
      assert_eq!(code, 0, "stderr: {stderr}");
      assert_eq!(stdout, "recovered reply\n");
-@@ -520,8 +527,8 @@ fn print_mode_overflow_json_streams_the_compaction_events() {
+@@ -549,8 +556,8 @@ fn print_mode_overflow_json_streams_the_compaction_events() {
              overflow_error(50),
          ]
      });
@@ -245,7 +245,7 @@ index 6a6f80a..5d9ee56 100644
      let (stdout, stderr, code) = run_in_home(
          home.path(),
          &["--mode", "json", "-p", &seed, &probe],
-@@ -619,8 +626,8 @@ fn print_mode_stale_overflow_recovers_before_the_next_prompt_after_a_resume() {
+@@ -648,8 +655,8 @@ fn print_mode_stale_overflow_recovers_before_the_next_prompt_after_a_resume() {
      let script = serde_json::json!({
          "responses": [{"text": "seed reply"}, overflow_error(0)]
      });
@@ -256,7 +256,7 @@ index 6a6f80a..5d9ee56 100644
      let (stdout, stderr, code) = run_in_home(home.path(), &["-p", &seed, &probe], &script);
      assert_eq!(code, 1, "stderr: {stderr}");
      assert!(stdout.is_empty());
-@@ -778,11 +785,11 @@ fn print_mode_json_streams_the_threshold_compaction_pair() {
+@@ -807,11 +814,11 @@ fn print_mode_json_streams_the_threshold_compaction_pair() {
              "compaction": { "enabled": true, "reserveTokens": 1, "keepRecentTokens": 10 }
          }),
      );
@@ -272,7 +272,7 @@ index 6a6f80a..5d9ee56 100644
          "responses": [
              {"text": "seed reply"},
              {"text": "crossing reply"},
-@@ -790,7 +797,7 @@ fn print_mode_json_streams_the_threshold_compaction_pair() {
+@@ -819,7 +826,7 @@ fn print_mode_json_streams_the_threshold_compaction_pair() {
          ]
      });
      let first = "seed turn".to_string();
@@ -281,7 +281,7 @@ index 6a6f80a..5d9ee56 100644
      let (stdout, stderr, code) = run_in_home(
          home.path(),
          &["--mode", "json", "-p", &first, &second],
-@@ -856,6 +863,7 @@ fn run_in_home_cwd(
+@@ -885,6 +892,7 @@ fn run_in_home_cwd(
      let output = Command::new(bin)
          .args(args)
          .env("HOME", home)
@@ -289,7 +289,7 @@ index 6a6f80a..5d9ee56 100644
          .env("PRIME_AGENT_FAUX_SCRIPT", script.to_string())
          .env_remove("PRIME_AGENT_CODING_AGENT_DIR")
          .env_remove("PRIME_AGENT_SESSION_DIR")
-@@ -913,8 +921,8 @@ fn print_mode_fork_copies_the_session_into_a_new_file() {
+@@ -942,8 +950,8 @@ fn print_mode_fork_copies_the_session_into_a_new_file() {
      let fork_entries = read_entries(fork);
      assert_ne!(fork_entries[0]["id"], session_id.as_str());
      assert_eq!(
@@ -300,7 +300,7 @@ index 6a6f80a..5d9ee56 100644
      );
      let texts: Vec<&str> = fork_entries
          .iter()
-@@ -984,8 +992,8 @@ fn print_mode_fork_imports_a_global_session_into_this_cwd() {
+@@ -1013,8 +1021,8 @@ fn print_mode_fork_imports_a_global_session_into_this_cwd() {
          "the fork adopts the TARGET cwd"
      );
      assert_eq!(
@@ -311,7 +311,7 @@ index 6a6f80a..5d9ee56 100644
      );
      let texts: Vec<&str> = fork_entries
          .iter()
-@@ -1002,7 +1010,7 @@ fn print_mode_fork_imports_a_global_session_into_this_cwd() {
+@@ -1031,7 +1039,7 @@ fn print_mode_fork_imports_a_global_session_into_this_cwd() {
  fn print_mode_fork_rejects_empty_sources_and_conflicting_flags() {
      let home = isolated_home();
      // An empty session file, addressed by path.
@@ -321,10 +321,10 @@ index 6a6f80a..5d9ee56 100644
      let empty = sessions.join("empty-session.jsonl");
      std::fs::write(&empty, "").expect("empty session");
 diff --git a/crates/pa-cli/tests/rpc_mode_e2e.rs b/crates/pa-cli/tests/rpc_mode_e2e.rs
-index e75875a..41fc5c9 100644
+index c1c9df549..deee562e6 100644
 --- a/crates/pa-cli/tests/rpc_mode_e2e.rs
 +++ b/crates/pa-cli/tests/rpc_mode_e2e.rs
-@@ -871,6 +871,7 @@ fn rpc_failed_replacement_restarts_the_queue_pump() {
+@@ -955,6 +955,7 @@ fn rpc_idle_session_runs_a_turn_on_a_background_bash_completion() {
  
  /// The 143 exit must not queue behind the replacement's settle.
  #[test]
@@ -333,7 +333,7 @@ index e75875a..41fc5c9 100644
      let script = json!({ "responses": [ { "text": "slow", "delayMs": 30_000 } ] });
      let mut client = RpcChild::spawn(&["--mode", "rpc", "--no-session"], &script);
 diff --git a/crates/pa-core/src/agent_traces/tests.rs b/crates/pa-core/src/agent_traces/tests.rs
-index 988fc34..fca1130 100644
+index 988fc3461..fca11309c 100644
 --- a/crates/pa-core/src/agent_traces/tests.rs
 +++ b/crates/pa-core/src/agent_traces/tests.rs
 @@ -269,7 +269,7 @@ async fn an_oversize_session_reports_the_limit() {
@@ -363,7 +363,7 @@ index 988fc34..fca1130 100644
      .expect("child file");
      let header = read_trace_session_header(&child).expect("header");
 diff --git a/crates/pa-core/src/auth/resolve_config_value.rs b/crates/pa-core/src/auth/resolve_config_value.rs
-index 10e9323..27faefc 100644
+index 10e932354..27faefc40 100644
 --- a/crates/pa-core/src/auth/resolve_config_value.rs
 +++ b/crates/pa-core/src/auth/resolve_config_value.rs
 @@ -135,7 +135,10 @@ mod tests {
@@ -379,10 +379,10 @@ index 10e9323..27faefc 100644
              assert_eq!(resolve_config_value(&format!("!{command}")), None);
          }
 diff --git a/crates/pa-core/src/kernel/orphan_journal.rs b/crates/pa-core/src/kernel/orphan_journal.rs
-index 809e68c..70ade91 100644
+index 1bb6b25cc..c6ccdb9be 100644
 --- a/crates/pa-core/src/kernel/orphan_journal.rs
 +++ b/crates/pa-core/src/kernel/orphan_journal.rs
-@@ -217,7 +217,11 @@ mod tests {
+@@ -250,7 +250,11 @@ mod tests {
          // `ps:<lstart>` - the same ladder TS `getProcessStartId` walks.
          let id = get_process_start_id(std::process::id() as i32);
          let id = id.expect("own pid must be readable");
@@ -396,7 +396,7 @@ index 809e68c..70ade91 100644
  
      #[test]
 diff --git a/crates/pa-core/src/packages/tests.rs b/crates/pa-core/src/packages/tests.rs
-index 105fd4e..14f670a 100644
+index 105fd4e9f..14f670a42 100644
 --- a/crates/pa-core/src/packages/tests.rs
 +++ b/crates/pa-core/src/packages/tests.rs
 @@ -15,9 +15,17 @@ use crate::settings::SettingsManager;
@@ -439,10 +439,10 @@ index 105fd4e..14f670a 100644
              .unwrap(),
          )
 diff --git a/crates/pa-core/src/tools/golden_replay.rs b/crates/pa-core/src/tools/golden_replay.rs
-index 5e8f4fa..2baa484 100644
+index 94c021eff..0dc5b67aa 100644
 --- a/crates/pa-core/src/tools/golden_replay.rs
 +++ b/crates/pa-core/src/tools/golden_replay.rs
-@@ -32,7 +32,9 @@ fn corpus(name: &str) -> serde_json::Value {
+@@ -30,7 +30,9 @@ fn corpus(name: &str) -> serde_json::Value {
  
  /// Normalize temp paths to the forms the recorded corpus uses.
  fn norm_string(s: &str, tmp: &str) -> String {
@@ -453,7 +453,7 @@ index 5e8f4fa..2baa484 100644
      let re = regex_lite("golden-[A-Za-z0-9_]{6}");
      let out = re.replace_all(&out, "golden-<ID>").into_owned();
      let re = regex_lite(r"pi-(?:bash|output)-[0-9a-f]+\.log");
-@@ -63,7 +65,7 @@ fn tmp_root() -> &'static str {
+@@ -61,7 +63,7 @@ fn tmp_root() -> &'static str {
          std::env::temp_dir()
              .to_str()
              .expect("utf-8 tmpdir")
@@ -462,7 +462,7 @@ index 5e8f4fa..2baa484 100644
              .to_string()
      })
  }
-@@ -91,9 +93,13 @@ fn make_fixture(case: &serde_json::Value) -> (tempfile::TempDir, String) {
+@@ -89,9 +91,13 @@ fn make_fixture(case: &serde_json::Value) -> (tempfile::TempDir, String) {
      if let Some(commands) = case.get("fixture").and_then(serde_json::Value::as_array) {
          for command in commands {
              let command = command.as_str().expect("fixture command");
@@ -478,7 +478,7 @@ index 5e8f4fa..2baa484 100644
                  .current_dir(dir.path())
                  .status()
                  .expect("run fixture command");
-@@ -217,6 +223,21 @@ async fn golden_bash_group_matches_ts() {
+@@ -215,6 +221,21 @@ async fn golden_bash_group_matches_ts() {
              continue;
          }
          let (dir, dir_path) = make_fixture(case);
@@ -500,7 +500,7 @@ index 5e8f4fa..2baa484 100644
          if case
              .get("envBypass")
              .and_then(serde_json::Value::as_bool)
-@@ -227,7 +248,7 @@ async fn golden_bash_group_matches_ts() {
+@@ -225,7 +246,7 @@ async fn golden_bash_group_matches_ts() {
          let result = bash::execute_bash(
              &dir_path,
              &BashToolOptions::default(),
@@ -510,7 +510,7 @@ index 5e8f4fa..2baa484 100644
              case.get("allowDestructiveGit")
                  .and_then(serde_json::Value::as_bool),
 diff --git a/crates/pa-core/src/tools/path_utils.rs b/crates/pa-core/src/tools/path_utils.rs
-index 9a9d3d8..679c2b2 100644
+index 9a9d3d8dd..679c2b24b 100644
 --- a/crates/pa-core/src/tools/path_utils.rs
 +++ b/crates/pa-core/src/tools/path_utils.rs
 @@ -502,22 +502,32 @@ mod tests {
@@ -555,7 +555,7 @@ index 9a9d3d8..679c2b2 100644
  
      /// POSIX dispatcher semantics; the win32 sibling lives below (the dispatcher is
 diff --git a/crates/pa-core/src/tools/shell_utils.rs b/crates/pa-core/src/tools/shell_utils.rs
-index 0b27d3c..872bfbf 100644
+index 0b27d3c8a..872bfbfa3 100644
 --- a/crates/pa-core/src/tools/shell_utils.rs
 +++ b/crates/pa-core/src/tools/shell_utils.rs
 @@ -112,7 +112,14 @@ mod tests {
@@ -589,51 +589,8 @@ index 0b27d3c..872bfbf 100644
      }
  
      #[test]
-diff --git a/crates/pa-core/tests/golden/system_prompt.rs b/crates/pa-core/tests/golden/system_prompt.rs
-index b28c8d7..a68e560 100644
---- a/crates/pa-core/tests/golden/system_prompt.rs
-+++ b/crates/pa-core/tests/golden/system_prompt.rs
-@@ -39,7 +39,21 @@ fn fixture_prompt() -> (String, usize) {
-         .skills
-         .sort_by(|left, right| left.name.cmp(&right.name));
-     let count = loaded.skills.len();
--    let prompt = build_system_prompt(&BuildSystemPromptOptions {
-+    let skill_paths: Vec<_> = loaded
-+        .skills
-+        .iter()
-+        .map(|skill| {
-+            let relative = skill.file_path.strip_prefix(&skills_dir).unwrap();
-+            (
-+                skill.file_path.display().to_string(),
-+                format!(
-+                    "<skills-dir>/{}",
-+                    relative.to_string_lossy().replace('\\', "/")
-+                ),
-+            )
-+        })
-+        .collect();
-+    let mut prompt = build_system_prompt(&BuildSystemPromptOptions {
-         cwd: "/w".to_string(),
-         messages_path: Some("/w/sessions/fixture-session.jsonl".to_string()),
-         skills: loaded.skills,
-@@ -47,9 +61,12 @@ fn fixture_prompt() -> (String, usize) {
-         allow_recursion: Some(true),
-         rlm_depth: Some(0),
-         ..Default::default()
--    })
--    .replace(skills_dir.to_string_lossy().as_ref(), "<skills-dir>");
--    let normalized = regex_lite_replace(&prompt);
-+    });
-+    for (path, normalized) in skill_paths {
-+        prompt = prompt.replace(&path, &normalized);
-+    }
-+    // Git checkout line endings do not change the prompt's content.
-+    let normalized = regex_lite_replace(&prompt.replace("\r\n", "\n"));
-     (normalized, count)
- }
- 
 diff --git a/crates/pa-core/tests/kernel_prewarm.rs b/crates/pa-core/tests/kernel_prewarm.rs
-index 063df56..44b9b42 100644
+index 9cf79139e..e966493ae 100644
 --- a/crates/pa-core/tests/kernel_prewarm.rs
 +++ b/crates/pa-core/tests/kernel_prewarm.rs
 @@ -221,6 +221,7 @@ async fn prewarmed_kernel_lands_compaction_notice_without_tool_use() {
@@ -658,81 +615,8 @@ index 063df56..44b9b42 100644
      );
 +    engine.dispose_kernel().await;
  }
-diff --git a/crates/pa-daemon/src/agent_engine/tests/abort.rs b/crates/pa-daemon/src/agent_engine/tests/abort.rs
-index 8c981fc..427f768 100644
---- a/crates/pa-daemon/src/agent_engine/tests/abort.rs
-+++ b/crates/pa-daemon/src/agent_engine/tests/abort.rs
-@@ -10,22 +10,34 @@ fn abort_in_flight_turn_cancels_a_mid_provider_wait() {
-         .lock()
-         .unwrap_or_else(std::sync::PoisonError::into_inner);
-     let dir = tempfile::TempDir::new().unwrap();
-+    let script = json!({
-+        "responses": [{ "text": "held reply", "delayMs": 60000 }],
-+    });
-+    let parsed = pa_ai::faux::script::parse_faux_script(&script).unwrap();
-+    let registration = pa_ai::faux::script::register_faux_provider_from_script(&parsed);
-+    let agent_dir = dir.path().join("agent");
-+    std::fs::create_dir_all(&agent_dir).unwrap();
-+    std::fs::write(
-+        agent_dir.join("models.json"),
-+        json!({"providers": {"faux": {
-+            "api": "faux",
-+            "baseUrl": "http://127.0.0.1:0",
-+            "apiKey": "sk-faux",
-+            "models": [registration.get_model()],
-+        }}})
-+        .to_string(),
-+    )
-+    .unwrap();
-     let engine = AgentSessionEngine::new(AgentEngineConfig {
-         cwd: dir.path().to_path_buf(),
--        agent_dir: dir.path().join("agent"),
--        provider: None,
--        model: None,
-+        agent_dir,
-+        provider: Some("faux".to_string()),
-+        model: Some("faux-1".to_string()),
-         api_key: None,
-         thinking: None,
-         session_dir: None,
-         session_file: None,
--        faux_script: Some(
--            json!({
--                "engine": "faux",
--                "responses": [{ "text": "held reply", "delayMs": 60000 }],
--            })
--            .to_string(),
--        ),
-+        faux_script: None,
-         supervisor_link: None,
-         telemetry_disabled: None,
-         cron_store: None,
-@@ -54,19 +66,15 @@ fn abort_in_flight_turn_cancels_a_mid_provider_wait() {
-             },
-         );
-     });
--    // Wait until the turn is live, so the abort lands mid-provider-wait.
-+    // The request counter distinguishes the provider wait from early turn admission.
-     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-     loop {
--        let agent = engine.turn_agent.lock().expect("turn agent lock").clone();
--        if let Some(agent) = agent {
--            let state = engine.runtime.block_on(agent.state());
--            if state.is_streaming {
--                break;
--            }
-+        if registration.call_count() > 0 {
-+            break;
-         }
-         assert!(
-             std::time::Instant::now() < deadline,
--            "the turn never started streaming"
-+            "the provider never started streaming"
-         );
-         std::thread::sleep(std::time::Duration::from_millis(25));
-     }
 diff --git a/crates/pa-daemon/src/agent_engine/tests/autonomous.rs b/crates/pa-daemon/src/agent_engine/tests/autonomous.rs
-index 9f2b974..9531829 100644
+index 9f2b9742f..953182960 100644
 --- a/crates/pa-daemon/src/agent_engine/tests/autonomous.rs
 +++ b/crates/pa-daemon/src/agent_engine/tests/autonomous.rs
 @@ -76,10 +76,7 @@ fn autonomous_gate_pass_and_failure_drive_the_loop() {
@@ -748,10 +632,10 @@ index 9f2b974..9531829 100644
          AgentSessionEngine::new(AgentEngineConfig {
              cwd: dir.path().to_path_buf(),
 diff --git a/crates/pa-daemon/src/rlm_children/usage_emit_tests.rs b/crates/pa-daemon/src/rlm_children/usage_emit_tests.rs
-index b718fb5..aa715dd 100644
+index 82bd6c2a0..a383f4e28 100644
 --- a/crates/pa-daemon/src/rlm_children/usage_emit_tests.rs
 +++ b/crates/pa-daemon/src/rlm_children/usage_emit_tests.rs
-@@ -189,9 +189,9 @@ async fn reseed_lists_live_ledger_children_settled_and_bills_only_after_a_delive
+@@ -272,9 +272,9 @@ async fn reseed_lists_live_ledger_children_settled_and_bills_only_after_a_delive
          .unwrap();
      }
      let spawn = |child_id: &str, parent: &str, child: &str| {
@@ -764,7 +648,7 @@ index b718fb5..aa715dd 100644
      };
      let ledger_path = crate::rlm_ledger::rlm_ledger_path(&agent, &daemon_sessions);
      std::fs::create_dir_all(ledger_path.parent().expect("ledger dir")).unwrap();
-@@ -204,9 +204,9 @@ async fn reseed_lists_live_ledger_children_settled_and_bills_only_after_a_delive
+@@ -287,9 +287,9 @@ async fn reseed_lists_live_ledger_children_settled_and_bills_only_after_a_delive
              spawn("sub-b", &parent_one, &child_two).as_str(),
              spawn("sub-legacy", &parent_one, &child_legacy).as_str(),
              spawn("sub-c", &parent_one, &child_three).as_str(),
@@ -778,7 +662,7 @@ index b718fb5..aa715dd 100644
              spawn("sub-d", &parent_two, &child_four).as_str(),
          ]
 diff --git a/crates/pa-daemon/src/rlm_ledger/tests.rs b/crates/pa-daemon/src/rlm_ledger/tests.rs
-index 5738d8e..943c3a2 100644
+index 686711572..f6d5d7f63 100644
 --- a/crates/pa-daemon/src/rlm_ledger/tests.rs
 +++ b/crates/pa-daemon/src/rlm_ledger/tests.rs
 @@ -28,9 +28,11 @@ fn legacy_registry_probe_reads_the_header_line_bounded() {
@@ -811,7 +695,7 @@ index 5738d8e..943c3a2 100644
          "a torn-write tail no longer masks the readable header"
      );
  }
-@@ -250,8 +254,8 @@ fn moved_edge_paths_resolve_through_the_session_id() {
+@@ -352,8 +356,8 @@ fn moved_edge_paths_resolve_through_the_session_id() {
      assert!(ledger.live_edges().unwrap().is_empty());
      let raw = ledger.edges(false).unwrap();
      assert_eq!(raw.len(), 1);
@@ -822,7 +706,7 @@ index 5738d8e..943c3a2 100644
  }
  
  #[test]
-@@ -317,11 +321,11 @@ fn unknown_op_records_are_skipped_forward_compatible() {
+@@ -666,11 +670,11 @@ fn unknown_op_records_are_skipped_forward_compatible() {
      fs::write(
          &path,
          format!(
@@ -839,7 +723,7 @@ index 5738d8e..943c3a2 100644
          ),
      )
      .unwrap();
-@@ -347,10 +351,10 @@ fn seeds_from_legacy_registries_once_and_atomically() {
+@@ -696,10 +700,10 @@ fn seeds_from_legacy_registries_once_and_atomically() {
      fs::write(&child, "{}").unwrap();
      fs::write(
          artifacts.join("rlm-subagents.jsonl"),
@@ -855,10 +739,10 @@ index 5738d8e..943c3a2 100644
      .unwrap();
      let ledger = ledger_for(&dir);
 diff --git a/crates/pa-daemon/src/session_store_info_tests.rs b/crates/pa-daemon/src/session_store_info_tests.rs
-index 4feece8..e9e863e 100644
+index 66968e0c8..3f9739093 100644
 --- a/crates/pa-daemon/src/session_store_info_tests.rs
 +++ b/crates/pa-daemon/src/session_store_info_tests.rs
-@@ -648,9 +648,15 @@ fn zero_usage_states_are_capped_by_count_not_only_the_usage_budget() {
+@@ -636,9 +636,15 @@ fn zero_usage_states_are_capped_by_count_not_only_the_usage_budget() {
          let info = read_session_info(&path).unwrap();
          assert_eq!(info.message_count, 1);
      }
@@ -877,10 +761,10 @@ index 4feece8..e9e863e 100644
          super::SESSION_SCAN_MAX_CACHED_STATES,
          cache.states.len(),
 diff --git a/crates/pa-daemon/src/supervisor/tests.rs b/crates/pa-daemon/src/supervisor/tests.rs
-index a45dff7..4d7acc0 100644
+index f3f5438aa..442c93c34 100644
 --- a/crates/pa-daemon/src/supervisor/tests.rs
 +++ b/crates/pa-daemon/src/supervisor/tests.rs
-@@ -1732,7 +1732,11 @@ async fn a_ledger_delete_never_tombstones_an_unrelated_edge_sharing_the_child_id
+@@ -2271,7 +2271,11 @@ async fn a_ledger_delete_never_tombstones_an_unrelated_edge_sharing_the_child_id
          1,
          "the unrelated edge sharing the child id must stay live: {live:?}"
      );
@@ -894,7 +778,7 @@ index a45dff7..4d7acc0 100644
  
  #[tokio::test]
 diff --git a/crates/pa-daemon/src/supervisor_roster_seed.rs b/crates/pa-daemon/src/supervisor_roster_seed.rs
-index 05057f8..42ea4de 100644
+index 05057f850..42ea4dea5 100644
 --- a/crates/pa-daemon/src/supervisor_roster_seed.rs
 +++ b/crates/pa-daemon/src/supervisor_roster_seed.rs
 @@ -887,7 +887,9 @@ pub(crate) mod tests {
@@ -909,7 +793,7 @@ index 05057f8..42ea4de 100644
          );
          assert!(immediate.summary.get("model").is_none());
 diff --git a/crates/pa-daemon/src/worker/tests/abort_boundary_tests.rs b/crates/pa-daemon/src/worker/tests/abort_boundary_tests.rs
-index fe42266..e06eb34 100644
+index 700e46e53..026163307 100644
 --- a/crates/pa-daemon/src/worker/tests/abort_boundary_tests.rs
 +++ b/crates/pa-daemon/src/worker/tests/abort_boundary_tests.rs
 @@ -117,7 +117,7 @@ async fn abort_and_send_queued_delivers_the_parked_queue_at_the_boundary() {
@@ -949,7 +833,7 @@ index fe42266..e06eb34 100644
  }
  
 diff --git a/crates/pa-daemon/src/worker/tests/goal_tests.rs b/crates/pa-daemon/src/worker/tests/goal_tests.rs
-index 5c2b026..c4e8d8e 100644
+index 460933b8c..f8591a8fb 100644
 --- a/crates/pa-daemon/src/worker/tests/goal_tests.rs
 +++ b/crates/pa-daemon/src/worker/tests/goal_tests.rs
 @@ -221,7 +221,7 @@ async fn goal_turn_end_loop_runs_to_completion() {
@@ -971,7 +855,7 @@ index 5c2b026..c4e8d8e 100644
  
  #[allow(clippy::await_holding_lock)] // the faux registry is process-global: the guard must span the async flow
 diff --git a/crates/pa-daemon/src/worker/tests/kill_broadcast_tests.rs b/crates/pa-daemon/src/worker/tests/kill_broadcast_tests.rs
-index f564b24..396a8a5 100644
+index f564b241a..396a8a54a 100644
 --- a/crates/pa-daemon/src/worker/tests/kill_broadcast_tests.rs
 +++ b/crates/pa-daemon/src/worker/tests/kill_broadcast_tests.rs
 @@ -32,7 +32,7 @@ async fn aborted_turn_row_broadcasts_and_persists_through_the_worker_gate() {
@@ -1018,7 +902,7 @@ index f564b24..396a8a5 100644
 +    assert!(closed.success, "shutdown failed: {closed:?}");
  }
 diff --git a/crates/pa-daemon/src/worker/turn_stream_tests/queue.rs b/crates/pa-daemon/src/worker/turn_stream_tests/queue.rs
-index b55ef96..e8fe804 100644
+index 7114efb5e..8b096203c 100644
 --- a/crates/pa-daemon/src/worker/turn_stream_tests/queue.rs
 +++ b/crates/pa-daemon/src/worker/turn_stream_tests/queue.rs
 @@ -440,7 +440,7 @@ async fn abort_and_send_queued_delivers_the_steering_batch_then_the_follow_ups()
@@ -1048,7 +932,7 @@ index b55ef96..e8fe804 100644
          )
          .await;
      assert!(created.success, "create failed: {created:?}");
-@@ -761,5 +763,7 @@ async fn abort_and_send_queued_acks_before_the_follow_up_delivery() {
+@@ -761,6 +763,8 @@ async fn abort_and_send_queued_acks_before_the_follow_up_delivery() {
          ],
          "the follow-up row survived the bare abort exactly once: {texts:?}"
      );
@@ -1056,8 +940,9 @@ index b55ef96..e8fe804 100644
 +    assert!(closed.success, "shutdown failed: {closed:?}");
      let _ = std::fs::remove_dir_all(&dir);
  }
+ 
 diff --git a/crates/pa-tui/src/session_open_error.rs b/crates/pa-tui/src/session_open_error.rs
-index 8847b31..162d48e 100644
+index 8847b31bd..162d48e17 100644
 --- a/crates/pa-tui/src/session_open_error.rs
 +++ b/crates/pa-tui/src/session_open_error.rs
 @@ -272,7 +272,12 @@ mod tests {

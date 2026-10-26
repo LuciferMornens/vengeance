@@ -601,8 +601,8 @@ if (childMode) {
     const firstState = await first.nativeCommand('get_state')
     assert.equal(path.dirname(firstState.sessionFile), sessionsDirectory)
     const toolsState = await first.bridge({ op: 'tools-get' })
-    const pythonTool = toolsState.tools.find((tool) => tool.name === 'ipython')
-    assert.ok(toolsState.active.includes('ipython'))
+    const pythonTool = toolsState.tools.find((tool) => tool.name === 'python_repl')
+    assert.ok(toolsState.active.includes('python_repl'))
     assert.ok(pythonTool?.description.trim())
     console.log('tools bridge: native Python definition has a description')
 

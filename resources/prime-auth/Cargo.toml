@@ -12,19 +12,19 @@ tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
 
 [dependencies.pa-ai]
 git = "https://github.com/PrimeIntellect-ai/prime-agent"
-rev = "763094e1b6a7c17450ee8399b06cda1853847ca5"
+rev = "8aac8692456c00c01d4e53e60e6d3347a3506559"
 
 [dependencies.pa-core]
 git = "https://github.com/PrimeIntellect-ai/prime-agent"
-rev = "763094e1b6a7c17450ee8399b06cda1853847ca5"
+rev = "8aac8692456c00c01d4e53e60e6d3347a3506559"
 
 [dependencies.pa-daemon]
 git = "https://github.com/PrimeIntellect-ai/prime-agent"
-rev = "763094e1b6a7c17450ee8399b06cda1853847ca5"
+rev = "8aac8692456c00c01d4e53e60e6d3347a3506559"
 
 [dependencies.pa-types]
 git = "https://github.com/PrimeIntellect-ai/prime-agent"
-rev = "763094e1b6a7c17450ee8399b06cda1853847ca5"
+rev = "8aac8692456c00c01d4e53e60e6d3347a3506559"
 
 [profile.release]
 strip = true

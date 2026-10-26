@@ -19,6 +19,8 @@ export interface ParsedProviderError {
    * Settings → Providers, where signing in again is the remedy.
    */
   expiredSignIn?: string
+  /** The provider has no capacity for the model right now; another model is the remedy. */
+  overloaded?: boolean
 }
 
 /**
@@ -56,6 +58,15 @@ export function expiredSignInSummary(
   return `${SIGN_IN_EXPIRED.label} for ${expiredSignInName(provider, providers)}. ${SIGN_IN_EXPIRED.explanation}`
 }
 
+const OVERLOADED = 'The provider is overloaded'
+
+/**
+ * Said instead of the provider's own sentence for an overload: Moonshot's ("The engine is currently overloaded")
+ * would read as Vengeance's Engine, and its 429 status as the account's rate limit.
+ */
+const OVERLOADED_DETAIL =
+  'The provider has no capacity for this model right now; your plan’s usage limits are not the cause. Try again later or choose another model.'
+
 const STATUS_TITLES: Record<number, string> = {
   400: 'The request was rejected',
   401: 'Not signed in to this provider',
@@ -68,14 +79,18 @@ const STATUS_TITLES: Record<number, string> = {
   502: 'The provider is unreachable',
   503: 'The provider is unavailable',
   504: 'The provider timed out',
-  529: 'The provider is overloaded'
+  529: OVERLOADED
 }
 
 const CODE_TITLES: Record<string, string> = {
-  overloaded_error: 'The provider is overloaded',
+  overloaded_error: OVERLOADED,
+  // Moonshot (Kimi): an overloaded model answers 429 with this type.
+  engine_overloaded_error: OVERLOADED,
   rate_limit_error: 'Rate limit reached',
   rate_limit_exceeded: 'Rate limit reached',
+  rate_limit_reached_error: 'Rate limit reached',
   insufficient_quota: 'Out of credits for this provider',
+  exceeded_current_quota_error: 'Out of credits for this provider',
   authentication_error: 'Not signed in to this provider',
   invalid_api_key: 'The API key was rejected',
   permission_error: 'Access denied by the provider',
@@ -165,6 +180,8 @@ export function parseProviderError(raw: string | undefined): ParsedProviderError
   }
   const known = (code && CODE_TITLES[code]) || (status && STATUS_TITLES[status])
   const title = known || message || (text.startsWith('<') ? 'The provider returned an error page' : text)
+  if (title === OVERLOADED)
+    return { title, detail: OVERLOADED_DETAIL, status, code, raw: text, overloaded: true }
   const detail = message && message !== title && message.toLowerCase() !== title.toLowerCase() ? message : undefined
   return { title, detail, status, code, raw: text }
 }

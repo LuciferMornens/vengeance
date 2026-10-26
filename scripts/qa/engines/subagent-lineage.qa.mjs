@@ -6,6 +6,7 @@ import { inspectRequest, turn } from '../lib/fake-llm.mjs'
 import { isAlive, processIdentity, processTable } from '../lib/processes.mjs'
 import { until } from '../chat/helpers.mjs'
 import { createEngineFixture } from './integration-fixture.mjs'
+import { PYTHON_TOOLS } from '../lib/native-kernel.mjs'
 
 const PARENT_NAME = 'Lineage parent'
 const CHILD_NAME = 'Lineage reviewer'
@@ -83,7 +84,7 @@ try {
   await application.send('Reply with exactly: ready')
   await application.waitForSettle()
   const toolName = inspectRequest(fixture.primeServer.requests[0]).tools.find(
-    (name) => name === 'ipython' || name === 'python'
+    (name) => PYTHON_TOOLS.includes(name)
   )
   assert.ok(toolName, 'the native Python runtime exposes delegation')
   const parentState = await application.rpc({ type: 'get_state' }, parent.agentId)

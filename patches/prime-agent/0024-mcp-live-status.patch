@@ -1,18 +1,18 @@
 diff --git a/crates/pa-core/README.md b/crates/pa-core/README.md
-index 5b3d0d8..72a8308 100644
+index a3a3ff61d..dbc7d9306 100644
 --- a/crates/pa-core/README.md
 +++ b/crates/pa-core/README.md
-@@ -74,7 +74,7 @@ only: nothing wires it to a user-facing cloud toggle yet.
+@@ -76,7 +76,7 @@ only: nothing wires it to a user-facing cloud toggle yet.
  No provider HTTP (pa-ai), no loop policy (pa-agent), no daemon supervision (pa-daemon), no TUI (pa-tui). No update coordination (the pa-cli coordinator owns the FSM; the update-flow seam here is the daemon-free support layer: `update::version` (semver/channel policy), `update::install` (the managed install-root layout), `update::release` (the channel manifest fetch), `update::download` (sha256-verified archive download + staging)). The package manager installs sources and resolves resource paths only. No workspace snapshot upload, transport, or remote materialization (staging and verification live here; the cloud attach surface owns the transport when it ships).
  
  ## Public API
--`SessionEngine` (message in -> events out), `export_html` (the HTML exporter plus its renderer seam: `tools_section`, `pre_render_custom_tools` + `ToolHtmlRenderer`/`RenderedToolHtml`/`RenderedToolResult`, and `ansi_to_html::ansi_lines_to_html`/`tool_render::trim_rendered_result_lines` for renderer implementers), `ToolRegistry`, kernel manager, settings (`SettingsManager`), packages (`packages::PackageManager` + source types), `platform` (process control, file locking, permissions, shell selection - usable by higher crates, e.g. pa-cli's detached spawn), `session_engine::rlm_host::RlmSubagentHost` (implemented by pa-daemon for supervisor-backed children; the default is no children), `session_engine::semantic_edges` (the TS `semantic-edges.ts` WRITER: `SemanticEdgeRecorder`/`SemanticEdgeIdentity`, `semantic_edge_ledger_path` + `last_committed_request_id`, and the `X-ACP-Model-Request-ID`/`Idempotency-Key` constants — one durable per-session ledger of model-request events, byte-compatible with the TS lines; the fold and any publishing stay downstream), `mcp::McpManager` (the session's host-side MCP manager, exposed as `SessionEngine.mcp_manager`: auth gating for built-in integrations, the `mcpServers` setting seam, and the `mcp.*` host-request handlers - `mcp.config`/`mcp.refresh`/optional `mcp.begin_login` - the kernel's generic MCP client resolves through), `mcp::McpManager::connection_roster` + `mcp::McpConnectionEntry` (the `/mcp` view's roster: every resolved integration with its connected state, display kind, transport, and generic-listable flag), `mcp::McpManager::service_catalog_views` + `service_catalog_diagnostics` (the `/mcp` view's resolved service-catalog cards and their diagnostics, answered from local state - the TS `buildServiceCatalogViews` parity; the picker never round-trips the kernel), `mcp::McpManager::api_key_credential_views` + `mcp::API_KEY_CREDENTIALS`/`McpCredentialView` (the `/mcp` view's api-key credential rows - the stored keys the surface manages alongside the connections, e.g. the web-search key - configured from the shared auth store), `models` (the registry and resolver, plus `models::order_for_picker`: the picker-catalog order the composition root applies to its snapshot), `session_engine::provider_adapter` (`switchable_stream_fn`/`ProviderTarget`: the live provider-target slot a host swaps on `set_model`; the adapter bridges the loop's abort into pa-ai's `StreamOptions::signal` cancellation token, so a turn abort cancels the in-flight HTTP fetch at the transport — closed by `ModelStream::close` and the stream's drop), `session_engine::ipython_state` (the post-compaction `ipython_state` kernel-persistence notice: the `CompactionKernelProbe` view of the kernel provisioner the engine wiring binds via `AgentSession::set_kernel_state_probe`, and the notice row that rides `CompactRun` for the surfaces to broadcast). `session_engine::session_commands` (the `/compact`/`/refine`/`/goal`/`/autonomous` executor: the durable echo/result rows with their persistence order - the echo ahead of the command so its own work sees it - the compaction/refinement/goal/autonomous arms, and the post-execution live-context rebuild that keeps the rows in the agent state; hosts own the wire surface), `session_engine::auto_refine_trigger` (the compact-trigger auto-refine machine on `AgentSession`: the arm/discard/increment accessors and `consume_compact_auto_refine`, the shared gate/review/stamp sequence every scheduling surface applies - TS `_compactAutoRefinePending`/`_lastAutoRefineReviewAt`/`_assistantTurnsSinceAutoRefine` plus `_maybeAutoRefine`'s compact arm, the serialized checkpoint's compact step, and dispose's serialized drain, with the surface parameter carrying the one behavioral difference between a boundary and a disposal). `session_engine::goal_boundary` (the goal arms of the natural turn end on `SessionEngine`: the `--goal` construction seed with its next-turn context row - TS `_pendingNextTurnMessages` on `AgentSession` - the usage accounting, the budget-limit steer mint, the natural continuation mint with its slot rollback, and the terminal-error finish; the transports - the print driver's in-loop hook, the ACP settle loop, the daemon worker's queue - drive the one goal driver through these methods). `SessionEngine::expand_skill_submission` + `AgentSession`'s prompt-path expansion (the `/skill:<name>` submission seam, TS `_expandSkillCommand`: `skills::expand_skill_command` builds the `<skill ...>` block over the shared `pa_types::skill_blocks` parse, the accepted-turn row and the admitted user message agree on the expanded text, and the `skill_use_count` session counter counts at the admission). `workspace_snapshot` (`create_workspace_snapshot`: bounded, secret/nested-repo/submodule/symlink-ancestor-excluding capture of a git worktree into an owner-private staging directory, with the caller-chosen `BaselineMode` (HEAD-tree content verified against HEAD's object ids, or explicit external) and a `ConcurrentMutation` error when the worktree changes under the capture; `verify_workspace_snapshot`: offline manifest/blob/baseline integrity check; the `SnapshotManifest`/`WorkspaceSnapshot`/`SnapshotLimits`/`BaselineMode`/`SnapshotError` types). All subsystem internals `pub(crate)`; the engine is the only facade - subsystems must not import each other directly (the package manager consumes the public settings API only).
-+`SessionEngine` (message in -> events out), `export_html` (the HTML exporter plus its renderer seam: `tools_section`, `pre_render_custom_tools` + `ToolHtmlRenderer`/`RenderedToolHtml`/`RenderedToolResult`, and `ansi_to_html::ansi_lines_to_html`/`tool_render::trim_rendered_result_lines` for renderer implementers), `ToolRegistry`, kernel manager, settings (`SettingsManager`), packages (`packages::PackageManager` + source types), `platform` (process control, file locking, permissions, shell selection - usable by higher crates, e.g. pa-cli's detached spawn), `session_engine::rlm_host::RlmSubagentHost` (implemented by pa-daemon for supervisor-backed children; the default is no children), `session_engine::semantic_edges` (the TS `semantic-edges.ts` WRITER: `SemanticEdgeRecorder`/`SemanticEdgeIdentity`, `semantic_edge_ledger_path` + `last_committed_request_id`, and the `X-ACP-Model-Request-ID`/`Idempotency-Key` constants — one durable per-session ledger of model-request events, byte-compatible with the TS lines; the fold and any publishing stay downstream), `mcp::McpManager` (the session's host-side MCP manager, exposed as `SessionEngine.mcp_manager`: auth gating for built-in integrations, the `mcpServers` setting seam, and the `mcp.*` host-request handlers - `mcp.config`/`mcp.refresh`/optional `mcp.begin_login` - the kernel's generic MCP client resolves through), `mcp::McpManager::connection_roster` + `mcp::McpConnectionEntry` (the `/mcp` view's roster: every resolved integration with its connected state, display kind, transport, and generic-listable flag), `session_engine::mcp_status::{McpStatusServers, McpLiveStatus}` + `SessionEngine::{mcp_status, reconnect_mcp_server}` (the live MCP status lane over the session's running kernel: each enabled generic server's tools or error, and the per-server reconnect that closes and relists the kernel connection; never boots a kernel), `mcp::McpManager::service_catalog_views` + `service_catalog_diagnostics` (the `/mcp` view's resolved service-catalog cards and their diagnostics, answered from local state - the TS `buildServiceCatalogViews` parity; the picker never round-trips the kernel), `mcp::McpManager::api_key_credential_views` + `mcp::API_KEY_CREDENTIALS`/`McpCredentialView` (the `/mcp` view's api-key credential rows - the stored keys the surface manages alongside the connections, e.g. the web-search key - configured from the shared auth store), `models` (the registry and resolver, plus `models::order_for_picker`: the picker-catalog order the composition root applies to its snapshot), `session_engine::provider_adapter` (`switchable_stream_fn`/`ProviderTarget`: the live provider-target slot a host swaps on `set_model`; the adapter bridges the loop's abort into pa-ai's `StreamOptions::signal` cancellation token, so a turn abort cancels the in-flight HTTP fetch at the transport — closed by `ModelStream::close` and the stream's drop), `session_engine::ipython_state` (the post-compaction `ipython_state` kernel-persistence notice: the `CompactionKernelProbe` view of the kernel provisioner the engine wiring binds via `AgentSession::set_kernel_state_probe`, and the notice row that rides `CompactRun` for the surfaces to broadcast). `session_engine::session_commands` (the `/compact`/`/refine`/`/goal`/`/autonomous` executor: the durable echo/result rows with their persistence order - the echo ahead of the command so its own work sees it - the compaction/refinement/goal/autonomous arms, and the post-execution live-context rebuild that keeps the rows in the agent state; hosts own the wire surface), `session_engine::auto_refine_trigger` (the compact-trigger auto-refine machine on `AgentSession`: the arm/discard/increment accessors and `consume_compact_auto_refine`, the shared gate/review/stamp sequence every scheduling surface applies - TS `_compactAutoRefinePending`/`_lastAutoRefineReviewAt`/`_assistantTurnsSinceAutoRefine` plus `_maybeAutoRefine`'s compact arm, the serialized checkpoint's compact step, and dispose's serialized drain, with the surface parameter carrying the one behavioral difference between a boundary and a disposal). `session_engine::goal_boundary` (the goal arms of the natural turn end on `SessionEngine`: the `--goal` construction seed with its next-turn context row - TS `_pendingNextTurnMessages` on `AgentSession` - the usage accounting, the budget-limit steer mint, the natural continuation mint with its slot rollback, and the terminal-error finish; the transports - the print driver's in-loop hook, the ACP settle loop, the daemon worker's queue - drive the one goal driver through these methods). `SessionEngine::expand_skill_submission` + `AgentSession`'s prompt-path expansion (the `/skill:<name>` submission seam, TS `_expandSkillCommand`: `skills::expand_skill_command` builds the `<skill ...>` block over the shared `pa_types::skill_blocks` parse, the accepted-turn row and the admitted user message agree on the expanded text, and the `skill_use_count` session counter counts at the admission). `workspace_snapshot` (`create_workspace_snapshot`: bounded, secret/nested-repo/submodule/symlink-ancestor-excluding capture of a git worktree into an owner-private staging directory, with the caller-chosen `BaselineMode` (HEAD-tree content verified against HEAD's object ids, or explicit external) and a `ConcurrentMutation` error when the worktree changes under the capture; `verify_workspace_snapshot`: offline manifest/blob/baseline integrity check; the `SnapshotManifest`/`WorkspaceSnapshot`/`SnapshotLimits`/`BaselineMode`/`SnapshotError` types). All subsystem internals `pub(crate)`; the engine is the only facade - subsystems must not import each other directly (the package manager consumes the public settings API only).
+-`SessionEngine` (message in -> events out), `export_html` (the HTML exporter plus its renderer seam: `tools_section`, `pre_render_custom_tools` + `ToolHtmlRenderer`/`RenderedToolHtml`/`RenderedToolResult`, and `ansi_to_html::ansi_lines_to_html`/`tool_render::trim_rendered_result_lines` for renderer implementers), `ToolRegistry`, kernel manager, settings (`SettingsManager`), packages (`packages::PackageManager` + source types), `platform` (process control, file locking, permissions, shell selection - usable by higher crates, e.g. pa-cli's detached spawn), `session_engine::rlm_host::RlmSubagentHost` (implemented by pa-daemon for supervisor-backed children and by pa-cli's print mode for in-process children; the default is no children; the trait crate also owns the shared spawn/depth facts — `DEFAULT_RLM_MAX_DEPTH`, the depth-limit and name errors, the daemonless `create_session` refusal, `rlm_child_session_dir`, and the `persisted_rlm_max_depth`/`resolve_rlm_max_depth` precedence chain), `session_engine::semantic_edges` (the TS `semantic-edges.ts` WRITER: `SemanticEdgeRecorder`/`SemanticEdgeIdentity`, `semantic_edge_ledger_path` + `last_committed_request_id`, and the `X-ACP-Model-Request-ID`/`Idempotency-Key` constants — one durable per-session ledger of model-request events, byte-compatible with the TS lines; the fold and any publishing stay downstream), `mcp::McpManager` (the session's host-side MCP manager, exposed as `SessionEngine.mcp_manager`: auth gating for built-in integrations, the `mcpServers` setting seam, and the `mcp.*` host-request handlers - `mcp.config`/`mcp.refresh`/optional `mcp.begin_login` - the kernel's generic MCP client resolves through), `mcp::McpManager::connection_roster` + `mcp::McpConnectionEntry` (the `/mcp` view's roster: every resolved integration with its connected state, display kind, transport, and generic-listable flag), `mcp::McpManager::service_catalog_views` + `service_catalog_diagnostics` (the `/mcp` view's resolved service-catalog cards and their diagnostics, answered from local state - the TS `buildServiceCatalogViews` parity; the picker never round-trips the kernel), `mcp::McpManager::api_key_credential_views` + `mcp::API_KEY_CREDENTIALS`/`McpCredentialView` (the `/mcp` view's api-key credential rows - the stored keys the surface manages alongside the connections, e.g. the web-search key - configured from the shared auth store), `models` (the registry and resolver, plus `models::order_for_picker`: the picker-catalog order the composition root applies to its snapshot), `session_engine::provider_adapter` (`switchable_stream_fn`/`ProviderTarget`: the live provider-target slot a host swaps on `set_model`; the adapter bridges the loop's abort into pa-ai's `StreamOptions::signal` cancellation token, so a turn abort cancels the in-flight HTTP fetch at the transport — closed by `ModelStream::close` and the stream's drop), `session_engine::ipython_state` (the post-compaction `ipython_state` kernel-persistence notice: the `CompactionKernelProbe` view of the kernel provisioner the engine wiring binds via `AgentSession::set_kernel_state_probe`, and the notice row that rides `CompactRun` for the surfaces to broadcast). `session_engine::session_commands` (the `/compact`/`/refine`/`/goal`/`/autonomous` executor: the durable echo/result rows with their persistence order - the echo ahead of the command so its own work sees it - the compaction/refinement/goal/autonomous arms, and the post-execution live-context rebuild that keeps the rows in the agent state; hosts own the wire surface), `session_engine::auto_refine_trigger` (the compact-trigger auto-refine machine on `AgentSession`: the arm/discard/increment accessors and `consume_compact_auto_refine`, the shared gate/review/stamp sequence every scheduling surface applies - TS `_compactAutoRefinePending`/`_lastAutoRefineReviewAt`/`_assistantTurnsSinceAutoRefine` plus `_maybeAutoRefine`'s compact arm, the serialized checkpoint's compact step, and dispose's serialized drain, with the surface parameter carrying the one behavioral difference between a boundary and a disposal). `session_engine::goal_boundary` (the goal arms of the natural turn end on `SessionEngine`: the `--goal` construction seed with its next-turn context row - TS `_pendingNextTurnMessages` on `AgentSession` - the usage accounting, the budget-limit steer mint, the natural continuation mint with its slot rollback, the RLM deferral behind unsettled descendant work (mark/drop/take owed, the wake-up ownership probe, and the latest settled turn the post-settle deliveries decide from), and the terminal-error finish; the transports - the print driver's in-loop hook, the ACP settle loop, the daemon worker's queue - drive the one goal driver through these methods). `SessionEngine::expand_skill_submission` + `AgentSession`'s prompt-path expansion (the `/skill:<name>` submission seam, TS `_expandSkillCommand`: `skills::expand_skill_command` builds the `<skill ...>` block over the shared `pa_types::skill_blocks` parse, the accepted-turn row and the admitted user message agree on the expanded text, and the `skill_use_count` session counter counts at the admission). `workspace_snapshot` (`create_workspace_snapshot`: bounded, secret/nested-repo/submodule/symlink-ancestor-excluding capture of a git worktree into an owner-private staging directory, with the caller-chosen `BaselineMode` (HEAD-tree content verified against HEAD's object ids, or explicit external) and a `ConcurrentMutation` error when the worktree changes under the capture; `verify_workspace_snapshot`: offline manifest/blob/baseline integrity check; the `SnapshotManifest`/`WorkspaceSnapshot`/`SnapshotLimits`/`BaselineMode`/`SnapshotError` types). All subsystem internals `pub(crate)`; the engine is the only facade - subsystems must not import each other directly (the package manager consumes the public settings API only).
++`SessionEngine` (message in -> events out), `export_html` (the HTML exporter plus its renderer seam: `tools_section`, `pre_render_custom_tools` + `ToolHtmlRenderer`/`RenderedToolHtml`/`RenderedToolResult`, and `ansi_to_html::ansi_lines_to_html`/`tool_render::trim_rendered_result_lines` for renderer implementers), `ToolRegistry`, kernel manager, settings (`SettingsManager`), packages (`packages::PackageManager` + source types), `platform` (process control, file locking, permissions, shell selection - usable by higher crates, e.g. pa-cli's detached spawn), `session_engine::rlm_host::RlmSubagentHost` (implemented by pa-daemon for supervisor-backed children and by pa-cli's print mode for in-process children; the default is no children; the trait crate also owns the shared spawn/depth facts — `DEFAULT_RLM_MAX_DEPTH`, the depth-limit and name errors, the daemonless `create_session` refusal, `rlm_child_session_dir`, and the `persisted_rlm_max_depth`/`resolve_rlm_max_depth` precedence chain), `session_engine::semantic_edges` (the TS `semantic-edges.ts` WRITER: `SemanticEdgeRecorder`/`SemanticEdgeIdentity`, `semantic_edge_ledger_path` + `last_committed_request_id`, and the `X-ACP-Model-Request-ID`/`Idempotency-Key` constants — one durable per-session ledger of model-request events, byte-compatible with the TS lines; the fold and any publishing stay downstream), `mcp::McpManager` (the session's host-side MCP manager, exposed as `SessionEngine.mcp_manager`: auth gating for built-in integrations, the `mcpServers` setting seam, and the `mcp.*` host-request handlers - `mcp.config`/`mcp.refresh`/optional `mcp.begin_login` - the kernel's generic MCP client resolves through), `mcp::McpManager::connection_roster` + `mcp::McpConnectionEntry` (the `/mcp` view's roster: every resolved integration with its connected state, display kind, transport, and generic-listable flag), `session_engine::mcp_status::{McpStatusServers, McpLiveStatus}` + `SessionEngine::{mcp_status, reconnect_mcp_server}` (the live MCP status lane over the session's running kernel: each enabled generic server's tools or error, and the per-server reconnect that closes and relists the kernel connection; never boots a kernel), `mcp::McpManager::service_catalog_views` + `service_catalog_diagnostics` (the `/mcp` view's resolved service-catalog cards and their diagnostics, answered from local state - the TS `buildServiceCatalogViews` parity; the picker never round-trips the kernel), `mcp::McpManager::api_key_credential_views` + `mcp::API_KEY_CREDENTIALS`/`McpCredentialView` (the `/mcp` view's api-key credential rows - the stored keys the surface manages alongside the connections, e.g. the web-search key - configured from the shared auth store), `models` (the registry and resolver, plus `models::order_for_picker`: the picker-catalog order the composition root applies to its snapshot), `session_engine::provider_adapter` (`switchable_stream_fn`/`ProviderTarget`: the live provider-target slot a host swaps on `set_model`; the adapter bridges the loop's abort into pa-ai's `StreamOptions::signal` cancellation token, so a turn abort cancels the in-flight HTTP fetch at the transport — closed by `ModelStream::close` and the stream's drop), `session_engine::ipython_state` (the post-compaction `ipython_state` kernel-persistence notice: the `CompactionKernelProbe` view of the kernel provisioner the engine wiring binds via `AgentSession::set_kernel_state_probe`, and the notice row that rides `CompactRun` for the surfaces to broadcast). `session_engine::session_commands` (the `/compact`/`/refine`/`/goal`/`/autonomous` executor: the durable echo/result rows with their persistence order - the echo ahead of the command so its own work sees it - the compaction/refinement/goal/autonomous arms, and the post-execution live-context rebuild that keeps the rows in the agent state; hosts own the wire surface), `session_engine::auto_refine_trigger` (the compact-trigger auto-refine machine on `AgentSession`: the arm/discard/increment accessors and `consume_compact_auto_refine`, the shared gate/review/stamp sequence every scheduling surface applies - TS `_compactAutoRefinePending`/`_lastAutoRefineReviewAt`/`_assistantTurnsSinceAutoRefine` plus `_maybeAutoRefine`'s compact arm, the serialized checkpoint's compact step, and dispose's serialized drain, with the surface parameter carrying the one behavioral difference between a boundary and a disposal). `session_engine::goal_boundary` (the goal arms of the natural turn end on `SessionEngine`: the `--goal` construction seed with its next-turn context row - TS `_pendingNextTurnMessages` on `AgentSession` - the usage accounting, the budget-limit steer mint, the natural continuation mint with its slot rollback, the RLM deferral behind unsettled descendant work (mark/drop/take owed, the wake-up ownership probe, and the latest settled turn the post-settle deliveries decide from), and the terminal-error finish; the transports - the print driver's in-loop hook, the ACP settle loop, the daemon worker's queue - drive the one goal driver through these methods). `SessionEngine::expand_skill_submission` + `AgentSession`'s prompt-path expansion (the `/skill:<name>` submission seam, TS `_expandSkillCommand`: `skills::expand_skill_command` builds the `<skill ...>` block over the shared `pa_types::skill_blocks` parse, the accepted-turn row and the admitted user message agree on the expanded text, and the `skill_use_count` session counter counts at the admission). `workspace_snapshot` (`create_workspace_snapshot`: bounded, secret/nested-repo/submodule/symlink-ancestor-excluding capture of a git worktree into an owner-private staging directory, with the caller-chosen `BaselineMode` (HEAD-tree content verified against HEAD's object ids, or explicit external) and a `ConcurrentMutation` error when the worktree changes under the capture; `verify_workspace_snapshot`: offline manifest/blob/baseline integrity check; the `SnapshotManifest`/`WorkspaceSnapshot`/`SnapshotLimits`/`BaselineMode`/`SnapshotError` types). All subsystem internals `pub(crate)`; the engine is the only facade - subsystems must not import each other directly (the package manager consumes the public settings API only).
  
  ## Depends on
  pa-types, pa-ai, pa-agent (one-way).
 diff --git a/crates/pa-core/src/kernel/manager/mod.rs b/crates/pa-core/src/kernel/manager/mod.rs
-index 5d798d9..b6bac12 100644
+index 6c89a4120..2d83aaab8 100644
 --- a/crates/pa-core/src/kernel/manager/mod.rs
 +++ b/crates/pa-core/src/kernel/manager/mod.rs
 @@ -46,6 +46,10 @@ const REPAIR_STEP_TIMEOUT_MS: u64 = 30_000;
@@ -26,7 +26,7 @@ index 5d798d9..b6bac12 100644
  /// Largest legit frame is an attachment display event, base64 capped at
  /// `MAX_ATTACHMENT_DATA_CHARS`; a longer line is corruption the protocol repair owns.
  const MAX_PROTOCOL_LINE_BYTES: usize = 32 * 1024 * 1024;
-@@ -860,7 +864,7 @@ impl ReplKernelManager {
+@@ -845,7 +849,7 @@ impl ReplKernelManager {
      /// bound it with their own deadline.
      ///
      /// The request rides the dedicated MCP status lane (the eager
@@ -35,7 +35,7 @@ index 5d798d9..b6bac12 100644
      /// done event settles by request id, so the listing NEVER occupies
      /// the manager's execution queue — a slow or unreachable server
      /// would otherwise park the user's first python cell behind its
-@@ -873,54 +877,92 @@ impl ReplKernelManager {
+@@ -858,54 +862,92 @@ impl ReplKernelManager {
          servers: &[String],
          per_server_timeout_ms: u64,
      ) -> Option<Vec<Value>> {
@@ -143,10 +143,10 @@ index 5d798d9..b6bac12 100644
          }
      }
 diff --git a/crates/pa-core/src/session_engine/engine.rs b/crates/pa-core/src/session_engine/engine.rs
-index 9a9e484..916be68 100644
+index 8c22bcea3..becac1f1e 100644
 --- a/crates/pa-core/src/session_engine/engine.rs
 +++ b/crates/pa-core/src/session_engine/engine.rs
-@@ -127,6 +127,10 @@ pub struct SessionEngine {
+@@ -152,6 +152,10 @@ pub struct SessionEngine {
      /// loops the graph and keeps a dropped session's kernel process alive
      /// until the process exits.
      pub(crate) provisioner: std::sync::Arc<crate::kernel::provisioner::IpythonKernelProvisioner>,
@@ -157,18 +157,18 @@ index 9a9e484..916be68 100644
  }
  
  /// Skill overrides for built-in integrations the user is not logged into,
-@@ -489,7 +493,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
-             // A spawned child's prompt must read "depth: N (not root)" with
-             // the child-agent reply doctrine, never the root identity.
+@@ -592,7 +596,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
              rlm_depth: config.rlm_depth,
+             daemonless: config.daemonless,
+             can_spawn: config.rlm_subagent_host.is_some(),
 -            generic_mcp_servers,
 +            generic_mcp_servers: generic_mcp_servers.clone(),
              append_system_prompt: Some(resources.append_system_prompt.join("\n\n")),
              ..Default::default()
          },
-@@ -776,6 +780,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
-         rlm_usage: wiring.rlm_usage,
+@@ -927,6 +931,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
          factory_host,
+         rlm_progress_notes: Arc::clone(&wiring.rlm.notes),
          provisioner,
 +        generic_mcp_servers,
      })
@@ -176,7 +176,7 @@ index 9a9e484..916be68 100644
  
 diff --git a/crates/pa-core/src/session_engine/mcp_status.rs b/crates/pa-core/src/session_engine/mcp_status.rs
 new file mode 100644
-index 0000000..a5efc8e
+index 000000000..a5efc8e86
 --- /dev/null
 +++ b/crates/pa-core/src/session_engine/mcp_status.rs
 @@ -0,0 +1,210 @@
@@ -391,20 +391,20 @@ index 0000000..a5efc8e
 +    }
 +}
 diff --git a/crates/pa-core/src/session_engine/mod.rs b/crates/pa-core/src/session_engine/mod.rs
-index a5b8c74..70b2a5b 100644
+index 7ccd56163..bba3fc237 100644
 --- a/crates/pa-core/src/session_engine/mod.rs
 +++ b/crates/pa-core/src/session_engine/mod.rs
-@@ -22,6 +22,7 @@ pub mod headless;
- pub mod host_requests;
+@@ -24,6 +24,7 @@ pub mod host_requests;
  pub mod image_model_routing;
  pub mod ipython_state;
+ pub mod late_sent_messages;
 +pub mod mcp_status;
  pub mod messages;
  pub mod provider_adapter;
  pub mod provider_failover;
 diff --git a/crates/pa-core/tests/kernel_mcp_reconnect.rs b/crates/pa-core/tests/kernel_mcp_reconnect.rs
 new file mode 100644
-index 0000000..eeb5dec
+index 000000000..eeb5dec43
 --- /dev/null
 +++ b/crates/pa-core/tests/kernel_mcp_reconnect.rs
 @@ -0,0 +1,240 @@
@@ -649,10 +649,10 @@ index 0000000..eeb5dec
 +    engine.dispose_kernel().await;
 +}
 diff --git a/crates/pa-daemon/README.md b/crates/pa-daemon/README.md
-index 3000ef6..32bfb94 100644
+index 027009ab0..0a7279816 100644
 --- a/crates/pa-daemon/README.md
 +++ b/crates/pa-daemon/README.md
-@@ -258,7 +258,7 @@ attached UIs daemon-wide).
+@@ -247,7 +247,7 @@ attached UIs daemon-wide).
  No agent behavior inside workers beyond hosting a pa-core engine; no UI.
  
  ## Public API
@@ -662,18 +662,18 @@ index 3000ef6..32bfb94 100644
  
  ## Depends on
 diff --git a/crates/pa-daemon/src/agent_engine/lifecycle.rs b/crates/pa-daemon/src/agent_engine/lifecycle.rs
-index fbdfe10..8a7e014 100644
+index 9cfef0d8f..c08e1e3e0 100644
 --- a/crates/pa-daemon/src/agent_engine/lifecycle.rs
 +++ b/crates/pa-daemon/src/agent_engine/lifecycle.rs
-@@ -10,6 +10,7 @@ use super::{
-     QuotaParkState, SessionCommandExecution, SessionCommandParams, SessionEngineConfig,
-     SupervisorChildSessions, Value,
+@@ -12,6 +12,7 @@ use super::{
+     ProviderTarget, QuotaParkState, SessionCommandExecution, SessionCommandParams,
+     SessionEngineConfig, SupervisorChildSessions, Value,
  };
 +use pa_core::session_engine::mcp_status::{McpLiveStatus, McpStatusServers};
  
  /// The instruction the floor appends to a bare skill invocation: ask what
  /// the user wants first, never an imperative to execute.
-@@ -715,6 +716,44 @@ impl AgentSessionEngine {
+@@ -886,6 +887,44 @@ impl AgentSessionEngine {
              .await
      }
  
@@ -719,7 +719,7 @@ index fbdfe10..8a7e014 100644
      /// through the same guarded funnel.
      pub(crate) fn ensure_core_session(&self, model: &Model) -> anyhow::Result<()> {
 diff --git a/crates/pa-daemon/src/agent_engine/tests/session.rs b/crates/pa-daemon/src/agent_engine/tests/session.rs
-index e74aae2..a84d4d6 100644
+index e74aae2ff..a84d4d61e 100644
 --- a/crates/pa-daemon/src/agent_engine/tests/session.rs
 +++ b/crates/pa-daemon/src/agent_engine/tests/session.rs
 @@ -87,6 +87,59 @@ async fn get_commands_enumerates_skills_before_the_first_prompt() {
@@ -783,7 +783,7 @@ index e74aae2..a84d4d6 100644
  async fn replacement_teardown_retires_the_session_and_the_funnel_adopts_the_branch() {
      let engine = {
 diff --git a/crates/pa-daemon/src/lib.rs b/crates/pa-daemon/src/lib.rs
-index 05686a3..b64f741 100644
+index f3403019f..4b81b4970 100644
 --- a/crates/pa-daemon/src/lib.rs
 +++ b/crates/pa-daemon/src/lib.rs
 @@ -57,6 +57,7 @@ pub mod journal;
@@ -796,7 +796,7 @@ index 05686a3..b64f741 100644
  pub(crate) mod model_catalog;
 diff --git a/crates/pa-daemon/src/mcp_status.rs b/crates/pa-daemon/src/mcp_status.rs
 new file mode 100644
-index 0000000..f3dc54d
+index 000000000..0797d52cb
 --- /dev/null
 +++ b/crates/pa-daemon/src/mcp_status.rs
 @@ -0,0 +1,239 @@
@@ -1040,7 +1040,7 @@ index 0000000..f3dc54d
 +    }
 +}
 diff --git a/crates/pa-daemon/src/protocol.rs b/crates/pa-daemon/src/protocol.rs
-index a4f32c3..0196724 100644
+index 17909b97c..0e224fc16 100644
 --- a/crates/pa-daemon/src/protocol.rs
 +++ b/crates/pa-daemon/src/protocol.rs
 @@ -164,6 +164,8 @@ pub const KNOWN_COMMAND_TYPES: &[&str] = &[
@@ -1050,9 +1050,9 @@ index a4f32c3..0196724 100644
 +    "get_mcp_status",
 +    "reconnect_mcp_server",
      "mark_anthropic_warning_shown",
- ];
- 
-@@ -725,6 +727,12 @@ pub fn command_active_session_id(command: &DaemonCommand) -> Option<&str> {
+     "list_persistent_shells",
+     "tail_persistent_shell",
+@@ -730,6 +732,12 @@ pub fn command_active_session_id(command: &DaemonCommand) -> Option<&str> {
          | DaemonCommand::RemoveMcpConnection {
              active_session_id, ..
          }
@@ -1065,7 +1065,7 @@ index a4f32c3..0196724 100644
          | DaemonCommand::ReplaceAcpMcpServers {
              active_session_id, ..
          }
-@@ -990,6 +998,8 @@ pub fn command_type_name(command: &DaemonCommand) -> &'static str {
+@@ -1001,6 +1009,8 @@ pub fn command_type_name(command: &DaemonCommand) -> &'static str {
          DaemonCommand::GetMcpConnections { .. } => "get_mcp_connections",
          DaemonCommand::SetMcpStaticToken { .. } => "set_mcp_static_token",
          DaemonCommand::RemoveMcpConnection { .. } => "remove_mcp_connection",
@@ -1074,7 +1074,7 @@ index a4f32c3..0196724 100644
          DaemonCommand::ReplaceAcpMcpServers { .. } => "replace_acp_mcp_servers",
          DaemonCommand::GetModelCatalog { .. } => "get_model_catalog",
          DaemonCommand::GetAvailableModels { .. } => "get_available_models",
-@@ -1086,6 +1096,43 @@ mod tests {
+@@ -1097,6 +1107,43 @@ mod tests {
          assert!(default_server_capabilities().contains(&"kernel_bash_activity".to_string()));
      }
  
@@ -1119,10 +1119,10 @@ index a4f32c3..0196724 100644
      fn factory_activity_commands_are_session_scoped() {
          for (command, action, run_id, spec_id, timeout_ms) in [
 diff --git a/crates/pa-daemon/src/worker/commands.rs b/crates/pa-daemon/src/worker/commands.rs
-index 005ed7c..de5d24a 100644
+index d720269d8..a1d41de7f 100644
 --- a/crates/pa-daemon/src/worker/commands.rs
 +++ b/crates/pa-daemon/src/worker/commands.rs
-@@ -121,6 +121,8 @@ impl Worker {
+@@ -125,6 +125,8 @@ impl Worker {
              "get_mcp_connections" => self.handle_get_mcp_connections().await,
              "set_mcp_static_token" => self.handle_set_mcp_static_token(payload).await,
              "remove_mcp_connection" => self.handle_remove_mcp_connection(payload).await,
@@ -1132,7 +1132,7 @@ index 005ed7c..de5d24a 100644
              "get_context_tree" => self.handle_get_context_tree().await,
              "get_commands" => self.handle_get_commands().await,
 diff --git a/crates/pa-daemon/tests/command_breadth.rs b/crates/pa-daemon/tests/command_breadth.rs
-index 9befd7a..03b7633 100644
+index e3ebaf05f..04c6315ea 100644
 --- a/crates/pa-daemon/tests/command_breadth.rs
 +++ b/crates/pa-daemon/tests/command_breadth.rs
 @@ -516,6 +516,14 @@ const WIRE_FIXTURES: &[(&str, &str)] = &[
@@ -1150,7 +1150,7 @@ index 9befd7a..03b7633 100644
      (
          "mark_anthropic_warning_shown",
          r#"{"type": "mark_anthropic_warning_shown", "activeSessionId": "sess"}"#,
-@@ -544,6 +552,8 @@ fn known_command_types_match_the_ts_list() {
+@@ -556,6 +564,8 @@ fn known_command_types_match_the_ts_list() {
                      | "get_mcp_connections"
                      | "set_mcp_static_token"
                      | "remove_mcp_connection"
@@ -1160,10 +1160,10 @@ index 9befd7a..03b7633 100644
                      | "tail_kernel_bash"
                      | "kill_kernel_bash"
 diff --git a/crates/pa-types/src/daemon/command.rs b/crates/pa-types/src/daemon/command.rs
-index 2c8583a..d6bc115 100644
+index fb6bcaa37..97ede525a 100644
 --- a/crates/pa-types/src/daemon/command.rs
 +++ b/crates/pa-types/src/daemon/command.rs
-@@ -665,6 +665,36 @@ pub enum DaemonCommand {
+@@ -728,6 +728,36 @@ pub enum DaemonCommand {
          #[serde(flatten)]
          rest: JsonMap,
      },
@@ -1200,7 +1200,7 @@ index 2c8583a..d6bc115 100644
      ReplaceAcpMcpServers {
          #[serde(default, skip_serializing_if = "Option::is_none")]
          id: Option<String>,
-@@ -1262,4 +1292,47 @@ mod tests {
+@@ -1325,4 +1355,47 @@ mod tests {
      fn mark_anthropic_warning_shown_roundtrip() {
          rt::<DaemonCommand>(r#"{"type":"mark_anthropic_warning_shown","activeSessionId":"s1"}"#);
      }
@@ -1249,7 +1249,7 @@ index 2c8583a..d6bc115 100644
 +    }
  }
 diff --git a/crates/pa-types/src/daemon/plane.rs b/crates/pa-types/src/daemon/plane.rs
-index b79dd52..89a99b8 100644
+index 7d70510fb..8049dfc32 100644
 --- a/crates/pa-types/src/daemon/plane.rs
 +++ b/crates/pa-types/src/daemon/plane.rs
 @@ -52,6 +52,8 @@ pub fn command_plane(command_type: &str) -> DaemonCommandPlane {
@@ -1261,7 +1261,7 @@ index b79dd52..89a99b8 100644
          | "replace_acp_mcp_servers"
          | "get_model_catalog"
          | "get_available_models"
-@@ -133,6 +135,7 @@ const READ_ONLY_DAEMON_COMMANDS: &[&str] = &[
+@@ -135,6 +137,7 @@ const READ_ONLY_DAEMON_COMMANDS: &[&str] = &[
      "get_commands",
      "get_resource_snapshot",
      "get_mcp_connections",
@@ -1270,7 +1270,7 @@ index b79dd52..89a99b8 100644
      "get_available_models",
      "get_queue",
 diff --git a/prime-agent-runtime/src/rlm/repl.md b/prime-agent-runtime/src/rlm/repl.md
-index a448448..5c01a81 100644
+index a4484484e..5c01a819d 100644
 --- a/prime-agent-runtime/src/rlm/repl.md
 +++ b/prime-agent-runtime/src/rlm/repl.md
 @@ -33,7 +33,7 @@ event.
@@ -1295,7 +1295,7 @@ index a448448..5c01a81 100644
    for updates (no push events). Each row contains opaque `id`, `command`,
    `pid`, `durationMs`, and `status` (`running` or `finished`). Finished rows
 diff --git a/prime-agent-runtime/src/rlm/repl.py b/prime-agent-runtime/src/rlm/repl.py
-index fd76e26..14d0e3f 100644
+index eeb7d9122..2c8f586d3 100644
 --- a/prime-agent-runtime/src/rlm/repl.py
 +++ b/prime-agent-runtime/src/rlm/repl.py
 @@ -1308,6 +1308,13 @@ async def _handle_mcp_status(req: dict[str, Any], ns: dict[str, Any]) -> None:
@@ -1340,10 +1340,10 @@ index fd76e26..14d0e3f 100644
              pass
  
 diff --git a/prime-agent-runtime/test/test_repl.py b/prime-agent-runtime/test/test_repl.py
-index cce4c88..931c15c 100644
+index 81d6bd028..d410af6a2 100644
 --- a/prime-agent-runtime/test/test_repl.py
 +++ b/prime-agent-runtime/test/test_repl.py
-@@ -1582,6 +1582,23 @@ class ReplTest(unittest.TestCase):
+@@ -1668,6 +1668,23 @@ class ReplTest(unittest.TestCase):
          events = self.repl.execute("ms3", "'alive'")
          self.assertEqual(one(events, "result")["text"], "'alive'")
  
@@ -1367,7 +1367,7 @@ index cce4c88..931c15c 100644
      def test_list_names_skips_non_string_keys(self):
          self.repl.execute("lnk1", "globals()[1] = 1\nbeta = 2")
          self.repl.send({"type": "list_names", "id": "lnk2"})
-@@ -3019,6 +3036,64 @@ class SnapshotPairConsistencyTest(unittest.TestCase):
+@@ -3105,6 +3122,64 @@ class SnapshotPairConsistencyTest(unittest.TestCase):
                  dill.load(fh)
  
  

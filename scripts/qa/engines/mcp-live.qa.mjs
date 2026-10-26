@@ -172,13 +172,12 @@ try {
       agentId,
       {
         toolCallId,
-        toolName: 'ipython',
         code: nativeKernelCode('print("Engine2 MCP kernel up")'),
         prompt: 'Start the kernel for the MCP probe',
         timeoutMs: KERNEL_BOOTSTRAP_TIMEOUT_MS
       }
     )
-    assert.ok(inspectRequest(firstRequest).tools.includes('ipython'), 'ipython is declared')
+    assert.ok(inspectRequest(firstRequest).tools.includes('python_repl'), 'python_repl is declared')
     assert.notEqual(result.isError, true, result.text)
     assert.ok(result.text.includes('Engine2 MCP kernel up'), result.text)
   })

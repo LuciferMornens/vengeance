@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ChevronRight,
   ChevronUp,
+  Cpu,
   GitBranch,
   Layers,
   Puzzle,
@@ -30,6 +31,8 @@ import { Badge, Button, Shimmer, Spinner } from '../../ui'
 import { Collapse } from '../../ui/Collapse'
 import { CopyButton } from '../../ui/CopyButton'
 import { Markdown } from '../../ui/Markdown'
+import { openModelPicker } from '../composer/model-pill'
+import { supportsAgentCommand } from '../composer/operations'
 import { SIGN_IN_EXPIRED } from '../settings/provider-status'
 import { Console, ExitBadge, PromptIcon } from '../tools'
 import { useCatalogProviders } from './catalog-providers'
@@ -349,7 +352,27 @@ export const AssistantErrorCard = memo(function AssistantErrorCard({
       />
     )
   const meta = [parsed.status, parsed.code, message.model].filter(Boolean).join(' · ')
-  return <ErrorCard title={title} detail={parsed.detail} meta={meta} raw={parsed.raw} />
+  return (
+    <ErrorCard
+      title={title}
+      detail={parsed.detail}
+      meta={meta}
+      raw={parsed.raw}
+      action={
+        parsed.overloaded && supportsAgentCommand(agentId, 'set_model') ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            leading={<Cpu />}
+            className="shrink-0"
+            onClick={() => openModelPicker(agentId)}
+          >
+            Change model
+          </Button>
+        ) : undefined
+      }
+    />
+  )
 })
 
 /**

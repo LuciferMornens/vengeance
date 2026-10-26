@@ -15,6 +15,7 @@ import { isAlive, processTable } from '../lib/processes.mjs'
 import { closeSettings, openSettings, waitFor } from '../settings/settings-ui.mjs'
 import { createHeapSampler } from './heap-sampler.mjs'
 import { runFixedCorpus } from './fixed-corpus.mjs'
+import { PYTHON_TOOLS } from '../lib/native-kernel.mjs'
 
 const FIXED_CORPUS_ONLY = process.argv.includes('--fixed-corpus')
 const SUITE_NAME = FIXED_CORPUS_ONLY ? 'performance-fixed-corpus' : 'performance-session-churn'
@@ -153,7 +154,7 @@ async function runNativeTool(application, fixture, engine, name, toolId) {
   let argumentsObject = { command: 'node churn-output.mjs' }
   if (engine === 'prime') {
     toolName = inspectRequest(server.requests.at(-1)).tools.find(
-      (candidate) => candidate === 'ipython' || candidate === 'python'
+      (candidate) => PYTHON_TOOLS.includes(candidate)
     )
     assert.ok(toolName, 'native Python tool is advertised to its model')
     argumentsObject = {
@@ -210,7 +211,7 @@ async function abortNativeTool(application, fixture, engine) {
     engine === 'pi'
       ? 'bash'
       : inspectRequest(server.requests.at(-1)).tools.find(
-          (candidate) => candidate === 'ipython' || candidate === 'python'
+          (candidate) => PYTHON_TOOLS.includes(candidate)
         )
   assert.ok(toolName)
   const argumentsObject =

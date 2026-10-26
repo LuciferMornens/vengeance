@@ -1,47 +1,6 @@
-From e1f16f9a0c6d34a04fa6b599d2e3152650490886 Mon Sep 17 00:00:00 2001
-From: Vengeance <126121081+LuciferMornens@users.noreply.github.com>
-Date: Mon, 12 Oct 2026 10:41:19 +0200
-Subject: [PATCH 1/2] fix: cancel provider HTTP streams when compaction is
- dropped
-
----
- .../src/session_engine/compaction_exec.rs     |   6 +
- crates/pa-core/tests/compaction_http_abort.rs | 267 ++++++++++++++++++
- 2 files changed, 273 insertions(+)
- create mode 100644 crates/pa-core/tests/compaction_http_abort.rs
-
-diff --git a/crates/pa-core/src/session_engine/compaction_exec.rs b/crates/pa-core/src/session_engine/compaction_exec.rs
-index b27a3987b..796f821ad 100644
---- a/crates/pa-core/src/session_engine/compaction_exec.rs
-+++ b/crates/pa-core/src/session_engine/compaction_exec.rs
-@@ -9,6 +9,7 @@ use super::messages::convert_to_llm;
- use pa_types::ai::{AssistantMessage, TextContent, UserContent, UserContentBlock, UserMessage};
- use pa_types::session::{AgentMessage, CompactionEntry, FileEntry};
- use std::fmt::Write as _;
-+use tokio_util::sync::CancellationToken;
- 
- /// Details stored on the compaction entry for file tracking.
- #[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-@@ -153,11 +154,16 @@ pub async fn complete_summary_call(
-         messages,
-         tools: None,
-     };
-+    // Provider streams run in their own tasks, so dropping the summary future must
-+    // cancel their transport too, including both calls in a split compaction.
-+    let cancellation = CancellationToken::new();
-+    let _cancel_on_drop = cancellation.clone().drop_guard();
-     let stream_options =
-         pa_ai::types::SimpleStreamOptions::from_base(pa_ai::types::StreamOptions {
-             max_tokens: Some(max_tokens),
-             api_key,
-             headers: headers.map(|headers| headers.into_iter().collect()),
-+            signal: Some(cancellation),
-             ..Default::default()
-         });
-     let assistant = match on_delta {
 diff --git a/crates/pa-core/tests/compaction_http_abort.rs b/crates/pa-core/tests/compaction_http_abort.rs
 new file mode 100644
-index 000000000..3c5f8b05c
+index 000000000..6ac384d59
 --- /dev/null
 +++ b/crates/pa-core/tests/compaction_http_abort.rs
 @@ -0,0 +1,267 @@
@@ -305,10 +264,10 @@ index 000000000..3c5f8b05c
 +
 +#[tokio::test]
 +async fn abort_closes_completion_http_and_allows_the_next_compaction() {
-+    verify_compaction_abort(SummaryMode::Completion).await;
++    Box::pin(verify_compaction_abort(SummaryMode::Completion)).await;
 +}
 +
 +#[tokio::test]
 +async fn abort_closes_both_split_summary_streams_and_allows_the_next_compaction() {
-+    verify_compaction_abort(SummaryMode::SplitStreaming).await;
++    Box::pin(verify_compaction_abort(SummaryMode::SplitStreaming)).await;
 +}

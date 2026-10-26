@@ -1,5 +1,5 @@
 diff --git a/crates/pa-cli/src/client_update.rs b/crates/pa-cli/src/client_update.rs
-index 7c820e9..42810da 100644
+index 7c820e989..42810da26 100644
 --- a/crates/pa-cli/src/client_update.rs
 +++ b/crates/pa-cli/src/client_update.rs
 @@ -14,6 +14,9 @@ pub struct ClientUpdate;
@@ -13,7 +13,7 @@ index 7c820e9..42810da 100644
                  .ok()
                  .as_deref()
 diff --git a/crates/pa-cli/src/config.rs b/crates/pa-cli/src/config.rs
-index 61442be..75f6798 100644
+index 61442befa..75f679823 100644
 --- a/crates/pa-cli/src/config.rs
 +++ b/crates/pa-cli/src/config.rs
 @@ -46,10 +46,16 @@ pub const ENV_LEGACY_SESSION_DIR: &str = "PRIME_AGENT_CODING_AGENT_SESSION_DIR";
@@ -34,7 +34,7 @@ index 61442be..75f6798 100644
          Some(version) => version,
          None => crate::config::VERSION.to_string(),
 diff --git a/crates/pa-cli/src/installer_update.rs b/crates/pa-cli/src/installer_update.rs
-index 0ecbbdd..5e9bb5a 100644
+index 0ecbbdd22..5e9bb5acb 100644
 --- a/crates/pa-cli/src/installer_update.rs
 +++ b/crates/pa-cli/src/installer_update.rs
 @@ -84,6 +84,10 @@ pub fn requested_installer_channel(flag: Option<UpdateChannel>) -> &'static str
@@ -60,7 +60,7 @@ index 0ecbbdd..5e9bb5a 100644
          Ok(archive) => archive,
          Err(error) => {
 diff --git a/crates/pa-cli/src/self_update.rs b/crates/pa-cli/src/self_update.rs
-index e0b9275..81081bf 100644
+index e0b9275ac..81081bff5 100644
 --- a/crates/pa-cli/src/self_update.rs
 +++ b/crates/pa-cli/src/self_update.rs
 @@ -72,6 +72,10 @@ pub fn confirm_nightly_switch(

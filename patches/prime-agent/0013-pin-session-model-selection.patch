@@ -1,7 +1,9 @@
 diff --git a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
+index 9ea3dd91f..134995b8e 100644
 --- a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
 +++ b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
-@@ -246,6 +246,13 @@ impl SessionEngine for AgentSessionEngine {
+@@ -245,7 +245,14 @@ impl SessionEngine for AgentSessionEngine {
+     }
  
      fn creation_model(&self) -> Option<(String, String)> {
 -        let model = self.resolve_registry_model().ok()?;
@@ -18,7 +20,7 @@ diff --git a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs b/crates/p
  
 diff --git a/crates/pa-daemon/tests/model_isolation.rs b/crates/pa-daemon/tests/model_isolation.rs
 new file mode 100644
-index 0000000..433a936
+index 000000000..433a936f0
 --- /dev/null
 +++ b/crates/pa-daemon/tests/model_isolation.rs
 @@ -0,0 +1,75 @@
