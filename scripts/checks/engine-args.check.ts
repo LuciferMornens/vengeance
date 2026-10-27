@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { launchOptionsToArgs } from '../../src/shared/api/launch'
 import { buildEngineArgs } from '../../src/main/engine/manager'
+import { formatEngineArgs } from '../../src/renderer/features/launch/options'
 import { check } from './harness'
 
 await check('launchOptionsToArgs: every option maps to its documented flag', () => {
@@ -98,4 +99,13 @@ await check('buildEngineArgs: conversation instructions join the launch prompt f
     ]
   )
   assert.deepEqual(buildEngineArgs({ cwd: 'C:/w', noSession: true, conversationPrompt }), ['--no-session'])
+})
+
+await check('formatEngineArgs: plain flags and paths unquoted; quotes escaped as argv parsing reads them', () => {
+  assert.equal(formatEngineArgs(['--model', 'anthropic/claude-x', 'C:\\Users\\dev\\work']), '--model anthropic/claude-x C:\\Users\\dev\\work')
+  assert.equal(formatEngineArgs(['C:\\Program Files\\x']), '"C:\\Program Files\\x"')
+  assert.equal(formatEngineArgs(['say "hi"']), '"say \\"hi\\""')
+  // Backslashes before a quote or the closing quote double, so they stay literal.
+  assert.equal(formatEngineArgs(['C:\\my dir\\']), '"C:\\my dir\\\\"')
+  assert.equal(formatEngineArgs(['a\\"b c']), '"a\\\\\\"b c"')
 })
