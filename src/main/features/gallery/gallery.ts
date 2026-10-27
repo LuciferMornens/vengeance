@@ -85,6 +85,6 @@ export async function galleryPackage(name: string): Promise<GalleryPackageDetail
   if (env.mock) return (await import('./mock')).mockDetail(name)
   assertOnline()
   return cached(`package:${name}`, async () =>
-    parseManifest(name, await getJson(`${REGISTRY}/${name.replace('/', '%2F')}/latest`))
+    parseManifest(name, await getJson(`${REGISTRY}/${name.replaceAll('/', '%2F')}/latest`))
   )
 }

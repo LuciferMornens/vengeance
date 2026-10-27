@@ -18,7 +18,7 @@ try {
     setup(bundler) {
       bundler.onResolve({ filter: /^electron$/ }, () => ({ path: 'electron', namespace: 'stub' }))
       bundler.onLoad({ filter: /^electron$/, namespace: 'stub' }, () => ({
-        contents: `export const app = { isPackaged: false, getAppPath: () => ${JSON.stringify(tempRoot)} }`,
+        contents: 'export const app = { isPackaged: false, getAppPath: () => globalThis.__traceAppPath }',
         loader: 'js'
       }))
       bundler.onResolve({ filter: /^node:child_process$/ }, () => ({
@@ -98,6 +98,7 @@ try {
     plugins: [stub],
     logLevel: 'silent'
   })
+  globalThis.__traceAppPath = tempRoot
   const { runPrimeTraces } = await import(pathToFileURL(bundlePath).href)
   const cwd = join(tempRoot, 'workspace')
   const sessionFile = join(tempRoot, 'session.jsonl')

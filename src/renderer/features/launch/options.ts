@@ -148,9 +148,13 @@ export function mergeLaunchOptions(
   )
 }
 
-/** Quote one argument for display (never executed). */
+/**
+ * Quote one argument for display (never executed). Backslashes stay literal unless they precede a
+ * quote, as argv parsing reads them, so Windows paths keep their single backslashes.
+ */
 function quoteArg(arg: string): string {
-  return /^[\w@%+=:,./\\*-]+$/.test(arg) ? arg : `"${arg.replace(/"/g, '\\"')}"`
+  if (/^[\w@%+=:,./\\*-]+$/.test(arg)) return arg
+  return `"${arg.replace(/(\\*)("|$)/g, (_, slashes: string, quote: string) => `${slashes}${slashes}${quote && '\\"'}`)}"`
 }
 
 export function formatEngineArgs(args: string[]): string {
