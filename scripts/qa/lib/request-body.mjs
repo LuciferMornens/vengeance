@@ -1,12 +1,25 @@
 import { promisify } from 'node:util'
 import { brotliDecompress, gunzip, inflate, zstdDecompress } from 'node:zlib'
 
-const decompressors = new Map([
-  ['br', promisify(brotliDecompress)],
-  ['gzip', promisify(gunzip)],
-  ['deflate', promisify(inflate)],
-  ['zstd', promisify(zstdDecompress)]
-])
+const brotli = promisify(brotliDecompress)
+const gzip = promisify(gunzip)
+const deflate = promisify(inflate)
+const zstd = promisify(zstdDecompress)
+
+function decompress(encoding, bytes) {
+  switch (encoding) {
+    case 'br':
+      return brotli(bytes)
+    case 'gzip':
+      return gzip(bytes)
+    case 'deflate':
+      return deflate(bytes)
+    case 'zstd':
+      return zstd(bytes)
+    default:
+      throw new Error(`Unsupported request encoding: ${encoding}`)
+  }
+}
 
 /** Native Codex transports compress their JSON request bodies. */
 export async function readRequestText(incoming) {
@@ -15,7 +28,5 @@ export async function readRequestText(incoming) {
   const bytes = Buffer.concat(chunks)
   const encoding = incoming.headers['content-encoding']
   if (!encoding || encoding === 'identity') return bytes.toString('utf8')
-  const decompress = decompressors.get(encoding)
-  if (!decompress) throw new Error(`Unsupported request encoding: ${encoding}`)
-  return (await decompress(bytes)).toString('utf8')
+  return (await decompress(encoding, bytes)).toString('utf8')
 }
