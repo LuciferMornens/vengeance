@@ -1,0 +1,192 @@
+diff --git a/packages/ai/src/api/transform-messages.ts b/packages/ai/src/api/transform-messages.ts
+index d6bbba5..d3bb193 100644
+--- a/packages/ai/src/api/transform-messages.ts
++++ b/packages/ai/src/api/transform-messages.ts
+@@ -83,6 +83,46 @@ function downgradeUnsupportedImages<TApi extends Api>(messages: Message[], model
+ 	});
+ }
+ 
++/**
++ * Keep the newest `inputLimits.images.maxPerRequest` images and replace each run of older ones with a
++ * note, so a long conversation does not exceed the provider's per-request image count.
++ */
++function limitImagesPerRequest<TApi extends Api>(messages: Message[], model: Model<TApi>): Message[] {
++	const maxPerRequest = model.inputLimits?.images?.maxPerRequest;
++	if (maxPerRequest === undefined) return messages;
++	const placeholder = `(older image omitted: the model accepts at most ${maxPerRequest} images per request)`;
++	let remaining = maxPerRequest;
++	const limited = [...messages];
++
++	for (let i = limited.length - 1; i >= 0; i--) {
++		const msg = limited[i];
++		if ((msg.role !== "user" && msg.role !== "toolResult") || !Array.isArray(msg.content)) continue;
++		const imageCount = msg.content.filter((block) => block.type === "image").length;
++		if (imageCount <= remaining) {
++			remaining -= imageCount;
++			continue;
++		}
++
++		let omitted = imageCount - remaining;
++		remaining = 0;
++		const content: (TextContent | ImageContent)[] = [];
++		let previousWasPlaceholder = false;
++		for (const block of msg.content) {
++			if (block.type === "image" && omitted > 0) {
++				omitted--;
++				if (!previousWasPlaceholder) content.push({ type: "text", text: placeholder });
++				previousWasPlaceholder = true;
++				continue;
++			}
++			content.push(block);
++			previousWasPlaceholder = false;
++		}
++		limited[i] = { ...msg, content };
++	}
++
++	return limited;
++}
++
+ /**
+  * Normalize tool call ID for cross-provider compatibility.
+  * OpenAI Responses API generates IDs that are 450+ chars with special characters like `|`.
+@@ -98,7 +138,7 @@ export function transformMessages<TApi extends Api>(
+ 	// Normalize null/undefined content from untyped callers (custom tools, hand-built
+ 	// histories, old session files) so downstream code can rely on the type contract.
+ 	const normalizedMessages = messages.map((msg) => (msg.content == null ? { ...msg, content: [] } : msg));
+-	const imageAwareMessages = downgradeUnsupportedImages(normalizedMessages, model);
++	const imageAwareMessages = limitImagesPerRequest(downgradeUnsupportedImages(normalizedMessages, model), model);
+ 
+ 	// First pass: transform messages (unsupported image downgrade, thinking blocks, tool call ID normalization)
+ 	const transformed = imageAwareMessages.map((msg) => {
+diff --git a/packages/ai/test/transform-messages-image-limit.test.ts b/packages/ai/test/transform-messages-image-limit.test.ts
+new file mode 100644
+index 0000000..86957c3
+--- /dev/null
++++ b/packages/ai/test/transform-messages-image-limit.test.ts
+@@ -0,0 +1,113 @@
++import { describe, expect, it } from "vitest";
++import { transformMessages } from "../src/api/transform-messages.ts";
++import type { AssistantMessage, ImageContent, Message, Model } from "../src/types.ts";
++
++const vision: Model<"openai-completions"> = {
++	id: "vision-model",
++	name: "Vision Model",
++	api: "openai-completions",
++	provider: "test",
++	baseUrl: "https://example.invalid/v1",
++	reasoning: false,
++	input: ["text", "image"],
++	inputLimits: { images: { maxPerRequest: 4 } },
++	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
++	contextWindow: 128000,
++	maxTokens: 8192,
++};
++
++const note = "(older image omitted: the model accepts at most 4 images per request)";
++
++function image(data: string): ImageContent {
++	return { type: "image", data, mimeType: "image/png" };
++}
++
++function readCall(id: string): AssistantMessage {
++	return {
++		role: "assistant",
++		content: [{ type: "toolCall", id, name: "read", arguments: { path: `${id}.png` } }],
++		api: "openai-completions",
++		provider: "test",
++		model: "vision-model",
++		usage: {
++			input: 0,
++			output: 0,
++			cacheRead: 0,
++			cacheWrite: 0,
++			totalTokens: 0,
++			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
++		},
++		stopReason: "toolUse",
++		timestamp: 0,
++	};
++}
++
++function readResult(id: string): Message {
++	return {
++		role: "toolResult",
++		toolCallId: id,
++		toolName: "read",
++		content: [{ type: "text", text: "Read image file [image/png]" }, image(id)],
++		isError: false,
++		timestamp: 0,
++	};
++}
++
++function imageData(messages: Message[]): string[] {
++	return messages.flatMap((msg) =>
++		(msg.role === "user" || msg.role === "toolResult") && Array.isArray(msg.content)
++			? msg.content.flatMap((block) => (block.type === "image" ? [block.data] : []))
++			: [],
++	);
++}
++
++describe("per-request image limit", () => {
++	it("keeps the newest images and notes each run of older ones", () => {
++		const messages: Message[] = [
++			{
++				role: "user",
++				content: [{ type: "text", text: "Compare these" }, image("u1"), image("u2"), image("u3")],
++				timestamp: 0,
++			},
++			readCall("r1"),
++			readResult("r1"),
++			readCall("r2"),
++			readResult("r2"),
++			{ role: "user", content: [image("u4"), image("u5")], timestamp: 0 },
++		];
++
++		const result = transformMessages(messages, vision);
++
++		expect(imageData(result)).toEqual(["r1", "r2", "u4", "u5"]);
++		expect(result[0].content).toEqual([
++			{ type: "text", text: "Compare these" },
++			{ type: "text", text: note },
++		]);
++		expect(messages[0].content).toHaveLength(4);
++	});
++
++	it("drops the oldest images within one message and leaves requests under the limit unchanged", () => {
++		const crowded: Message[] = [
++			{
++				role: "user",
++				content: [image("a"), image("b"), { type: "text", text: "and" }, image("c"), image("d"), image("e")],
++				timestamp: 0,
++			},
++		];
++		expect(transformMessages(crowded, vision)[0].content).toEqual([
++			{ type: "text", text: note },
++			image("b"),
++			{ type: "text", text: "and" },
++			image("c"),
++			image("d"),
++			image("e"),
++		]);
++
++		const within: Message[] = [
++			{ role: "user", content: [image("a"), image("b"), image("c"), image("d")], timestamp: 0 },
++		];
++		expect(transformMessages(within, vision)).toEqual(within);
++		const { inputLimits: _limits, ...unlimited } = vision;
++		expect(imageData(transformMessages(crowded, unlimited))).toEqual(["a", "b", "c", "d", "e"]);
++	});
++});
+diff --git a/packages/coding-agent/docs/models.md b/packages/coding-agent/docs/models.md
+index e076ac1..6143463 100644
+--- a/packages/coding-agent/docs/models.md
++++ b/packages/coding-agent/docs/models.md
+@@ -99,7 +99,7 @@ Use `inputLimits.images.resize` to control how Pi encodes new image attachments,
+ }
+ ```
+ 
+-`maxBytes` limits the base64-encoded payload. Omitted resize fields use conservative defaults of 2000 by 2000 pixels, 4.5 MiB encoded, and JPEG quality 80. Images are encoded once; changing models does not rewrite historical images. The catalog can also describe hard request limits with `inputLimits.maxRequestBytes`, `images.maxPerMessage`, and `images.maxPerRequest`, but Pi does not yet rewrite or reject history based on them.
++`maxBytes` limits the base64-encoded payload. Omitted resize fields use conservative defaults of 2000 by 2000 pixels, 4.5 MiB encoded, and JPEG quality 80. Images are encoded once; changing models does not rewrite historical images. The catalog can also describe hard request limits with `inputLimits.maxRequestBytes`, `images.maxPerMessage`, and `images.maxPerRequest`. Pi keeps the newest `images.maxPerRequest` images in each request and replaces older ones with a note; it does not yet rewrite or reject history based on the other two.
+ 
+ <a id="prompt-cache-lifetimes"></a>
+ 

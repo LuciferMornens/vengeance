@@ -21,7 +21,7 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 
 `engines.lock.json` is the source of truth. Current stable bases are pi `v1.4.0` at
 `4a080252f06caf63a525d7873c5d94d3c23887e0` and Prime `v0.10.1` at
-`8aac8692456c00c01d4e53e60e6d3347a3506559`. The builds identify as `1.4.0+vengeance.1` and
+`8aac8692456c00c01d4e53e60e6d3347a3506559`. The builds identify as `1.4.0+vengeance.2` and
 `0.10.1+vengeance.1`. Never reuse a Vengeance build version for different shipped behavior.
 
 The current stable-release verification and patch decisions are recorded in
@@ -234,6 +234,23 @@ which never marks a credential), and that OpenAI's flows still read the `code` o
 Retire the patch when upstream recognizes rejected refresh tokens and stops offering their
 providers.
 
+### Per-request image limits
+
+pi build `1.4.0+vengeance.2` adds patch `0011`. Upstream's catalog declares
+`inputLimits.images.maxPerRequest` but never applies it, so every image in the history (pasted or
+read by a tool) is resent on each turn and a provider with a low cap rejects every request once the
+conversation passes it. Abliteration's Chat Completions answers a fifth image anywhere in the request
+with `400 media_count_exceeded` on Abliterated Model and Large Flash (checked against the live API on
+29 October 2026: four images pass, five in one message and three plus three across two messages
+fail). The patch keeps the newest `maxPerRequest` images and replaces each run of older ones with
+a note naming the limit, for every API that uses `transformMessages`; saved sessions keep every
+image, so a model with a higher cap still sees them. Patch `0006` declares the limit of 4 for both
+Abliteration vision models. `maxPerMessage` and `maxRequestBytes` stay declarative.
+
+Qualify on every base: the native `transform-messages-image-limit.test.ts` and
+`abliteration.test.ts`. Retire the patch when upstream applies `maxPerRequest`; raise or drop
+Abliteration's value when its API accepts more images.
+
 ## Platforms
 
 Every platform builds natively on its own host; nothing is cross-compiled. `engines.lock.json` schema
@@ -327,7 +344,7 @@ background activity stays out of the Dock. The main Vengeance app must remain a 
 
 Since 0.3.3, the macOS arm64/x64 and Linux arm64/x64 release runners then qualify the official
 same-platform 0.3.2 Engine 2 package (`0.10.0+vengeance.10`) against the final packaged candidate
-(`.12` in 0.3.3, `.13` in 0.3.4 to 0.3.6, and `0.10.1+vengeance.1` in 0.3.7).
+(`.12` in 0.3.3, `.13` in 0.3.4 to 0.3.6, and `0.10.1+vengeance.1` in 0.3.7 and 0.3.8).
 `scripts/qa/engines/release-baseline.mjs` pins both the public release's `SHA256SUMS` and each archive's
 SHA-256, verifies the complete extracted native inventories and macOS app signature, and emits
 `release-baseline.json` plus `release-baseline-env.json`. It never launches the production app.
@@ -341,7 +358,7 @@ This upgrade group follows the nine core suites and macOS visibility gate, befor
 benchmarking. Windows's `.10` to `.11` native transition is covered by the retained PR qualification
 report; that historical evidence does not qualify `.12` or later builds. The Intel wheel patch
 changes no Windows dependency resolution. pi is `1.3.0+vengeance.2` in 0.3.2 and 0.3.3,
-`1.3.0+vengeance.3` in 0.3.4 and `1.3.0+vengeance.4` in 0.3.5 and 0.3.6, all on the `v1.3.0` base, then `1.4.0+vengeance.1` in 0.3.7. Its historical 1.2 to 1.3 transition fixture
+`1.3.0+vengeance.3` in 0.3.4 and `1.3.0+vengeance.4` in 0.3.5 and 0.3.6, all on the `v1.3.0` base, then `1.4.0+vengeance.1` in 0.3.7 and `1.4.0+vengeance.2` in 0.3.8. Its historical 1.2 to 1.3 transition fixture
 is not used as a release upgrade gate.
 
 Each of the five release runners then runs
