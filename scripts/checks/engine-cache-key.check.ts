@@ -339,12 +339,28 @@ await check('engine cache: a missing entry fails the job that builds it', () => 
     const option = (step: YamlMap, key: string): Yaml | undefined => asMap(step.with, job.name)[key]
     assert.equal(option(job.lookup, 'lookup-only'), true, `${job.name}: a hit downloads nothing`)
     assert.equal(job.saves.length, 1, `${job.name} saves once`)
-    assert.equal(job.confirms.length, 1, `${job.name} confirms the entry once`)
-    const [save, confirm] = [job.saves[0]!, job.confirms[0]!]
+    // A just-saved entry can take a moment to become visible: the first lookup may miss, and only
+    // the lookup after a wait fails the job.
+    assert.equal(job.confirms.length, 2, `${job.name} confirms the entry, then once more`)
+    const [save, confirm, retry] = [job.saves[0]!, job.confirms[0]!, job.confirms[1]!]
     assert.ok(job.steps.indexOf(confirm) > job.steps.indexOf(save), `${job.name}: then confirms`)
     assert.equal(confirm.if, save.if, `${job.name}: confirms whenever it saves`)
     assert.equal(option(confirm, 'lookup-only'), true, `${job.name}: confirms by lookup`)
-    assert.equal(option(confirm, 'fail-on-cache-miss'), true, `${job.name}: fails on a miss`)
+    assert.equal(
+      option(confirm, 'fail-on-cache-miss'),
+      undefined,
+      `${job.name}: a first miss waits`
+    )
+    const missed = `${save.if} && steps.${asText(confirm.id, job.name)}.outputs.cache-hit != 'true'`
+    const all = asList(job.job.steps, job.name).map((step) => asMap(step, job.name))
+    const wait = all.slice(all.indexOf(confirm) + 1, all.indexOf(retry))
+    assert.ok(
+      wait.some((step) => step.if === missed && /^sleep \d+$/.test(String(step.run))),
+      `${job.name}: waits after a miss`
+    )
+    assert.equal(retry.if, missed, `${job.name}: looks again only after a miss`)
+    assert.equal(option(retry, 'lookup-only'), true, `${job.name}: looks again by lookup`)
+    assert.equal(option(retry, 'fail-on-cache-miss'), true, `${job.name}: fails on a second miss`)
   }
   for (const job of restorers) {
     assert.equal(job.steps.length, 1, `${job.name} only restores`)
