@@ -166,8 +166,22 @@ jobs:
           key: ${{ steps.cache.outputs.cache-primary-key }}
       # The save only warns when it cannot reserve the key or upload the entry. Failing here instead
       # makes re-running this job rebuild it, rather than leaving the checks and shots to miss it.
+      # A just-saved entry can take a moment to become visible, so a miss is looked up once more.
       - name: Confirm the staged engines are cached
+        id: confirm
         if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .engine-staging/bundled
+            resources/prime-auth/bin
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+          lookup-only: true
+      - name: Wait for the cache entry to become visible
+        if: steps.cache.outputs.cache-hit != 'true' && steps.confirm.outputs.cache-hit != 'true'
+        run: sleep 30
+      - name: Confirm the staged engines are cached after waiting
+        if: steps.cache.outputs.cache-hit != 'true' && steps.confirm.outputs.cache-hit != 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -258,8 +272,22 @@ jobs:
             .engine-staging/bundled
             resources/prime-auth/bin
           key: ${{ steps.cache.outputs.cache-primary-key }}
+      # A just-saved entry can take a moment to become visible, so a miss is looked up once more.
       - name: Confirm the staged engines are cached
+        id: confirm
         if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .engine-staging/bundled
+            resources/prime-auth/bin
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+          lookup-only: true
+      - name: Wait for the cache entry to become visible
+        if: steps.cache.outputs.cache-hit != 'true' && steps.confirm.outputs.cache-hit != 'true'
+        run: sleep 30
+      - name: Confirm the staged engines are cached after waiting
+        if: steps.cache.outputs.cache-hit != 'true' && steps.confirm.outputs.cache-hit != 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
