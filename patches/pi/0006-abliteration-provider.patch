@@ -12,10 +12,10 @@ index 560dce8a..72637526 100644
  		"qwen-token-plan-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
 diff --git a/packages/ai/src/providers/abliteration.ts b/packages/ai/src/providers/abliteration.ts
 new file mode 100644
-index 00000000..38822c29
+index 00000000..53e92d26
 --- /dev/null
 +++ b/packages/ai/src/providers/abliteration.ts
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,109 @@
 +import { openAICompletionsApi } from "../api/openai-completions.lazy.ts";
 +import { envApiKeyAuth } from "../auth/helpers.ts";
 +import { createProvider, type Provider } from "../models.ts";
@@ -48,7 +48,8 @@ index 00000000..38822c29
 +	max: "max",
 +} as const;
 +
-+// Provider limits and USD per million tokens: docs.abliteration.ai/models and GET /v1/models.
++// Provider limits and USD per million tokens: docs.abliteration.ai/models and GET /v1/models. Chat Completions
++// rejects a request with more than four images (400 media_count_exceeded).
 +export const ABLITERATION_MODELS = {
 +	"abliterated-model": {
 +		...modelDefaults,
@@ -63,6 +64,7 @@ index 00000000..38822c29
 +					maxBytes: 4.5 * 1024 * 1024,
 +					jpegQuality: 80,
 +				},
++				maxPerRequest: 4,
 +			},
 +		},
 +		contextWindow: 262144,
@@ -83,6 +85,7 @@ index 00000000..38822c29
 +					maxBytes: 4.5 * 1024 * 1024,
 +					jpegQuality: 80,
 +				},
++				maxPerRequest: 4,
 +			},
 +		},
 +		contextWindow: 1048576,
@@ -173,10 +176,10 @@ index c0f3b562..5d5d2f98 100644
  	| "anthropic"
 diff --git a/packages/ai/test/abliteration.test.ts b/packages/ai/test/abliteration.test.ts
 new file mode 100644
-index 00000000..05e4ce22
+index 00000000..21059f47
 --- /dev/null
 +++ b/packages/ai/test/abliteration.test.ts
-@@ -0,0 +1,57 @@
+@@ -0,0 +1,59 @@
 +import { describe, expect, it } from "vitest";
 +import { findEnvKeys, getEnvApiKey } from "../src/env-api-keys.ts";
 +import { getSupportedThinkingLevels } from "../src/models.ts";
@@ -217,7 +220,7 @@ index 00000000..05e4ce22
 +		expect((await models.getAvailable("abliteration")).map((model) => model.id)).toHaveLength(4);
 +	});
 +
-+	it("offers every effort, Off except on Large v2, and vision on the base model and Large Flash", () => {
++	it("offers every effort, Off except on Large v2, and four-image vision on the base model and Large Flash", () => {
 +		const every = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 +		const base = getBuiltinModel("abliteration", "abliterated-model");
 +		const large = getBuiltinModel("abliteration", "abliterated-model-large");
@@ -232,6 +235,8 @@ index 00000000..05e4ce22
 +		expect(large.input).toEqual(["text"]);
 +		expect(largeV2.input).toEqual(["text"]);
 +		expect(flash).toMatchObject({ contextWindow: 1048576, maxTokens: 262144, cost: { input: 1, output: 2 } });
++		expect(base.inputLimits?.images?.maxPerRequest).toBe(4);
++		expect(flash.inputLimits?.images?.maxPerRequest).toBe(4);
 +	});
 +});
 diff --git a/packages/coding-agent/src/core/model-resolver.ts b/packages/coding-agent/src/core/model-resolver.ts

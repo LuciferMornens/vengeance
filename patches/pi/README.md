@@ -1,13 +1,13 @@
 # Vengeance's pi build
 
 Vengeance builds stable `v1.4.0`, commit `4a080252f06caf63a525d7873c5d94d3c23887e0`,
-as `1.4.0+vengeance.1`. See [UPSTREAM.md](../../UPSTREAM.md) and
+as `1.4.0+vengeance.2`. See [UPSTREAM.md](../../UPSTREAM.md) and
 [engines.lock.json](../../engines.lock.json) for the source and maintenance contract.
 
 The active series includes distribution policy (0001), extension runtime version identity (0002),
 native runtime qualification (0003), Windows native test fixtures (0005), Abliteration (0006),
-native session sharing (0007), POSIX shell test paths (0008), MCP host state (0009) and OAuth
-refresh rejection (0010).
+native session sharing (0007), POSIX shell test paths (0008), MCP host state (0009), OAuth
+refresh rejection (0010) and the per-request image limit (0011).
 Patch `0005` normalizes the external-editor fixture's temporary path on Windows. Patch `0006`
 also supplies Abliteration's native default model, required by the 1.3 provider-selection contract.
 Rebasing onto 1.4.0 needed two reviewed resolutions: the chord package-boundary test, where 1.4.0's
@@ -37,7 +37,9 @@ the pinned catalog files. It supports native API-key login and `ABLIT_KEY`, all 
 Large v2 and the deprecated Large), session-affinity headers, current prices and model-specific
 thinking and image capabilities. Chat Completions accepts every `reasoning_effort` from `none` to
 `max` on all four (checked against the live API on 26 October 2026); Large v2 cannot turn reasoning
-off. Names, limits, image input and prices follow `GET /v1/models`.
+off. Names, limits, image input and prices follow `GET /v1/models`. Abliterated Model and Large Flash
+reject a request with more than four images (`400 media_count_exceeded`), so both declare
+`images.maxPerRequest: 4`, which patch `0011` applies.
 The native `abliteration.test.ts` and `scripts/qa/auth/abliteration.qa.mjs` qualify the integration;
 see `UPSTREAM.md` for the provider documentation and retirement criteria.
 
@@ -81,8 +83,7 @@ Code and Radius) now reports a token endpoint error response with a JSON body as
 and the error code: the RFC 6749 `error` string, or the `code` of the `error` object OpenAI's
 authorization server sends. Some flows raise it from login too, which never marks a credential. Only
 a rejected refresh token marks the stored credential: `invalid_grant`, or OpenAI's
-`refresh_token_expired`, `refresh_token_reused` or `refresh_token_invalidated`, with HTTP 400 or
-401. The credential keeps every field and gains `refreshRejectedAt` (epoch milliseconds) under the
+`refresh_token_expired`, `refresh_token_reused` or `refresh_token_invalidated`, with HTTP 400 or 401. The credential keeps every field and gains `refreshRejectedAt` (epoch milliseconds) under the
 same credential-store lock as the refresh. Timeouts, network errors, server errors, cancellation,
 lock failures and other error codes never mark it. A marked credential leaves its provider
 unconfigured, since a stored credential owns its provider and environment keys do not replace it:
@@ -109,6 +110,13 @@ registered symbol, not `instanceof`. The native `oauth-refresh-rejection.test.ts
 `suite/agent-session-prompt.test.ts` qualify it, with the existing OAuth flow, `models-runtime`,
 model runtime and model registry suites for the unchanged behavior. Retire it when upstream
 recognizes rejected refresh tokens and stops offering their providers.
+
+Patch `0011` applies `inputLimits.images.maxPerRequest`, which upstream only declares. Before each
+request `transformMessages` keeps the newest images up to the limit and replaces each run of older
+ones in user messages and tool results with "(older image omitted: the model accepts at most N
+images per request)". The session history is unchanged. It also updates `docs/models.md`, which said
+the limits were not applied. The native `transform-messages-image-limit.test.ts` qualifies it with
+the existing image and transform suites. Retire it when upstream applies the limit.
 
 The distribution patch refuses native self-updates and suppresses upstream release notifications.
 Extension/package updates and model catalog refreshes remain native operations. Built-in extensions,
