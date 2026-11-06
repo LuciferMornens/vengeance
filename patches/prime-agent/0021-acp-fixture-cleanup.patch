@@ -1,5 +1,5 @@
 diff --git a/crates/pa-cli/tests/acp_mode_e2e.rs b/crates/pa-cli/tests/acp_mode_e2e.rs
-index 87bd6b57c..4cf6297d4 100644
+index b1a098ff1..5074633ac 100644
 --- a/crates/pa-cli/tests/acp_mode_e2e.rs
 +++ b/crates/pa-cli/tests/acp_mode_e2e.rs
 @@ -16,7 +16,7 @@
@@ -181,7 +181,7 @@ index 87bd6b57c..4cf6297d4 100644
      let session_id = initialize_and_new_session(&mut second);
      assert_prompt_ends_turn(&mut second, &session_id, "Name a mountain.");
      let sessions = live_sessions(&socket);
-@@ -1541,19 +1557,84 @@ fn acp_daemon_attached_image_only_prompt_reaches_the_session() {
+@@ -1672,19 +1688,84 @@ fn acp_daemon_attached_image_only_prompt_reaches_the_session() {
  
  /// Stop the sandboxed supervisor a test spawned (the shared-daemon
  /// product behavior leaves it running; a test owns its sandbox).
@@ -279,7 +279,7 @@ index 87bd6b57c..4cf6297d4 100644
  }
  
  #[test]
-@@ -1987,10 +2068,8 @@ fn spawn_with_compaction_settings(
+@@ -2118,10 +2199,8 @@ fn spawn_with_compaction_settings(
      .expect("write settings.json");
      let socket = home.path().join("daemon.sock");
      std::fs::write(home.path().join("worker-script.json"), script.to_string()).unwrap();

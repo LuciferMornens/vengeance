@@ -19,16 +19,17 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 
 ## Reconstructing and changing our builds
 
-`engines.lock.json` is the source of truth. Current stable bases are pi `v1.4.0` at
-`4a080252f06caf63a525d7873c5d94d3c23887e0` and Prime `v0.10.1` at
-`8aac8692456c00c01d4e53e60e6d3347a3506559`. The builds identify as `1.4.0+vengeance.2` and
-`0.10.1+vengeance.1`. Never reuse a Vengeance build version for different shipped behavior.
+`engines.lock.json` is the source of truth. Current stable bases are pi `v1.5.0` at
+`f9a26365568127461c47a07a37dcb42c140a3ac5` and Prime `v0.10.2` at
+`ea9d9602ec0938d9e454e8963107cd85af1565c6`. The builds identify as `1.5.0+vengeance.1` and
+`0.10.2+vengeance.1`. Never reuse a Vengeance build version for different shipped behavior.
 
 The current stable-release verification and patch decisions are recorded in
-[ENGINE-STABLE-AUDIT-2026-10-26.md](docs/ENGINE-STABLE-AUDIT-2026-10-26.md), following
+[ENGINE-STABLE-AUDIT-2026-11-06.md](docs/ENGINE-STABLE-AUDIT-2026-11-06.md), following
+[ENGINE-STABLE-AUDIT-2026-10-26.md](docs/ENGINE-STABLE-AUDIT-2026-10-26.md),
 [ENGINE-STABLE-AUDIT-2026-10-18.md](docs/ENGINE-STABLE-AUDIT-2026-10-18.md) and the
 source comparison in [PRIME-STABLE-AUDIT-2026-10-16.md](docs/PRIME-STABLE-AUDIT-2026-10-16.md).
-The [pi patch guide](patches/pi/README.md) records the 1.4.0 rebase and retired catalog
+The [pi patch guide](patches/pi/README.md) records the 1.5.0 rebase and retired catalog
 fallback. The [14 October audit](docs/ENGINE-AUDIT-2026-10-14.md) records earlier integration
 evidence and gaps. Engine 2 settings preservation and rustls maintenance, former backports, are
 now upstream; both native bases are the latest stable releases.
@@ -43,7 +44,7 @@ compatibility policy and regressions for Prime patch `0015` and the Engine bridg
 Responses transports, both authentication routes, cancellation and saved-session replay on upgrades.
 
 pi's package version and extension-facing SDK `VERSION` stay at the upstream release, currently
-`1.4.0`. Extensions can reject build suffixes even when all required APIs exist. The separate
+`1.5.0`. Extensions can reject build suffixes even when all required APIs exist. The separate
 `vengeance.version` metadata, native CLI `--version` and Vengeance engine descriptor report our build
 identity. Native install-change detection uses that identity so a same-base patch upgrade is visible.
 Qualify both forms through the native loader and repeat startup/restart with compatibility packages;
@@ -344,7 +345,8 @@ background activity stays out of the Dock. The main Vengeance app must remain a 
 
 Since 0.3.3, the macOS arm64/x64 and Linux arm64/x64 release runners then qualify the official
 same-platform 0.3.2 Engine 2 package (`0.10.0+vengeance.10`) against the final packaged candidate
-(`.12` in 0.3.3, `.13` in 0.3.4 to 0.3.6, and `0.10.1+vengeance.1` in 0.3.7 and 0.3.8).
+(`.12` in 0.3.3, `.13` in 0.3.4 to 0.3.6, `0.10.1+vengeance.1` in 0.3.7 and 0.3.8, and `0.10.2+vengeance.1`
+in 0.3.9).
 `scripts/qa/engines/release-baseline.mjs` pins both the public release's `SHA256SUMS` and each archive's
 SHA-256, verifies the complete extracted native inventories and macOS app signature, and emits
 `release-baseline.json` plus `release-baseline-env.json`. It never launches the production app.
@@ -358,7 +360,7 @@ This upgrade group follows the nine core suites and macOS visibility gate, befor
 benchmarking. Windows's `.10` to `.11` native transition is covered by the retained PR qualification
 report; that historical evidence does not qualify `.12` or later builds. The Intel wheel patch
 changes no Windows dependency resolution. pi is `1.3.0+vengeance.2` in 0.3.2 and 0.3.3,
-`1.3.0+vengeance.3` in 0.3.4 and `1.3.0+vengeance.4` in 0.3.5 and 0.3.6, all on the `v1.3.0` base, then `1.4.0+vengeance.1` in 0.3.7 and `1.4.0+vengeance.2` in 0.3.8. Its historical 1.2 to 1.3 transition fixture
+`1.3.0+vengeance.3` in 0.3.4 and `1.3.0+vengeance.4` in 0.3.5 and 0.3.6, all on the `v1.3.0` base, then `1.4.0+vengeance.1` in 0.3.7, `1.4.0+vengeance.2` in 0.3.8 and `1.5.0+vengeance.1` in 0.3.9. Its historical 1.2 to 1.3 transition fixture
 is not used as a release upgrade gate.
 
 Each of the five release runners then runs
@@ -626,6 +628,22 @@ Recheck [models](https://docs.abliteration.ai/models), [pricing](https://docs.ab
 prices can lag the pricing page. Retire the patch when upstream supplies qualified support.
 Run `scripts/qa/auth/abliteration.qa.mjs` for isolated login, catalog, reasoning, image and tool transport
 coverage. Live verification is opt-in with `VENGEANCE_LIVE_ABLITERATION_QA=1` and `ABLIT_KEY`.
+
+pi patch `0012` and Prime patch `0025` add OrcaRouter's `orca/orcacyber-k3.1-pro` as a native provider
+in both engines, with API-key login, `ORCAROUTER_API_KEY` discovery and a native default model.
+Limits and prices come from `GET https://api.orcarouter.ai/v1/models`, which lists no cache write
+price, so writes cost the input price. Reasoning is the documented none/low/high/max ladder and Off is
+`none`. The API answers 200 to any effort string, even a made-up one, so a 200 proves nothing about a
+level. Only `none` was measurably different on 6 November 2026, and with it the model often writes its
+deliberation as visible text; one live turn kept calling `true` for three minutes until stopped. The
+same prompts on Low stayed clean, so this is the model's, not the request's. Recheck the ladder, prices
+and the rejected `developer` role against [the model](https://www.orcarouter.ai/models/orca/orcacyber-k3.1-pro)
+and the API on upgrades. Prime's remote catalog and bundled snapshot do not carry this provider, so
+`COMPILED_ONLY_PROVIDERS` in `pa-models` joins the compiled entry to whichever layer resolves. OrcaRouter
+reports `cached_tokens` and `cache_write_tokens` as disjoint parts of `prompt_tokens`, unlike OpenRouter;
+Prime's usage parser branches on the provider for that. Retire both patches when upstream supplies
+qualified support. Run `scripts/qa/auth/orcarouter.qa.mjs` for isolated coverage of both engines. Live
+verification is opt-in with `VENGEANCE_LIVE_ORCAROUTER_QA=1` and `ORCAROUTER_API_KEY`.
 
 Qualified on 16 October 2026 against the reconstructed and staged Engine `1.2.0+vengeance.4`.
 The staged pi payload hash is

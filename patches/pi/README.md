@@ -1,22 +1,26 @@
 # Vengeance's pi build
 
-Vengeance builds stable `v1.4.0`, commit `4a080252f06caf63a525d7873c5d94d3c23887e0`,
-as `1.4.0+vengeance.2`. See [UPSTREAM.md](../../UPSTREAM.md) and
+Vengeance builds stable `v1.5.0`, commit `f9a26365568127461c47a07a37dcb42c140a3ac5`,
+as `1.5.0+vengeance.1`. See [UPSTREAM.md](../../UPSTREAM.md) and
 [engines.lock.json](../../engines.lock.json) for the source and maintenance contract.
 
 The active series includes distribution policy (0001), extension runtime version identity (0002),
 native runtime qualification (0003), Windows native test fixtures (0005), Abliteration (0006),
 native session sharing (0007), POSIX shell test paths (0008), MCP host state (0009), OAuth
-refresh rejection (0010) and the per-request image limit (0011).
+refresh rejection (0010), the per-request image limit (0011) and OrcaRouter (0012).
 Patch `0005` normalizes the external-editor fixture's temporary path on Windows. Patch `0006`
 also supplies Abliteration's native default model, required by the 1.3 provider-selection contract.
 Rebasing onto 1.4.0 needed two reviewed resolutions: the chord package-boundary test, where 1.4.0's
 allow-list and patch `0005`'s portable separator now combine, and the default-model table, where
 `0006` adds Abliteration after 1.4.0's `mimo-v2.6-pro` Xiaomi defaults.
+Rebasing onto 1.5.0 kept all eleven patches. `0003` combines with upstream's reported editor failures, so
+an empty editor command now fails with a message. Upstream now compares `check:entry-graphs` paths in `/`
+form, so `0005` dropped that hunk; `0010` keeps upstream's `./models` forbid list and its 21-file budget.
+1.5.0's new JSON Schema suite and preview-package test assumed POSIX paths, so `0005` normalizes the
+suite's fixture names and reads the packed tarball by relative path, because GNU tar takes a `D:` prefix
+for a remote host.
 
-Upstream's `check:entry-graphs` compared its `allow` and `forbid` patterns with backslash paths on
-Windows, so the stable base fails it there, and `forbid` never matched. Patch `0005` compares the
-graph in `/` form. Patch `0010` raises the `./models` budget from 20 to 21 files for
+Patch `0010` raises the `./models` budget from 20 to 21 files for
 `auth/oauth-error.ts`, which rejected-refresh recognition adds to that entry.
 
 Patch `0005` also separates Bun result settlement from process exit in the real-worker fixture.
@@ -123,7 +127,7 @@ Extension/package updates and model catalog refreshes remain native operations. 
 the CLI, RPC entry and the SDK all come from our source checkout. Internal runtime packages are
 packed locally and substituted into upstream's installation lock; external dependencies stay pinned.
 
-The compatibility patch keeps the native package version and SDK `VERSION` at `1.4.0`.
+The compatibility patch keeps the native package version and SDK `VERSION` at `1.5.0`.
 Some extensions require a dotted upstream release and reject SemVer build metadata. Distribution
 identity lives in `package.json`'s `vengeance.version`, the engine manifest and CLI `--version`.
 Install-change detection compares the distribution identity, including builds on the same upstream base.
@@ -137,3 +141,9 @@ outside ASAR, and Vengeance runs it with Electron's Node runtime.
 Requalify package commands, RPC, SDK imports, bridge capabilities, provider behavior and saved
 sessions on every upstream upgrade. Native package self-update tests use temporary directories;
 app QA uses local providers and separate configuration stores. Never test against real account files.
+
+Patch `0012` adds OrcaRouter's `orca/orcacyber-k3.1-pro` as a native provider with API-key login,
+`ORCAROUTER_API_KEY` discovery and a default model. Its ladder is Off, Low, High and Max, the efforts
+OrcaRouter documents, so a saved Minimal, Medium or Extra high moves to Low, High or Max. The API
+rejects the `developer` role, so instructions stay in `system`. Video input has no Engine input type
+and is not declared. Images use the same conservative resize profile as every other vision model.

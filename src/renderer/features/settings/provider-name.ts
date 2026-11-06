@@ -10,6 +10,7 @@ const PROVIDER_WORDS: Record<string, string> = {
   xai: 'xAI',
   openai: 'OpenAI',
   openrouter: 'OpenRouter',
+  orcarouter: 'OrcaRouter',
   github: 'GitHub',
   deepseek: 'DeepSeek'
 }

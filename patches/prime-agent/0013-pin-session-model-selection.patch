@@ -1,5 +1,5 @@
 diff --git a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
-index 9ea3dd91f..134995b8e 100644
+index f25efe14d..06a181dbc 100644
 --- a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
 +++ b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
 @@ -245,7 +245,14 @@ impl SessionEngine for AgentSessionEngine {

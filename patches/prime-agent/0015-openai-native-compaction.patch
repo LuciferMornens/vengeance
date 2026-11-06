@@ -272,10 +272,10 @@ index ea6874782..9d04b8b45 100644
              .get("type")
              .and_then(|value| value.as_str())
 diff --git a/crates/pa-core/src/session/mod.rs b/crates/pa-core/src/session/mod.rs
-index 454e3f691..58f55f838 100644
+index 048ff8f42..63d2ceeca 100644
 --- a/crates/pa-core/src/session/mod.rs
 +++ b/crates/pa-core/src/session/mod.rs
-@@ -453,6 +453,11 @@ pub fn build_session_context(entries: &[FileEntry], leaf_id: Option<&str>) -> Se
+@@ -472,6 +472,11 @@ pub fn build_session_context(entries: &[FileEntry], leaf_id: Option<&str>) -> Se
          };
          messages.push(AgentMessage::CompactionSummary(CompactionSummaryMessage {
              summary: payload.summary,
@@ -288,10 +288,10 @@ index 454e3f691..58f55f838 100644
              retained_message_count: Some(retained.len() as u64),
              custom_instructions: payload.custom_instructions,
 diff --git a/crates/pa-core/src/session_engine/branch_summarization.rs b/crates/pa-core/src/session_engine/branch_summarization.rs
-index 94c9d36b1..14a9303b6 100644
+index 5f51067df..48a9342bf 100644
 --- a/crates/pa-core/src/session_engine/branch_summarization.rs
 +++ b/crates/pa-core/src/session_engine/branch_summarization.rs
-@@ -133,6 +133,7 @@ fn get_message_from_entry(entry: &FileEntry) -> Option<AgentMessage> {
+@@ -135,6 +135,7 @@ fn get_message_from_entry(entry: &FileEntry) -> Option<AgentMessage> {
          FileEntry::Compaction { payload, .. } => {
              Some(AgentMessage::CompactionSummary(CompactionSummaryMessage {
                  summary: payload.summary.clone(),
@@ -300,18 +300,18 @@ index 94c9d36b1..14a9303b6 100644
                  retained_message_count: None,
                  custom_instructions: payload.custom_instructions.clone(),
 diff --git a/crates/pa-core/src/session_engine/compact_session.rs b/crates/pa-core/src/session_engine/compact_session.rs
-index 5a171a452..7651a11b0 100644
+index 0133767ed..dc125d00c 100644
 --- a/crates/pa-core/src/session_engine/compact_session.rs
 +++ b/crates/pa-core/src/session_engine/compact_session.rs
-@@ -124,6 +124,7 @@ pub enum CompactOutcome {
- }
+@@ -127,6 +127,7 @@ pub enum CompactOutcome {
  
  pub(crate) struct CompactionAttempt {
+     session_id: String,
 +    pub(crate) native_messages: Vec<AgentMessage>,
      /// The session leaf at prepare: the commit is valid while the active
      /// branch still grows through it with no compaction between.
      prefix_leaf: Option<String>,
-@@ -207,7 +208,24 @@ pub(crate) fn prepare_attempt(
+@@ -210,8 +211,25 @@ pub(crate) fn prepare_attempt(
      file_op_messages.extend(turn_prefix_messages.iter().cloned());
      let details: CompactionDetails =
          details_for(&file_op_messages, &entries, prev_compaction_index);
@@ -332,6 +332,7 @@ index 5a171a452..7651a11b0 100644
 +            }),
 +    );
      Ok(CompactionAttempt {
+         session_id: session.get_session_id().to_string(),
 +        native_messages,
          prefix_leaf,
          cut,
@@ -349,7 +350,7 @@ index 286d2b998..55139f649 100644
              retained_message_count: None,
              custom_instructions: None,
 diff --git a/crates/pa-core/src/session_engine/compaction_arms.rs b/crates/pa-core/src/session_engine/compaction_arms.rs
-index b2ef8d6ab..ce0cca9ea 100644
+index 86c21ed72..ebbba9e7d 100644
 --- a/crates/pa-core/src/session_engine/compaction_arms.rs
 +++ b/crates/pa-core/src/session_engine/compaction_arms.rs
 @@ -310,11 +310,18 @@ impl AgentSession {

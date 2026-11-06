@@ -1,5 +1,5 @@
 diff --git a/packages/ai/src/env-api-keys.ts b/packages/ai/src/env-api-keys.ts
-index 560dce8a..72637526 100644
+index 560dce8a4..726375267 100644
 --- a/packages/ai/src/env-api-keys.ts
 +++ b/packages/ai/src/env-api-keys.ts
 @@ -82,6 +82,7 @@ function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
@@ -12,7 +12,7 @@ index 560dce8a..72637526 100644
  		"qwen-token-plan-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
 diff --git a/packages/ai/src/providers/abliteration.ts b/packages/ai/src/providers/abliteration.ts
 new file mode 100644
-index 00000000..53e92d26
+index 000000000..53e92d263
 --- /dev/null
 +++ b/packages/ai/src/providers/abliteration.ts
 @@ -0,0 +1,109 @@
@@ -126,7 +126,7 @@ index 00000000..53e92d26
 +	});
 +}
 diff --git a/packages/ai/src/providers/all.ts b/packages/ai/src/providers/all.ts
-index 297db37c..f89764d2 100644
+index 297db37c9..f89764d27 100644
 --- a/packages/ai/src/providers/all.ts
 +++ b/packages/ai/src/providers/all.ts
 @@ -1,6 +1,11 @@
@@ -163,7 +163,7 @@ index 297db37c..f89764d2 100644
  		antLingProvider(),
  		anthropicProvider(),
 diff --git a/packages/ai/src/types.ts b/packages/ai/src/types.ts
-index c0f3b562..5d5d2f98 100644
+index e435126ea..0c79ef8b7 100644
 --- a/packages/ai/src/types.ts
 +++ b/packages/ai/src/types.ts
 @@ -88,6 +88,7 @@ export type KnownClassifierApi =
@@ -176,7 +176,7 @@ index c0f3b562..5d5d2f98 100644
  	| "anthropic"
 diff --git a/packages/ai/test/abliteration.test.ts b/packages/ai/test/abliteration.test.ts
 new file mode 100644
-index 00000000..21059f47
+index 000000000..21059f472
 --- /dev/null
 +++ b/packages/ai/test/abliteration.test.ts
 @@ -0,0 +1,59 @@
@@ -240,7 +240,7 @@ index 00000000..21059f47
 +	});
 +});
 diff --git a/packages/coding-agent/src/core/model-resolver.ts b/packages/coding-agent/src/core/model-resolver.ts
-index e6657e9e..1f95a792 100644
+index d1abd57cf..839e32537 100644
 --- a/packages/coding-agent/src/core/model-resolver.ts
 +++ b/packages/coding-agent/src/core/model-resolver.ts
 @@ -59,6 +59,7 @@ export const defaultModelPerProvider: Partial<Record<KnownProvider, string>> = {

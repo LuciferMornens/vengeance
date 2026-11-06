@@ -1,8 +1,8 @@
 diff --git a/packages/coding-agent/src/config.ts b/packages/coding-agent/src/config.ts
-index 61dd63f3..1940d1f6 100644
+index 5a9552d5d..2a22326d7 100644
 --- a/packages/coding-agent/src/config.ts
 +++ b/packages/coding-agent/src/config.ts
-@@ -544,8 +544,9 @@ export function detectInstallChange(packageJsonPath = startupPackageJsonPath): I
+@@ -569,8 +569,9 @@ export function detectInstallChange(packageJsonPath = startupPackageJsonPath): I
  	} catch (error) {
  		return (error as NodeJS.ErrnoException).code === "ENOENT" ? { kind: "removed" } : undefined;
  	}
@@ -14,7 +14,7 @@ index 61dd63f3..1940d1f6 100644
  		: undefined;
  }
  
-@@ -556,6 +557,9 @@ export function detectInstallChange(packageJsonPath = startupPackageJsonPath): I
+@@ -581,6 +582,9 @@ export function detectInstallChange(packageJsonPath = startupPackageJsonPath): I
  interface PackageJson {
  	name?: string;
  	version?: string;
@@ -24,7 +24,7 @@ index 61dd63f3..1940d1f6 100644
  	piConfig?: {
  		name?: string;
  		configDir?: string;
-@@ -580,6 +584,8 @@ export const APP_NAME: string = piConfigName || "pi";
+@@ -605,6 +609,8 @@ export const APP_NAME: string = piConfigName || "pi";
  export const APP_TITLE: string = piConfigName ? APP_NAME : "π";
  export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
  export const VERSION: string = pkg.version || "0.0.0";
@@ -34,7 +34,7 @@ index 61dd63f3..1940d1f6 100644
  // e.g., PI_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
  export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
 diff --git a/packages/coding-agent/src/main.ts b/packages/coding-agent/src/main.ts
-index 51df447c..c6cac50f 100644
+index 88aa3c5d3..19d9a4ee6 100644
 --- a/packages/coding-agent/src/main.ts
 +++ b/packages/coding-agent/src/main.ts
 @@ -33,7 +33,14 @@ import { listModels } from "./cli/list-models.ts";
@@ -53,7 +53,7 @@ index 51df447c..c6cac50f 100644
  import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.ts";
  import {
  	type AgentSessionRuntimeDiagnostic,
-@@ -633,7 +640,7 @@ export async function main(args: string[], options?: MainOptions) {
+@@ -644,7 +651,7 @@ export async function main(args: string[], options?: MainOptions) {
  	time("parseArgs");
  
  	if (parsed.version) {
@@ -63,7 +63,7 @@ index 51df447c..c6cac50f 100644
  	}
  
 diff --git a/packages/coding-agent/src/utils/version-check.ts b/packages/coding-agent/src/utils/version-check.ts
-index cadeb912..ada78b95 100644
+index cadeb9126..ada78b95f 100644
 --- a/packages/coding-agent/src/utils/version-check.ts
 +++ b/packages/coding-agent/src/utils/version-check.ts
 @@ -1,4 +1,5 @@

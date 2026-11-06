@@ -1,0 +1,366 @@
+diff --git a/crates/pa-ai/src/env_api_keys.rs b/crates/pa-ai/src/env_api_keys.rs
+index d8a487908..fdcdb9f83 100644
+--- a/crates/pa-ai/src/env_api_keys.rs
++++ b/crates/pa-ai/src/env_api_keys.rs
+@@ -20,6 +20,7 @@ pub fn get_api_key_env_vars(provider: &str) -> Option<Vec<&'static str>> {
+                 "cerebras" => "CEREBRAS_API_KEY",
+                 "xai" => "XAI_API_KEY",
+                 "openrouter" => "OPENROUTER_API_KEY",
++                "orcarouter" => "ORCAROUTER_API_KEY",
+                 "vercel-ai-gateway" => "AI_GATEWAY_API_KEY",
+                 "zai" => "ZAI_API_KEY",
+                 "mistral" => "MISTRAL_API_KEY",
+diff --git a/crates/pa-ai/src/models_generated.rs b/crates/pa-ai/src/models_generated.rs
+index 6feaeb24a..2c11cd29c 100644
+--- a/crates/pa-ai/src/models_generated.rs
++++ b/crates/pa-ai/src/models_generated.rs
+@@ -765,6 +765,43 @@ compat: Some(RawCompat {
+         headers: &[],
+         compat: None,
+     },
++    // No catalog layer carries OrcaRouter: `pa_models::transports` joins it to each of them. OrcaRouter
++    // documents none, low, high and max, and answers 200 to any other value, even a made-up one.
++    RawModel {
++        provider: "orcarouter",
++        id: "orca/orcacyber-k3.1-pro",
++        name: "Kimi K3.1 Pro Abliterated / Uncensored",
++        api: "openai-completions",
++        base_url: "https://api.orcarouter.ai/v1",
++        reasoning: true,
++        thinking_levels: &[
++                (crate::types::ModelThinkingLevel::Off, Some("none")),
++                (crate::types::ModelThinkingLevel::Minimal, None),
++                (crate::types::ModelThinkingLevel::Low, Some("low")),
++                (crate::types::ModelThinkingLevel::Medium, None),
++                (crate::types::ModelThinkingLevel::High, Some("high")),
++                (crate::types::ModelThinkingLevel::Xhigh, None),
++                (crate::types::ModelThinkingLevel::Max, Some("max")),
++        ],
++        input: &[crate::types::ModelInput::Text, crate::types::ModelInput::Image],
++        cost: (4.0, 20.0, 0.35, 4.0),
++        context_window: 1_048_576,
++        max_tokens: 943_718,
++        featured: None,
++        headers: &[],
++compat: Some(RawCompat {
++            supports_store: Some(false),
++            // A `developer` message fails with 400.
++            supports_developer_role: Some(false),
++            supports_reasoning_effort: Some(true),
++            max_tokens_field: Some(crate::types::MaxTokensField::MaxTokens),
++            requires_reasoning_content_on_assistant_messages: None,
++            thinking_format: None,
++            zai_tool_stream: None,
++            send_session_affinity_headers: None,
++            supports_strict_mode: Some(false),
++        }),
++    },
+     RawModel {
+         provider: "prime-inference",
+         id: "anthropic/claude-fable-5",
+@@ -4481,12 +4518,16 @@ mod tests {
+     #[test]
+     fn catalog_loads_at_the_ts_fallback_scale() {
+         let providers = get_providers();
+-        assert_eq!(providers.len(), 32, "the TS fallback provider list");
++        assert_eq!(
++            providers.len(),
++            33,
++            "the TS fallback providers + OrcaRouter"
++        );
+         let total: usize = providers
+             .iter()
+             .map(|provider| get_models(provider).len())
+             .sum();
+-        assert_eq!(total, 152, "the TS fallback model list");
++        assert_eq!(total, 153, "the TS fallback models + OrcaRouter's");
+         assert_eq!(
+             get_models("prime-inference").len(),
+             110,
+@@ -4509,8 +4550,8 @@ mod tests {
+         }
+         assert_eq!(
+             tuples.len(),
+-            43,
+-            "42 public transport tuples + Prime Inference"
++            44,
++            "42 public transport tuples + OrcaRouter + Prime Inference"
+         );
+     }
+ 
+@@ -4530,6 +4571,33 @@ mod tests {
+         assert!(get_models("nope").is_empty());
+     }
+ 
++    #[test]
++    fn orcarouter_declares_the_documented_efforts_and_accepted_request_shape() {
++        use crate::types::ModelThinkingLevel::{High, Low, Max, Off};
++
++        let model = get_model("orcarouter", "orca/orcacyber-k3.1-pro").expect("compiled");
++        assert_eq!(
++            crate::models::get_supported_thinking_levels(model),
++            vec![Off, Low, High, Max]
++        );
++        assert_eq!(
++            model
++                .thinking_level_map
++                .as_ref()
++                .and_then(|map| map.get(&Off)),
++            Some(&Some("none".to_string())),
++            "the app lists the levels the map names, so Off needs its wire value"
++        );
++        assert_eq!(model.context_window, 1_048_576);
++        assert_eq!(model.max_tokens, 943_718);
++        let Some(crate::types::CompatKind::OpenAiCompletions(compat)) = model.compat_kind() else {
++            panic!("orcarouter carries a compat object");
++        };
++        assert_eq!(compat.supports_developer_role, Some(false));
++        assert_eq!(compat.supports_reasoning_effort, Some(true));
++        assert_eq!(compat.max_tokens_field, Some(MaxTokensField::MaxTokens));
++    }
++
+     /// The compiled Prime Inference section is the conservative fallback (TS #2519): it declares no
+     /// reasoning controls — the live catalog's `supported_parameters` rebuild them at runtime — and
+     /// it never carries the zai thinking format (TS #2459: Prime Inference rejects
+diff --git a/crates/pa-ai/src/providers/openai_completions/convert.rs b/crates/pa-ai/src/providers/openai_completions/convert.rs
+index 9534f5c75..4fd2b0e41 100644
+--- a/crates/pa-ai/src/providers/openai_completions/convert.rs
++++ b/crates/pa-ai/src/providers/openai_completions/convert.rs
+@@ -423,8 +423,9 @@ pub(crate) fn parse_chunk_usage(
+     // - cacheRead: hits from cache created by previous requests only
+     // - cacheWrite: tokens written to cache in this request
+     // Some OpenAI-compatible providers (observed on OpenRouter) report cached_tokens as (previous
+-    // hits + current writes). Remove cacheWrite from cacheRead in that case.
+-    let cache_read_tokens = if cache_write_tokens > 0 {
++    // hits + current writes). Remove cacheWrite from cacheRead in that case. OrcaRouter reports the
++    // two apart: prompt_tokens is plain input + cached_tokens + cache_write_tokens.
++    let cache_read_tokens = if cache_write_tokens > 0 && model.provider != "orcarouter" {
+         reported_cached_tokens.saturating_sub(cache_write_tokens)
+     } else {
+         reported_cached_tokens
+@@ -580,6 +581,35 @@ mod tests {
+         raw
+     }
+ 
++    #[test]
++    fn orcarouter_cache_reads_and_writes_stay_apart() {
++        let model = model("orcarouter", 4.0, 20.0);
++        let raw = json!({
++            "prompt_tokens": 3_905,
++            "completion_tokens": 11,
++            "prompt_tokens_details": { "cached_tokens": 2_560, "cache_write_tokens": 1_280 },
++        });
++        let usage = parse_chunk_usage(&raw, &model, None);
++        assert_eq!(usage.input, 65);
++        assert_eq!(usage.cache_read, 2_560);
++        assert_eq!(usage.cache_write, 1_280);
++        assert_eq!(usage.total_tokens, 3_916);
++    }
++
++    #[test]
++    fn openrouter_cache_writes_leave_cached_tokens() {
++        let model = model("openrouter", 4.0, 20.0);
++        let raw = json!({
++            "prompt_tokens": 3_905,
++            "completion_tokens": 11,
++            "prompt_tokens_details": { "cached_tokens": 3_840, "cache_write_tokens": 1_280 },
++        });
++        let usage = parse_chunk_usage(&raw, &model, None);
++        assert_eq!(usage.input, 65);
++        assert_eq!(usage.cache_read, 2_560);
++        assert_eq!(usage.cache_write, 1_280);
++    }
++
+     #[test]
+     fn openrouter_zero_reported_cost_keeps_catalog_estimate() {
+         let model = model("openrouter", 0.5, 0.5);
+diff --git a/crates/pa-cli/src/provider_login.rs b/crates/pa-cli/src/provider_login.rs
+index d1c7e75d0..17f02392f 100644
+--- a/crates/pa-cli/src/provider_login.rs
++++ b/crates/pa-cli/src/provider_login.rs
+@@ -47,6 +47,7 @@ const BUILT_IN_PROVIDER_DISPLAY_NAMES: &[(&str, &str)] = &[
+     ("opencode-go", "OpenCode Go"),
+     ("openai", "OpenAI"),
+     ("openrouter", "OpenRouter"),
++    ("orcarouter", "OrcaRouter"),
+     ("prime-agent-traces", "Prime Agent Traces"),
+     ("prime-inference", "Prime Inference"),
+     ("vercel-ai-gateway", "Vercel AI Gateway"),
+diff --git a/crates/pa-core/src/models/custom.rs b/crates/pa-core/src/models/custom.rs
+index f635090d4..a54539dff 100644
+--- a/crates/pa-core/src/models/custom.rs
++++ b/crates/pa-core/src/models/custom.rs
+@@ -277,10 +277,12 @@ fn compat_from_value(value: Option<&serde_json::Value>) -> Option<ModelCompat> {
+     serde_json::from_value(value.clone()).ok()
+ }
+ 
+-/// Compat merge: override fields win; nested routing objects merge.
++/// Compat merge: override fields win; nested routing objects merge. No override keeps `base`.
+ #[must_use]
+ pub fn merge_compat(base: Option<&ModelCompat>, over: Option<ModelCompat>) -> Option<ModelCompat> {
+-    let over = over?;
++    let Some(over) = over else {
++        return base.cloned();
++    };
+     let mut merged = base.map(|compat| compat.raw.clone()).unwrap_or_default();
+     for (key, value) in over.raw {
+         // Routing sub-objects merge instead of replacing.
+@@ -625,4 +627,26 @@ mod tests {
+         assert_eq!(merged.cost.output.0, 9.0);
+         assert_eq!(merged.cost.input.0, 1.0);
+     }
++
++    #[test]
++    fn a_model_override_without_compat_keeps_the_built_in_compat() {
++        let base: Model = serde_json::from_value(serde_json::json!({
++            "id": "m", "name": "M", "api": "openai-completions", "provider": "p",
++            "baseUrl": "http://x", "reasoning": true, "input": [],
++            "cost": { "input": 1, "output": 2, "cacheRead": 0, "cacheWrite": 0 },
++            "contextWindow": 1000, "maxTokens": 100,
++            "compat": { "supportsDeveloperRole": false }
++        }))
++        .unwrap();
++        let over = ModelOverride {
++            max_tokens: Some(50),
++            ..Default::default()
++        };
++        let merged = apply_model_override(&base, &over);
++        assert_eq!(merged.max_tokens, 50);
++        assert_eq!(
++            merged.compat.as_ref().map(|compat| &compat.raw),
++            base.compat.as_ref().map(|compat| &compat.raw)
++        );
++    }
+ }
+diff --git a/crates/pa-core/src/models/resolver.rs b/crates/pa-core/src/models/resolver.rs
+index 8f09603a9..4ebc184b6 100644
+--- a/crates/pa-core/src/models/resolver.rs
++++ b/crates/pa-core/src/models/resolver.rs
+@@ -17,6 +17,7 @@ pub fn default_model_per_provider(provider: &str) -> Option<&'static str> {
+         "deepseek" => "deepseek-v4-pro",
+         "google" | "google-vertex" => "gemini-3.1-pro-preview",
+         "openrouter" => "moonshotai/kimi-k2.6",
++        "orcarouter" => "orca/orcacyber-k3.1-pro",
+         "vercel-ai-gateway" => "zai/glm-5.1",
+         "xai" => "grok-4.20-0309-reasoning",
+         "groq" => "openai/gpt-oss-120b",
+diff --git a/crates/pa-models/src/chain.rs b/crates/pa-models/src/chain.rs
+index 41c703c68..489497811 100644
+--- a/crates/pa-models/src/chain.rs
++++ b/crates/pa-models/src/chain.rs
+@@ -163,7 +163,7 @@ impl ModelCatalog {
+     /// the live Prime Inference snapshot for `credentials` when given.
+     /// Never fails; never blocks on the network.
+     pub fn resolve(&self, credentials: Option<&PrimeCredentials>) -> Vec<Model> {
+-        let base = match self.provider_cache.get(PUBLIC_SCOPE) {
++        let mut base = match self.provider_cache.get(PUBLIC_SCOPE) {
+             Some(remote) => {
+                 // Step 1: validated last-good cache + the compiled offline
+                 // Prime Inference entries (private/live entries come from
+@@ -185,6 +185,7 @@ impl ModelCatalog {
+                 None => self.compiled.as_ref().clone(),
+             },
+         };
++        transports::join_compiled_only_entries(&mut base);
+         let live = credentials
+             .and_then(|credentials| self.prime_inference.get(&credentials.as_inference()));
+         match live {
+@@ -354,12 +355,54 @@ mod tests {
+         let models = catalog.resolve(None);
+         assert_eq!(
+             models.len(),
+-            111,
+-            "1 pinned bundled entry + 110 offline prime-inference entries"
++            112,
++            "1 pinned bundled entry + 110 offline prime-inference entries + OrcaRouter's"
+         );
+         assert!(models.iter().any(|m| m.id == "bundled-a"));
+     }
+ 
++    fn orcarouter_entries(models: &[Model]) -> usize {
++        models
++            .iter()
++            .filter(|model| model.provider == "orcarouter" && model.id == "orca/orcacyber-k3.1-pro")
++            .count()
++    }
++
++    #[test]
++    fn compiled_only_provider_survives_every_catalog_layer() {
++        let empty = tempfile::tempdir().unwrap();
++        let compiled =
++            ModelCatalog::with_bundled_dir(Some(empty.path().into()), Some(empty.path().into()));
++        assert_eq!(orcarouter_entries(&compiled.resolve(None)), 1, "compiled");
++
++        let dir = tempfile::tempdir().unwrap();
++        std::fs::write(
++            dir.path().join("models.bundled.json"),
++            models_json(&["bundled-a"]),
++        )
++        .unwrap();
++        let bundled =
++            ModelCatalog::with_bundled_dir(Some(dir.path().into()), Some(dir.path().into()));
++        assert_eq!(orcarouter_entries(&bundled.resolve(None)), 1, "bundled");
++
++        let snapshot = json!({
++            "url": MODEL_CATALOG_URL,
++            "scope": PUBLIC_SCOPE,
++            "fetchedAt": 1,
++            "payload": serde_json::from_str::<serde_json::Value>(&models_json(&["cached-a"])).unwrap(),
++        });
++        std::fs::write(
++            dir.path().join(PROVIDER_CATALOG_CACHE_FILE),
++            serde_json::to_string(&snapshot).unwrap(),
++        )
++        .unwrap();
++        let cached =
++            ModelCatalog::with_bundled_dir(Some(dir.path().into()), Some(dir.path().into()));
++        let models = cached.resolve(None);
++        assert!(models.iter().any(|m| m.id == "cached-a"), "cache wins");
++        assert_eq!(orcarouter_entries(&models), 1, "cached");
++    }
++
+     #[test]
+     fn disk_cache_beats_bundled_asset() {
+         let dir = tempfile::tempdir().unwrap();
+diff --git a/crates/pa-models/src/transports.rs b/crates/pa-models/src/transports.rs
+index 9da277422..9e21b26e9 100644
+--- a/crates/pa-models/src/transports.rs
++++ b/crates/pa-models/src/transports.rs
+@@ -48,6 +48,25 @@ pub fn compiled_transport_tuples() -> Vec<(&'static str, &'static str, &'static
+     tuples
+ }
+ 
++/// Compiled providers no catalog layer carries, so resolution must add them to whichever one it
++/// used: the remote catalog and the bundled snapshot would otherwise drop them.
++const COMPILED_ONLY_PROVIDERS: &[&str] = &["orcarouter"];
++
++/// Add the compiled entries of [`COMPILED_ONLY_PROVIDERS`] that `models` lacks.
++pub fn join_compiled_only_entries(models: &mut Vec<Model>) {
++    for model in compiled_models()
++        .iter()
++        .filter(|model| COMPILED_ONLY_PROVIDERS.contains(&model.provider.as_str()))
++    {
++        if !models
++            .iter()
++            .any(|existing| existing.provider == model.provider && existing.id == model.id)
++        {
++            models.push(model.clone());
++        }
++    }
++}
++
+ /// The compiled offline Prime Inference entries (the onboarding fallback
+ /// before the first credentialed fetch). Private ids (internal/, dev/, ids
+ /// containing `:`) never ship compiled.
+diff --git a/crates/pa-types/src/ai/mod.rs b/crates/pa-types/src/ai/mod.rs
+index 0dd606a42..a8ca2d775 100644
+--- a/crates/pa-types/src/ai/mod.rs
++++ b/crates/pa-types/src/ai/mod.rs
+@@ -61,6 +61,7 @@ pub enum KnownProvider {
+     Groq,
+     Cerebras,
+     Openrouter,
++    Orcarouter,
+     #[serde(rename = "vercel-ai-gateway")]
+     VercelAiGateway,
+     Zai,

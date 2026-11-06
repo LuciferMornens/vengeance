@@ -1,9 +1,10 @@
 // Real-engine check of long session trees (npm run e2e:tree, after npm run build). No model calls, no tokens.
 // Uses a TEMP engine config dir (PI_CODING_AGENT_DIR, never the user's ~/.pi/agent) with PI_OFFLINE and one
-// synthetic session file far deeper than the engine can serialize as a nested `get_tree`:
-//   1. the installed engine itself answers get_tree with an error for it and keeps serving commands;
-//   2. the BUILT app still shows its tree: sessions:tree (closed file) and get_tree (open session, rebuilt
-//      from get_entries) both arrive flat, equal the engine's SessionManager rules, and render in Branches.
+// synthetic linear session file:
+//   1. the installed engine answers get_tree for it and keeps serving commands (1.5.0 sends it nested; pi 1.1.0
+//      overflowed its stack, the failure `requestSessionTree` still falls back from);
+//   2. the BUILT app shows its tree: sessions:tree (closed file) and get_tree (open session) both arrive flat,
+//      equal the engine's SessionManager rules, and render in Branches.
 import { _electron as electron } from 'playwright'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -129,9 +130,8 @@ try {
   engine = startEngine(info, engineSessionPath)
   const engineTree = await engine.send({ type: 'get_tree' })
   console.log(`  get_tree: ${engineTree.success ? 'success' : `error "${engineTree.error}"`}`)
-  assert(!engineTree.success, 'the engine cannot send this tree nested (the case the fallback covers)')
   const state = await engine.send({ type: 'get_state' })
-  assert(state.success && engine.alive(), 'the engine keeps serving commands after the failed get_tree')
+  assert(state.success && engine.alive(), 'the engine keeps serving commands after get_tree')
   engine.stop()
   engine = undefined
 

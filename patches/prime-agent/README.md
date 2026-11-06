@@ -2,8 +2,8 @@
 
 Follow [UPSTREAM.md](../../UPSTREAM.md) for reconstruction and qualification.
 
-Vengeance ships a source build of stable `v0.10.1`, upstream commit
-`8aac8692456c00c01d4e53e60e6d3347a3506559`, identified as `0.10.1+vengeance.1`.
+Vengeance ships a source build of stable `v0.10.2`, upstream commit
+`ea9d9602ec0938d9e454e8963107cd85af1565c6`, identified as `0.10.2+vengeance.1`.
 The exact source, catalog revision, toolchain and patch order live in
 [engines.lock.json](../../engines.lock.json). The native helper links this same stable base.
 
@@ -18,7 +18,6 @@ The exact source, catalog revision, toolchain and patch order live in
 | 0007  | Preserve fragmented daemon commands; keep a cancellation-safe two-instance named-pipe backlog.            |
 | 0008  | Isolate and qualify native test fixtures on Windows.                                                      |
 | 0009  | Launch npm package operations correctly on Windows.                                                       |
-| 0010  | Report Windows edit failures without hiding the native error.                                             |
 | 0011  | Rotate Windows incident logs without retaining an open file handle.                                       |
 | 0012  | Refresh native prompt and kernel image capabilities after changing models.                                |
 | 0013  | Pin the resolved creation model to its session so another worker's default changes cannot alter it.       |
@@ -30,6 +29,14 @@ The exact source, catalog revision, toolchain and patch order live in
 | 0021  | Bound ACP fixture shutdown and collect stderr without waiting for inherited Windows pipe handles.         |
 | 0023  | Verify and explicitly install the bundled Intel macOS cryptography wheel; refresh kernel identity.        |
 | 0024  | Report each open session's live MCP server state from its kernel and reconnect one server on request.     |
+| 0025  | Add OrcaRouter as a compiled provider that survives every catalog layer.                                  |
+
+`v0.10.2` retires patch 0010, which reported Windows edit failures. Upstream deleted the dead built-in
+bash and edit tools it changed ([#3823](https://github.com/PrimeIntellect-ai/prime-agent/pull/3823)), so
+nothing remains to patch. The same removal took the bash and edit hunks out of patch 0008.
+On this base the faux cache counts an 8 KB crossing turn below the seed turn, so patch 0008 sends 24 KB
+against a 27,000 window in the threshold compaction test. Two more of its fixtures compare canonical
+paths, which carry the `\\?\` prefix on Windows.
 
 `v0.10.1` retires four patches. Its source contains the upstream commits our backports came from:
 settings/MCP save preservation [`7b89c111`](https://github.com/PrimeIntellect-ai/prime-agent/commit/7b89c111da0f1d9e67849b34f10552bbb4bd1bd1)
@@ -151,6 +158,15 @@ Before shipping, run formatting, native regressions, clippy, app checks, both-en
 Stop/compaction, shell/queue, controls/restart, saved history, executable transition and packaged
 app QA. Exact release evidence belongs in the release verification record, with each platform's
 manifest payload hashes and package hashes. Never substitute historical passing counts.
+
+Patch 0025 adds OrcaRouter with API-key login, `ORCAROUTER_API_KEY` discovery and a default model. Only
+`ModelCatalog::resolve()` chooses between the remote cache, the bundled snapshot and the compiled
+fallback, and neither of the first two carries this provider, so `join_compiled_only_entries` adds it to
+whichever layer won. Off maps to `none` because the app lists the levels the map names. OrcaRouter
+reports `cached_tokens` and `cache_write_tokens` apart, so the usage parser keeps them apart for it.
+The patch also makes `merge_compat` keep the base compat when there is no override. Upstream returned
+none there, so any `modelOverrides` entry without `compat` erased a built-in model's compat, which for
+OrcaRouter brought back the `developer` role and a 400 on every turn.
 
 When upstream incorporates a local fix, demonstrate the regression passing on that upstream base,
 then remove the redundant patch. Do not blindly carry patches or the helper across releases.

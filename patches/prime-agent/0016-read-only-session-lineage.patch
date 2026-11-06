@@ -1,8 +1,8 @@
 diff --git a/crates/pa-daemon/src/rlm_ledger.rs b/crates/pa-daemon/src/rlm_ledger.rs
-index 0b81c1c49..71209a1ea 100644
+index 03ff13398..bfbde2fd6 100644
 --- a/crates/pa-daemon/src/rlm_ledger.rs
 +++ b/crates/pa-daemon/src/rlm_ledger.rs
-@@ -256,6 +256,19 @@ impl RlmSpawnLedger {
+@@ -268,6 +268,19 @@ impl RlmSpawnLedger {
          &self.path
      }
  
@@ -22,7 +22,7 @@ index 0b81c1c49..71209a1ea 100644
      fn log(&self, message: &str) {
          (self.log)(message);
      }
-@@ -662,6 +675,45 @@ impl RlmSpawnLedger {
+@@ -754,6 +767,45 @@ impl RlmSpawnLedger {
              .collect())
      }
  

@@ -30,7 +30,7 @@ export async function scenarios(page, { app, test, shot, MOCK_WORKSPACE }) {
   await page.getByRole('button', { name: 'View default', exact: true }).click()
   let dialog = page.getByRole('dialog', { name: 'Engine built-in foundation', exact: true })
   await dialog.waitFor()
-  assert.match(await dialog.locator('pre').innerText(), /expert coding assistant/)
+  assert.match(await dialog.locator('pre').innerText(), /coding assistant running inside/)
   await shot('system-prompts-default-dark')
   await dialog.getByRole('button', { name: 'Customize foundation', exact: true }).click()
   dialog = page.getByRole('dialog', { name: 'SYSTEM.md · Global', exact: true })

@@ -1,5 +1,5 @@
 diff --git a/packages/coding-agent/test/tools.test.ts b/packages/coding-agent/test/tools.test.ts
-index c1a520c3..4c3c80aa 100644
+index 9703c9eaa..3ce3f7b51 100644
 --- a/packages/coding-agent/test/tools.test.ts
 +++ b/packages/coding-agent/test/tools.test.ts
 @@ -1,5 +1,5 @@
@@ -9,7 +9,7 @@ index c1a520c3..4c3c80aa 100644
  import * as fileOperations from "fs/promises";
  import { tmpdir } from "os";
  import { join } from "path";
-@@ -1139,7 +1139,9 @@ describe("tool cwd resolution", () => {
+@@ -1156,7 +1156,9 @@ describe("tool cwd resolution", () => {
  		);
  		const output = getTextOutput(result);
  		const nativePath = process.platform === "win32" ? normalizeWindowsShellPath(output.trim()) : output.trim();

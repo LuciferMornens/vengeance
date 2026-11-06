@@ -339,7 +339,7 @@ try {
             }
             send({
               type: 'ready', protocol: 1,
-              revision: '8aac8692456c00c01d4e53e60e6d3347a3506559',
+              revision: 'ea9d9602ec0938d9e454e8963107cd85af1565c6',
               providers: ['openai-codex', 'prime-inference', 'prime-agent-traces', 'anthropic'],
               mcp: true
             })

@@ -37,7 +37,7 @@ index e47a7b452..f33e4b841 100644
          return request_service_tier;
      }
 diff --git a/crates/pa-ai/src/providers/openai_codex_responses/mod.rs b/crates/pa-ai/src/providers/openai_codex_responses/mod.rs
-index 712bab182..c625b18a4 100644
+index 84c91f6e3..795672785 100644
 --- a/crates/pa-ai/src/providers/openai_codex_responses/mod.rs
 +++ b/crates/pa-ai/src/providers/openai_codex_responses/mod.rs
 @@ -63,10 +63,10 @@ pub struct OpenAICodexResponsesOptions {
@@ -93,7 +93,7 @@ index 712bab182..c625b18a4 100644
          reasoning_effort,
          ..Default::default()
 diff --git a/crates/pa-ai/src/providers/openai_responses.rs b/crates/pa-ai/src/providers/openai_responses.rs
-index d37a329a4..6fb32da2e 100644
+index 65809b825..3a0275831 100644
 --- a/crates/pa-ai/src/providers/openai_responses.rs
 +++ b/crates/pa-ai/src/providers/openai_responses.rs
 @@ -91,10 +91,10 @@ pub struct OpenAIResponsesOptions {
@@ -108,7 +108,7 @@ index d37a329a4..6fb32da2e 100644
          }
      }
  }
-@@ -281,13 +281,20 @@ async fn run_stream(
+@@ -289,13 +289,20 @@ async fn run_stream(
      output: &mut AssistantMessage,
      writer: &AssistantMessageEventWriter,
  ) -> Result<(), ProviderError> {
@@ -130,7 +130,7 @@ index d37a329a4..6fb32da2e 100644
      let cache_retention = resolve_cache_retention(options.base.cache_retention);
      let cache_session_id = if cache_retention == CacheRetention::None {
          None
-@@ -454,10 +461,10 @@ pub fn stream_simple_openai_responses(
+@@ -462,10 +469,10 @@ pub fn stream_simple_openai_responses(
          .map(|reasoning| clamp_thinking_level(model, reasoning));
      let reasoning_effort = clamped_reasoning.filter(|level| *level != ModelThinkingLevel::Off);
      let stream_options = OpenAIResponsesOptions {
@@ -713,7 +713,7 @@ index 000000000..10fcbce56
 +    server.await.unwrap();
 +}
 diff --git a/crates/pa-core/src/settings/manager.rs b/crates/pa-core/src/settings/manager.rs
-index 6e9af35b5..e2bf53e2b 100644
+index 9d0b6a900..5871479dc 100644
 --- a/crates/pa-core/src/settings/manager.rs
 +++ b/crates/pa-core/src/settings/manager.rs
 @@ -619,6 +619,7 @@ impl SettingsManager {
@@ -733,7 +733,7 @@ index 6e9af35b5..e2bf53e2b 100644
                  _ => None,
              })
 diff --git a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
-index c2fffb77d..50e014a20 100644
+index 69b52bef0..7d1ee9f4e 100644
 --- a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
 +++ b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
 @@ -372,6 +372,22 @@ impl SessionEngine for AgentSessionEngine {
@@ -760,10 +760,10 @@ index c2fffb77d..50e014a20 100644
          // Merge like the TS runtime config: explicit wire flags replace; absent fields keep.
          {
 diff --git a/crates/pa-daemon/src/engine.rs b/crates/pa-daemon/src/engine.rs
-index 7451f58f2..a5ace06bf 100644
+index a5f86e33f..660fe6d30 100644
 --- a/crates/pa-daemon/src/engine.rs
 +++ b/crates/pa-daemon/src/engine.rs
-@@ -271,6 +271,13 @@ pub trait SessionEngine: Send + Sync {
+@@ -274,6 +274,13 @@ pub trait SessionEngine: Send + Sync {
      /// Set the session's resolved service-tier preference before the next request.
      fn configure_service_tier(&self, _tier: Option<pa_types::ai::ServiceTier>) {}
  
@@ -803,7 +803,7 @@ index 20e1523a5..7f89750fe 100644
              .then_some(tier)
              .or(Some(ServiceTier::Default)),
 diff --git a/crates/pa-daemon/src/worker/commands.rs b/crates/pa-daemon/src/worker/commands.rs
-index 8aef0523f..d720269d8 100644
+index be735dbd5..c8f2c1e5f 100644
 --- a/crates/pa-daemon/src/worker/commands.rs
 +++ b/crates/pa-daemon/src/worker/commands.rs
 @@ -106,7 +106,22 @@ impl Worker {
