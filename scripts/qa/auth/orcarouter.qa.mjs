@@ -84,8 +84,8 @@ function assistantMessages(state) {
     .filter((message) => message.role === 'assistant')
 }
 
-function assistantText(state) {
-  return assistantMessages(state)
+function assistantText(messages) {
+  return messages
     .flatMap((message) => message.content)
     .filter((content) => content.type === 'text')
     .map((content) => content.text)
@@ -148,11 +148,41 @@ async function sendTurn(app, server, prompt, answers, settle) {
   await app.send(prompt)
   await (settle?.(app) ??
     app.waitForSettle({ timeoutMs: LIVE ? LIVE_TURN_TIMEOUT_MS : FAKE_TURN_TIMEOUT_MS }))
-  const state = await app.agentState()
   return {
-    state,
     requests: server.requests.slice(from).filter((request) => request.method === 'POST'),
-    messages: assistantMessages(state).slice(seen)
+    messages: assistantMessages(await app.agentState()).slice(seen)
+  }
+}
+
+/** Exact usage figures and saved-level moves, which only a fake provider can pin down. */
+async function accountingChecks({ app, server, checks, prefix, agentId }) {
+  await checks.check(`${prefix} cache reads and writes are counted apart`, async () => {
+    const { messages } = await sendTurn(app, server, REPLY_PROMPT, [
+      turn.text('ok', { usage: CACHE_USAGE })
+    ])
+    const { usage } = messages.at(-1)
+    assert.equal(usage.input, CACHE_USAGE.input)
+    assert.equal(usage.cacheRead, CACHE_USAGE.cacheRead)
+    assert.equal(usage.cacheWrite, CACHE_USAGE.cacheWrite)
+    const expected =
+      (CACHE_USAGE.input * MODEL_COST.input +
+        CACHE_USAGE.output * MODEL_COST.output +
+        CACHE_USAGE.cacheRead * MODEL_COST.cacheRead +
+        CACHE_USAGE.cacheWrite * MODEL_COST.cacheWrite) /
+      TOKENS_PER_MILLION
+    assert.ok(Math.abs(usage.cost.total - expected) < COST_TOLERANCE, `cost ${usage.cost.total}`)
+  })
+
+  for (const [saved, offered] of Object.entries(SAVED_LEVELS)) {
+    await checks.check(`${prefix} a saved ${saved} level moves up to ${offered}`, async () => {
+      await app.rpc({ type: 'set_thinking_level', level: saved }, agentId)
+      await until(
+        async () => (await app.rpc({ type: 'get_state' }, agentId)).thinkingLevel === offered,
+        {
+          label: `${saved} clamps to ${offered}`
+        }
+      )
+    })
   }
 }
 
@@ -191,7 +221,7 @@ async function suiteBody(fixture, app, checks) {
         assert.deepEqual(model.thinkingLevels, LEVELS)
         assert.deepEqual(model.input, ['text', 'image'])
         assert.equal(model.contextWindow, MODEL_LIMITS.contextWindow)
-        assert.ok(model.maxTokens === (LIVE ? LIVE_OUTPUT_LIMIT : MODEL_LIMITS.maxTokens))
+        assert.equal(model.maxTokens, LIVE ? LIVE_OUTPUT_LIMIT : MODEL_LIMITS.maxTokens)
         assert.deepEqual(model.cost, MODEL_COST)
       }
     )
@@ -205,7 +235,8 @@ async function suiteBody(fixture, app, checks) {
       async () => {
         const directory = engine.id === 'pi' ? fixture.piDirectory.dir : fixture.primeDirectory
         const auth = JSON.parse(await readFile(join(directory, 'auth.json'), 'utf8'))
-        assert.equal(auth[PROVIDER]?.key, API_KEY, 'the key is saved in the temporary account only')
+        // assert.ok: a failed comparison must not print the key.
+        assert.ok(auth[PROVIDER]?.key === API_KEY, 'the key is saved in the temporary account only')
         const catalog = await engineSettings(app, engine.id, 'settings:catalog')
         const provider = catalog.providers.find((entry) => entry.id === PROVIDER)
         assert.equal(provider.name, 'OrcaRouter')
@@ -267,8 +298,7 @@ async function suiteBody(fixture, app, checks) {
           }
           assert.equal(messages.at(-1)?.stopReason, 'stop', messages.at(-1)?.errorMessage)
           if (LIVE) {
-            const text = assistantText({ entries: messages.map((message) => ({ message })) })
-            assert.match(text.toLowerCase(), /ok/)
+            assert.match(assistantText(messages).toLowerCase(), /ok/)
             return
           }
           assert.equal(requests.length, 1)
@@ -282,12 +312,12 @@ async function suiteBody(fixture, app, checks) {
       `${prefix} tool continuation replays reasoning with the tool result`,
       async () => {
         await pickThinkingLevel(app, 'high')
-        const { state, requests } = await sendTurn(app, server, TOOL_PROMPT, [
+        const { requests, messages } = await sendTurn(app, server, TOOL_PROMPT, [
           turn.toolCall(engine.tool, engine.toolArguments, { thinking: 'Read the proof.' }),
           turn.text(TOOL_MARKER)
         ])
         assert.ok(
-          assistantText(state).includes(TOOL_MARKER),
+          assistantText(messages).includes(TOOL_MARKER),
           'the model returned the file contents'
         )
         if (LIVE) return
@@ -310,43 +340,13 @@ async function suiteBody(fixture, app, checks) {
       ])
       assert.equal(messages.at(-1)?.stopReason, 'stop', messages.at(-1)?.errorMessage)
       if (LIVE) {
-        const text = assistantText({ entries: messages.map((message) => ({ message })) })
-        assert.match(text, /red/i)
+        assert.match(assistantText(messages), /red/i)
         return
       }
       assert.equal(inspectRequest(requests[0]).imageCount, 1)
     })
 
-    if (LIVE) continue
-
-    await checks.check(`${prefix} cache reads and writes are counted apart`, async () => {
-      const { messages } = await sendTurn(app, server, REPLY_PROMPT, [
-        turn.text('ok', { usage: CACHE_USAGE })
-      ])
-      const { usage } = messages.at(-1)
-      assert.equal(usage.input, CACHE_USAGE.input)
-      assert.equal(usage.cacheRead, CACHE_USAGE.cacheRead)
-      assert.equal(usage.cacheWrite, CACHE_USAGE.cacheWrite)
-      const expected =
-        (CACHE_USAGE.input * MODEL_COST.input +
-          CACHE_USAGE.output * MODEL_COST.output +
-          CACHE_USAGE.cacheRead * MODEL_COST.cacheRead +
-          CACHE_USAGE.cacheWrite * MODEL_COST.cacheWrite) /
-        TOKENS_PER_MILLION
-      assert.ok(Math.abs(usage.cost.total - expected) < COST_TOLERANCE, `cost ${usage.cost.total}`)
-    })
-
-    for (const [saved, offered] of Object.entries(SAVED_LEVELS)) {
-      await checks.check(`${prefix} a saved ${saved} level moves up to ${offered}`, async () => {
-        await app.rpc({ type: 'set_thinking_level', level: saved }, agentId)
-        await until(
-          async () => (await app.rpc({ type: 'get_state' }, agentId)).thinkingLevel === offered,
-          {
-            label: `${saved} clamps to ${offered}`
-          }
-        )
-      })
-    }
+    if (!LIVE) await accountingChecks({ app, server, checks, prefix, agentId })
 
     await checks.check(`${prefix} no unexpected app errors`, async () => app.assertNoErrors())
   }

@@ -145,7 +145,7 @@ try {
   const response = await invoke('engine:command', agentId, { type: 'get_tree' })
   const live = await invoke('engine:command', agentId, { type: 'get_entries' })
   assert(response.success && live.success, 'get_tree and get_entries answer')
-  assert(isDeepStrictEqual(response.data.nodes, sessionTreeFromEntries(live.data.entries)), 'get_tree answers with the tree rebuilt from get_entries')
+  assert(isDeepStrictEqual(response.data.nodes, sessionTreeFromEntries(live.data.entries)), 'get_tree answers with the tree the get_entries rules give')
   assert(response.data.leafId === live.data.leafId, 'with the engine leaf')
   const listed = new Set(response.data.nodes.map((node) => node.entry.id))
   assert(entries.every((entry) => listed.has(entry.id)), `all ${entries.length} entries of the file are in it`)

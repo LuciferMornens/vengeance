@@ -193,7 +193,11 @@ for (const doc of docs) {
         ? 'global only (both)'
         : 'global only (Engine)'
       : 'global + project',
-    status: notes.length ? notes.join('; ') : 'match'
+    status: notes.length
+      ? notes.join('; ')
+      : NOT_APPLICABLE_KEYS.has(doc.key)
+        ? 'not applicable'
+        : 'match'
   })
 }
 

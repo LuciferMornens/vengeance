@@ -47,9 +47,10 @@ qualifies the bundled extensions against it.
 
 ## Prime 0.10.2
 
-The series shrinks from 22 to 21 patches; see the [Prime patch guide](../patches/prime-agent/README.md).
-`0010` is retired: upstream #3823 deleted the dead built-in `bash` and `edit` tools it reported Windows
-failures for, so no code remains to patch, and the same removal took the matching hunks out of `0008`.
+The series stays at 21 patches; see the [Prime patch guide](../patches/prime-agent/README.md). `0025`
+joins it and `0010` is retired: upstream #3823 deleted the dead built-in `bash` and `edit` tools it reported
+Windows failures for, so no code remains to patch, and the same removal took the matching hunks out of
+`0008`.
 `0015` keeps both `session_id` and `native_messages` in `compact_session.rs`, and `0024` keeps both
 tests in `agent_engine/tests/session.rs`.
 
