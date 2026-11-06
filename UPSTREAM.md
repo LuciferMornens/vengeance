@@ -67,7 +67,9 @@ against the packaged app; the source account and package files are never modifie
    be exported as patches first; an altered payload is rejected instead of silently trusted. A staged
    payload whose inputs and inventory still match is reused without a checkout or network; one staged
    for another platform is rebuilt. `-- --engine=pi` or `prime` builds just one backend. `npm run build`
-   and `npm run dev` prepare both engines and the helper automatically.
+   and `npm run dev` prepare both engines and the helper automatically. A Prime rebase also moves
+   `resources/prime-auth/Cargo.lock` to at least Prime's own tokio. Prime's Unix-only code does not
+   compile on Windows, so an older tokio fails only on Linux and macOS.
 4. Run the qualification matrix, then `npm run dist` (the host's packages: NSIS on Windows, dmg and zip
    on macOS, AppImage, deb, rpm and tar.gz on Linux, plus pacman on Linux x64) or
    `npm run dist:qa -- --dir`. The packaging hooks verify both payloads, their build inputs and their

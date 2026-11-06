@@ -13,7 +13,8 @@ unreleased and were not adopted.
 
 pi's tag points directly at its commit; Prime's annotated tag `26b06045` peels to its commit. Prime's
 model catalog moves to `01f4d46dd5157ec73f8faf440214088237c81d59`. The helper links the same patched
-Prime revision.
+Prime revision, and its lock moves to Prime's tokio 1.54.1 because Prime's Unix process code calls
+`AsyncFd::register_with_interest`, which 1.53.2 lacks.
 
 Sources: [pi release](https://github.com/earendil-works/pi/releases/tag/v1.5.0) and
 [Prime release](https://github.com/PrimeIntellect-ai/prime-agent/releases/tag/v0.10.2).
