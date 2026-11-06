@@ -21,6 +21,7 @@ const PROVIDER_COLORS: Record<string, string> = {
   'google-vertex': '#4c8df6',
   'google-gemini-cli': '#4c8df6',
   openrouter: '#8b7cf6',
+  orcarouter: '#2f7bf6',
   xai: '#a1a1aa',
   mistral: '#fa7a2a',
   deepseek: '#4d6bfe',

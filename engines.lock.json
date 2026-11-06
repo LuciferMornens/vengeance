@@ -19,9 +19,9 @@
   },
   "pi": {
     "repository": "https://github.com/earendil-works/pi.git",
-    "tag": "v1.4.0",
-    "revision": "4a080252f06caf63a525d7873c5d94d3c23887e0",
-    "version": "1.4.0+vengeance.2",
+    "tag": "v1.5.0",
+    "revision": "f9a26365568127461c47a07a37dcb42c140a3ac5",
+    "version": "1.5.0+vengeance.1",
     "patches": [
       "patches/pi/0001-vengeance-distribution.patch",
       "patches/pi/0002-preserve-extension-runtime-version.patch",
@@ -32,16 +32,17 @@
       "patches/pi/0008-posix-shell-test-paths.patch",
       "patches/pi/0009-mcp-host-state.patch",
       "patches/pi/0010-oauth-refresh-rejection.patch",
-      "patches/pi/0011-image-request-limit.patch"
+      "patches/pi/0011-image-request-limit.patch",
+      "patches/pi/0012-orcarouter-provider.patch"
     ],
     "packageDir": "pi/node_modules/@earendil-works/pi-coding-agent",
     "entry": "pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
   },
   "prime": {
     "repository": "https://github.com/PrimeIntellect-ai/prime-agent.git",
-    "tag": "v0.10.1",
-    "revision": "8aac8692456c00c01d4e53e60e6d3347a3506559",
-    "version": "0.10.1+vengeance.1",
+    "tag": "v0.10.2",
+    "revision": "ea9d9602ec0938d9e454e8963107cd85af1565c6",
+    "version": "0.10.2+vengeance.1",
     "patches": [
       "patches/prime-agent/0001-fix-cancel-provider-HTTP-streams-when-compaction-is-.patch",
       "patches/prime-agent/0002-fix-synchronize-persisted-user-shell-output-with-liv.patch",
@@ -52,7 +53,6 @@
       "patches/prime-agent/0007-daemon-transport-qualification.patch",
       "patches/prime-agent/0008-native-test-fixtures.patch",
       "patches/prime-agent/0009-windows-package-launcher.patch",
-      "patches/prime-agent/0010-windows-edit-errors.patch",
       "patches/prime-agent/0011-windows-incident-rotation.patch",
       "patches/prime-agent/0012-live-model-image-capabilities.patch",
       "patches/prime-agent/0013-pin-session-model-selection.patch",
@@ -63,7 +63,8 @@
       "patches/prime-agent/0020-native-append-system-prompt.patch",
       "patches/prime-agent/0021-acp-fixture-cleanup.patch",
       "patches/prime-agent/0023-bundled-python-wheel.patch",
-      "patches/prime-agent/0024-mcp-live-status.patch"
+      "patches/prime-agent/0024-mcp-live-status.patch",
+      "patches/prime-agent/0025-orcarouter-provider.patch"
     ],
     "runtimeWheels": {
       "darwin-x64": {
@@ -117,7 +118,7 @@
         ]
       }
     },
-    "catalogRevision": "b90e08807c37ccdfab04eb31b23de6a86dd6e7fe",
+    "catalogRevision": "01f4d46dd5157ec73f8faf440214088237c81d59",
     "rustVersion": "1.98.1",
     "packageDir": "prime",
     "entry": "prime/prime-agent"

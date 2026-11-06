@@ -48,6 +48,15 @@ assert.deepEqual(models.getSupportedThinkingLevels(sonnet), [
   'max'
 ])
 
+const orcarouter = catalog.getBuiltinModel('orcarouter', 'orca/orcacyber-k3.1-pro')
+assert.equal(orcarouter.reasoning, true)
+assert.deepEqual(orcarouter.input, ['text', 'image'])
+assert.equal(orcarouter.contextWindow, 1_048_576)
+assert.equal(orcarouter.maxTokens, 943_718)
+assert.deepEqual(orcarouter.cost, { input: 4, output: 20, cacheRead: 0.35, cacheWrite: 4 })
+assert.deepEqual(models.getSupportedThinkingLevels(orcarouter), ['off', 'low', 'high', 'max'])
+assert.equal(orcarouter.compat.supportsDeveloperRole, false)
+
 console.log(
-  '✓ native Claude catalog: Haiku capabilities, pricing and Off thinking; Sonnet cache price'
+  '✓ native catalog: Haiku capabilities, pricing and Off thinking; Sonnet cache price; OrcaRouter'
 )

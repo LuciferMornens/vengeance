@@ -78,9 +78,9 @@ export function sessionTreeFromEntries(entries: SessionEntry[]): FlatTreeNode[] 
 }
 
 /**
- * `get_tree` for the renderer. The engine serializes its nested tree recursively and fails past roughly
- * 2200 linear entries (pi 1.1.0: "Maximum call stack size exceeded"), so on any get_tree failure the tree
- * is rebuilt from the flat `get_entries`. When that fails too, the get_tree failure stands.
+ * `get_tree` for the renderer. The engine serializes a nested tree, which failed past roughly 2200 linear
+ * entries on pi 1.1.0 ("Maximum call stack size exceeded") and passes at 48,000 on 1.5.0. On any get_tree
+ * failure the tree is rebuilt from the flat `get_entries`. When that fails too, the get_tree failure stands.
  */
 export async function requestSessionTree(handle: EngineHandle, command: RpcCommand & { type: 'get_tree' }): Promise<RpcResponse> {
   let failure: RpcResponse | Error

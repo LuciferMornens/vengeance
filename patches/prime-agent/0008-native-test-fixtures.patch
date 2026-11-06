@@ -155,7 +155,7 @@ index 7433730dc..9b0ef03e3 100644
          .path()
          .join(format!("prime-agent-{version}-{host_platform}"));
 diff --git a/crates/pa-cli/tests/print_runtime_e2e.rs b/crates/pa-cli/tests/print_runtime_e2e.rs
-index c71ad9e0b..882051707 100644
+index 748474873..71b6793d7 100644
 --- a/crates/pa-cli/tests/print_runtime_e2e.rs
 +++ b/crates/pa-cli/tests/print_runtime_e2e.rs
 @@ -16,12 +16,17 @@
@@ -256,32 +256,37 @@ index c71ad9e0b..882051707 100644
      let (stdout, stderr, code) = run_in_home(home.path(), &["-p", &seed, &probe], &script);
      assert_eq!(code, 1, "stderr: {stderr}");
      assert!(stdout.is_empty());
-@@ -807,11 +814,11 @@ fn print_mode_json_streams_the_threshold_compaction_pair() {
-             "compaction": { "enabled": true, "reserveTokens": 1, "keepRecentTokens": 10 }
+@@ -808,10 +815,17 @@ fn print_mode_json_streams_the_threshold_compaction_pair() {
          }),
      );
--    // A small context window: the ~8.1k seed turn stays below the 15_808
--    // ceiling (24k - 4_096 output - 4_096 headroom), and the ~12k-token
--    // crossing turn pushes past it.
-+    // The seed stays below the reserve ceiling; the crossing prompt pushes
-+    // past it. The Windows ceiling accommodates its shorter command line.
-+    let context_window = if cfg!(windows) { 18_000 } else { 24_000 };
+     // The session-scoped faux cache counts the ~8.1k seed prompt as input
+-    // plus cache-write tokens. It stays below the 23_808 ceiling (32k -
+-    // 4_096 output - 4_096 headroom); the crossing turn exceeds it.
++    // plus cache-write tokens. It stays below the reserve ceiling (window -
++    // 4_096 output - 4_096 headroom); the crossing turn exceeds it. Windows
++    // caps a command line near 32 KiB, so it pairs a smaller crossing prompt
++    // with a lower ceiling.
++    let (context_window, crossing_bytes) = if cfg!(windows) {
++        (27_000, 24_000)
++    } else {
++        (32_000, COMPACTION_PROMPT_BYTES)
++    };
      let script = serde_json::json!({
--        "contextWindow": 24000,
+-        "contextWindow": 32000,
 +        "contextWindow": context_window,
          "responses": [
              {"text": "seed reply"},
              {"text": "crossing reply"},
-@@ -819,7 +826,7 @@ fn print_mode_json_streams_the_threshold_compaction_pair() {
+@@ -819,7 +833,7 @@ fn print_mode_json_streams_the_threshold_compaction_pair() {
          ]
      });
      let first = "seed turn".to_string();
 -    let second = format!("crossing turn {}", "x".repeat(48_000));
-+    let second = format!("crossing turn {}", "x".repeat(COMPACTION_PROMPT_BYTES));
++    let second = format!("crossing turn {}", "x".repeat(crossing_bytes));
      let (stdout, stderr, code) = run_in_home(
          home.path(),
          &["--mode", "json", "-p", &first, &second],
-@@ -885,6 +892,7 @@ fn run_in_home_cwd(
+@@ -885,6 +899,7 @@ fn run_in_home_cwd(
      let output = Command::new(bin)
          .args(args)
          .env("HOME", home)
@@ -289,7 +294,7 @@ index c71ad9e0b..882051707 100644
          .env("PRIME_AGENT_FAUX_SCRIPT", script.to_string())
          .env_remove("PRIME_AGENT_CODING_AGENT_DIR")
          .env_remove("PRIME_AGENT_SESSION_DIR")
-@@ -942,8 +950,8 @@ fn print_mode_fork_copies_the_session_into_a_new_file() {
+@@ -942,8 +957,8 @@ fn print_mode_fork_copies_the_session_into_a_new_file() {
      let fork_entries = read_entries(fork);
      assert_ne!(fork_entries[0]["id"], session_id.as_str());
      assert_eq!(
@@ -300,7 +305,7 @@ index c71ad9e0b..882051707 100644
      );
      let texts: Vec<&str> = fork_entries
          .iter()
-@@ -1013,8 +1021,8 @@ fn print_mode_fork_imports_a_global_session_into_this_cwd() {
+@@ -1013,8 +1028,8 @@ fn print_mode_fork_imports_a_global_session_into_this_cwd() {
          "the fork adopts the TARGET cwd"
      );
      assert_eq!(
@@ -311,7 +316,7 @@ index c71ad9e0b..882051707 100644
      );
      let texts: Vec<&str> = fork_entries
          .iter()
-@@ -1031,7 +1039,7 @@ fn print_mode_fork_imports_a_global_session_into_this_cwd() {
+@@ -1031,7 +1046,7 @@ fn print_mode_fork_imports_a_global_session_into_this_cwd() {
  fn print_mode_fork_rejects_empty_sources_and_conflicting_flags() {
      let home = isolated_home();
      // An empty session file, addressed by path.
@@ -438,77 +443,6 @@ index 105fd4e9f..14f670a42 100644
              }))
              .unwrap(),
          )
-diff --git a/crates/pa-core/src/tools/golden_replay.rs b/crates/pa-core/src/tools/golden_replay.rs
-index 94c021eff..0dc5b67aa 100644
---- a/crates/pa-core/src/tools/golden_replay.rs
-+++ b/crates/pa-core/src/tools/golden_replay.rs
-@@ -30,7 +30,9 @@ fn corpus(name: &str) -> serde_json::Value {
- 
- /// Normalize temp paths to the forms the recorded corpus uses.
- fn norm_string(s: &str, tmp: &str) -> String {
--    let out = s.replace(&format!("{tmp}/"), "<TMP>/");
-+    let out = s
-+        .replace(&format!("{tmp}/"), "<TMP>/")
-+        .replace(&format!("{tmp}\\"), "<TMP>/");
-     let re = regex_lite("golden-[A-Za-z0-9_]{6}");
-     let out = re.replace_all(&out, "golden-<ID>").into_owned();
-     let re = regex_lite(r"pi-(?:bash|output)-[0-9a-f]+\.log");
-@@ -61,7 +63,7 @@ fn tmp_root() -> &'static str {
-         std::env::temp_dir()
-             .to_str()
-             .expect("utf-8 tmpdir")
--            .trim_end_matches('/')
-+            .trim_end_matches(['/', '\\'])
-             .to_string()
-     })
- }
-@@ -89,9 +91,13 @@ fn make_fixture(case: &serde_json::Value) -> (tempfile::TempDir, String) {
-     if let Some(commands) = case.get("fixture").and_then(serde_json::Value::as_array) {
-         for command in commands {
-             let command = command.as_str().expect("fixture command");
--            let status = std::process::Command::new("/bin/bash")
--                .arg("-c")
-+            let shell = crate::tools::shell_utils::get_shell_config(None).unwrap();
-+            let status = std::process::Command::new(&shell.shell)
-+                .args(&shell.args)
-                 .arg(command)
-+                // The corpus commits use UTC dates and untranslated LF blobs.
-+                .env("TZ", "UTC")
-+                .env("GIT_CONFIG_NOSYSTEM", "1")
-                 .current_dir(dir.path())
-                 .status()
-                 .expect("run fixture command");
-@@ -215,6 +221,21 @@ async fn golden_bash_group_matches_ts() {
-             continue;
-         }
-         let (dir, dir_path) = make_fixture(case);
-+        let command = case["command"].as_str().expect("command");
-+        // The frozen Unix corpus uses python3 and LF output. Windows Python's
-+        // launcher and newline defaults differ; the tested Python code does not.
-+        let command = if cfg!(windows) {
-+            command.strip_prefix("python3 -c \"").map_or_else(
-+                || command.to_string(),
-+                |code| {
-+                    format!(
-+                        "python -X utf8 -c \"import sys; sys.stdout.reconfigure(newline='\\n'); {code}"
-+                    )
-+                },
-+            )
-+        } else {
-+            command.to_string()
-+        };
-         if case
-             .get("envBypass")
-             .and_then(serde_json::Value::as_bool)
-@@ -225,7 +246,7 @@ async fn golden_bash_group_matches_ts() {
-         let result = bash::execute_bash(
-             &dir_path,
-             &BashToolOptions::default(),
--            case["command"].as_str().expect("command"),
-+            &command,
-             case.get("timeout").and_then(serde_json::Value::as_f64),
-             case.get("allowDestructiveGit")
-                 .and_then(serde_json::Value::as_bool),
 diff --git a/crates/pa-core/src/tools/path_utils.rs b/crates/pa-core/src/tools/path_utils.rs
 index 9a9d3d8dd..679c2b24b 100644
 --- a/crates/pa-core/src/tools/path_utils.rs
@@ -554,41 +488,6 @@ index 9a9d3d8dd..679c2b24b 100644
      }
  
      /// POSIX dispatcher semantics; the win32 sibling lives below (the dispatcher is
-diff --git a/crates/pa-core/src/tools/shell_utils.rs b/crates/pa-core/src/tools/shell_utils.rs
-index 0b27d3c8a..872bfbfa3 100644
---- a/crates/pa-core/src/tools/shell_utils.rs
-+++ b/crates/pa-core/src/tools/shell_utils.rs
-@@ -112,7 +112,14 @@ mod tests {
-     #[test]
-     fn shell_config_prefers_bin_bash() {
-         let cfg = get_shell_config(None).unwrap();
--        assert_eq!(cfg.shell, "/bin/bash");
-+        if cfg!(windows) {
-+            assert_eq!(
-+                std::path::Path::new(&cfg.shell).file_name().unwrap(),
-+                "bash.exe"
-+            );
-+        } else {
-+            assert_eq!(cfg.shell, "/bin/bash");
-+        }
-         assert_eq!(cfg.args, vec!["-c".to_string()]);
-     }
- 
-@@ -121,7 +128,13 @@ mod tests {
-         let env = get_shell_env();
-         assert_eq!(env.get("GIT_TERMINAL_PROMPTS").unwrap(), "0");
-         assert_eq!(env.get("PAGER").unwrap(), "cat");
--        assert!(env.get("PATH").unwrap().contains("/bin"));
-+        let path = env
-+            .iter()
-+            .find(|(name, _)| name.eq_ignore_ascii_case("path"))
-+            .unwrap()
-+            .1;
-+        assert!(std::env::split_paths(path)
-+            .any(|directory| directory == std::path::Path::new(&get_bin_dir())));
-     }
- 
-     #[test]
 diff --git a/crates/pa-core/tests/kernel_prewarm.rs b/crates/pa-core/tests/kernel_prewarm.rs
 index 9cf79139e..e966493ae 100644
 --- a/crates/pa-core/tests/kernel_prewarm.rs
@@ -615,6 +514,23 @@ index 9cf79139e..e966493ae 100644
      );
 +    engine.dispose_kernel().await;
  }
+diff --git a/crates/pa-core/tests/kernel_snapshot_resume.rs b/crates/pa-core/tests/kernel_snapshot_resume.rs
+index 8bb00f605..c9dccca62 100644
+--- a/crates/pa-core/tests/kernel_snapshot_resume.rs
++++ b/crates/pa-core/tests/kernel_snapshot_resume.rs
+@@ -331,9 +331,9 @@ async fn session_end_then_resume_prewarms_and_revives_the_namespace() {
+         .canonicalize()
+         .expect("canonicalize the fixture cwd");
+     assert!(
+-        read_back
+-            .lines()
+-            .any(|line| Path::new(line.trim()) == session_cwd.as_path()),
++        read_back.lines().any(|line| Path::new(line.trim())
++            .canonicalize()
++            .is_ok_and(|path| path == session_cwd)),
+         "the resumed kernel must run at the session cwd: {read_back}"
+     );
+     assert!(
 diff --git a/crates/pa-daemon/src/agent_engine/tests/autonomous.rs b/crates/pa-daemon/src/agent_engine/tests/autonomous.rs
 index 9f2b9742f..953182960 100644
 --- a/crates/pa-daemon/src/agent_engine/tests/autonomous.rs
@@ -632,10 +548,10 @@ index 9f2b9742f..953182960 100644
          AgentSessionEngine::new(AgentEngineConfig {
              cwd: dir.path().to_path_buf(),
 diff --git a/crates/pa-daemon/src/rlm_children/usage_emit_tests.rs b/crates/pa-daemon/src/rlm_children/usage_emit_tests.rs
-index 82bd6c2a0..a383f4e28 100644
+index 9a250ba4a..c7782aae1 100644
 --- a/crates/pa-daemon/src/rlm_children/usage_emit_tests.rs
 +++ b/crates/pa-daemon/src/rlm_children/usage_emit_tests.rs
-@@ -272,9 +272,9 @@ async fn reseed_lists_live_ledger_children_settled_and_bills_only_after_a_delive
+@@ -273,9 +273,9 @@ async fn reseed_lists_live_ledger_children_settled_and_bills_only_after_a_delive
          .unwrap();
      }
      let spawn = |child_id: &str, parent: &str, child: &str| {
@@ -648,7 +564,7 @@ index 82bd6c2a0..a383f4e28 100644
      };
      let ledger_path = crate::rlm_ledger::rlm_ledger_path(&agent, &daemon_sessions);
      std::fs::create_dir_all(ledger_path.parent().expect("ledger dir")).unwrap();
-@@ -287,9 +287,9 @@ async fn reseed_lists_live_ledger_children_settled_and_bills_only_after_a_delive
+@@ -288,9 +288,9 @@ async fn reseed_lists_live_ledger_children_settled_and_bills_only_after_a_delive
              spawn("sub-b", &parent_one, &child_two).as_str(),
              spawn("sub-legacy", &parent_one, &child_legacy).as_str(),
              spawn("sub-c", &parent_one, &child_three).as_str(),
@@ -662,7 +578,7 @@ index 82bd6c2a0..a383f4e28 100644
              spawn("sub-d", &parent_two, &child_four).as_str(),
          ]
 diff --git a/crates/pa-daemon/src/rlm_ledger/tests.rs b/crates/pa-daemon/src/rlm_ledger/tests.rs
-index 686711572..f6d5d7f63 100644
+index 13871b0ca..f5b6f475b 100644
 --- a/crates/pa-daemon/src/rlm_ledger/tests.rs
 +++ b/crates/pa-daemon/src/rlm_ledger/tests.rs
 @@ -28,9 +28,11 @@ fn legacy_registry_probe_reads_the_header_line_bounded() {
@@ -761,7 +677,7 @@ index 66968e0c8..3f9739093 100644
          super::SESSION_SCAN_MAX_CACHED_STATES,
          cache.states.len(),
 diff --git a/crates/pa-daemon/src/supervisor/tests.rs b/crates/pa-daemon/src/supervisor/tests.rs
-index f3f5438aa..442c93c34 100644
+index e35a5eb68..d03287693 100644
 --- a/crates/pa-daemon/src/supervisor/tests.rs
 +++ b/crates/pa-daemon/src/supervisor/tests.rs
 @@ -2271,7 +2271,11 @@ async fn a_ledger_delete_never_tombstones_an_unrelated_edge_sharing_the_child_id
@@ -777,11 +693,22 @@ index f3f5438aa..442c93c34 100644
  }
  
  #[tokio::test]
+@@ -2584,7 +2588,9 @@ async fn a_restarted_supervisors_registration_seeds_the_roster_family() {
+     assert_eq!(row.summary["rlmChildId"], "sub-9");
+     assert_eq!(
+         row.summary["parentSessionPath"],
+-        root_file.to_string_lossy().to_string()
++        crate::lease::canonical_session_path(&root_file)
++            .to_string_lossy()
++            .to_string()
+     );
+     assert_eq!(row.summary["runtimeKind"], "subagent");
+     assert_eq!(row.worker_id, None, "the seeded row, never a worker's");
 diff --git a/crates/pa-daemon/src/supervisor_roster_seed.rs b/crates/pa-daemon/src/supervisor_roster_seed.rs
-index 05057f850..42ea4dea5 100644
+index ef9fa19be..c83dd7442 100644
 --- a/crates/pa-daemon/src/supervisor_roster_seed.rs
 +++ b/crates/pa-daemon/src/supervisor_roster_seed.rs
-@@ -887,7 +887,9 @@ pub(crate) mod tests {
+@@ -865,7 +865,9 @@ pub(crate) mod tests {
          );
          assert_eq!(
              immediate.summary["cwd"],

@@ -1,5 +1,5 @@
 diff --git a/crates/pa-cli/tests/acp_mode_e2e.rs b/crates/pa-cli/tests/acp_mode_e2e.rs
-index a08dadff6..87bd6b57c 100644
+index 7bc9a6109..b1a098ff1 100644
 --- a/crates/pa-cli/tests/acp_mode_e2e.rs
 +++ b/crates/pa-cli/tests/acp_mode_e2e.rs
 @@ -34,7 +34,7 @@ struct AcpChild {
@@ -93,7 +93,7 @@ index a08dadff6..87bd6b57c 100644
      std::fs::write(
          home.path().join("worker-script.json"),
          json!({ "engine": "faux", "responses": ["unused"] }).to_string(),
-@@ -1861,10 +1886,19 @@ fn daemon_request(socket: &std::path::Path, id: &str, command: &Value) -> Value
+@@ -1992,10 +2017,19 @@ fn daemon_request(socket: &std::path::Path, id: &str, command: &Value) -> Value
      let frame = json!({ "type": "command", "id": id, "protocol": protocol, "command": command });
      writeln!(writer, "{frame}").expect("daemon frame");
      writer.flush().expect("daemon flush");
@@ -114,7 +114,7 @@ index a08dadff6..87bd6b57c 100644
          })
          .find(|frame| frame["id"] == json!(id))
          .unwrap_or_else(|| panic!("the daemon closed without answering {id}"))
-@@ -2548,6 +2582,12 @@ fn acp_daemon_attached_close_holds_the_input_pause_until_the_next_session_new()
+@@ -2679,6 +2713,12 @@ fn acp_daemon_attached_close_holds_the_input_pause_until_the_next_session_new()
          "foreign-follow-up",
          &json!({ "type": "follow_up", "activeSessionId": active_session_id, "message": "foreign" }),
      );
@@ -127,7 +127,7 @@ index a08dadff6..87bd6b57c 100644
      let idle = daemon_request(
          &socket,
          "foreign-idle",
-@@ -2561,3 +2601,60 @@ fn acp_daemon_attached_close_holds_the_input_pause_until_the_next_session_new()
+@@ -2692,3 +2732,60 @@ fn acp_daemon_attached_close_holds_the_input_pause_until_the_next_session_new()
      let _second = new_session(&mut client);
      drop(client);
  }

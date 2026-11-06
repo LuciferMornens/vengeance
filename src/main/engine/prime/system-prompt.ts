@@ -5,7 +5,7 @@ import { primeHelperPath } from './helper'
 import { jsonObject } from './configuration-store'
 
 const HELPER_PROTOCOL_VERSION = 1
-const HELPER_UPSTREAM_REVISION = '8aac8692456c00c01d4e53e60e6d3347a3506559'
+const HELPER_UPSTREAM_REVISION = 'ea9d9602ec0938d9e454e8963107cd85af1565c6'
 const PROMPT_TIMEOUT_MS = 15_000
 const MAX_PROMPT_BYTES = 1024 * 1024
 

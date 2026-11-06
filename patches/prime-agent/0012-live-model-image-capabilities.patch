@@ -1,8 +1,8 @@
 diff --git a/crates/pa-agent/src/agent.rs b/crates/pa-agent/src/agent.rs
-index eb859b3f0..a9589fc46 100644
+index 9aab1587a..98eabcb22 100644
 --- a/crates/pa-agent/src/agent.rs
 +++ b/crates/pa-agent/src/agent.rs
-@@ -879,6 +879,19 @@ impl Agent {
+@@ -890,6 +890,19 @@ impl Agent {
          shared.state.thinking_level = thinking_level;
      }
  
@@ -22,7 +22,7 @@ index eb859b3f0..a9589fc46 100644
      /// Per-run model override: `None` returns to the session model.
      pub fn set_model_override(&self, model_override: Option<AgentModelOverride>) {
          *self
-@@ -1520,7 +1533,7 @@ mod tests {
+@@ -1531,7 +1544,7 @@ mod tests {
      }
  
      #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -31,7 +31,7 @@ index eb859b3f0..a9589fc46 100644
          fn model(id: &str) -> Model {
              Model {
                  id: id.to_string(),
-@@ -1536,13 +1549,12 @@ mod tests {
+@@ -1547,13 +1560,12 @@ mod tests {
              }
          }
  
@@ -47,7 +47,7 @@ index eb859b3f0..a9589fc46 100644
                  ..Default::default()
              },
              ..Default::default()
-@@ -1551,15 +1563,17 @@ mod tests {
+@@ -1562,15 +1574,17 @@ mod tests {
          let switcher = tokio::spawn(async move {
              for _ in 0..2_000 {
                  writer
@@ -67,7 +67,7 @@ index eb859b3f0..a9589fc46 100644
                      )
                      .await;
              }
-@@ -1571,9 +1585,11 @@ mod tests {
+@@ -1582,9 +1596,11 @@ mod tests {
              while samples < 20_000 {
                  let state = reader.state().await;
                  let mixed_state = (state.model.id == "model-a"
@@ -81,7 +81,7 @@ index eb859b3f0..a9589fc46 100644
                  mixed += u64::from(mixed_state);
                  samples += 1;
              }
-@@ -1583,7 +1599,7 @@ mod tests {
+@@ -1594,7 +1610,7 @@ mod tests {
          let mixed = observed.await.unwrap();
          assert_eq!(
              mixed, 0,
@@ -240,7 +240,7 @@ index a6824eccd..290a97015 100644
  
  fn session_role_section(options: &BuildSystemPromptOptions, has_ipython: bool) -> String {
 diff --git a/crates/pa-core/src/session_engine/engine.rs b/crates/pa-core/src/session_engine/engine.rs
-index 684ba6e28..8c22bcea3 100644
+index 783f1532e..4cd55d2f0 100644
 --- a/crates/pa-core/src/session_engine/engine.rs
 +++ b/crates/pa-core/src/session_engine/engine.rs
 @@ -116,7 +116,11 @@ pub struct SessionEngine {
@@ -256,7 +256,7 @@ index 684ba6e28..8c22bcea3 100644
      /// The same instance the kernel `goal.*` host handlers reach, so `/goal`
      /// and `goal.complete()` observe one state machine.
      pub goal_driver: std::sync::Arc<tokio::sync::Mutex<super::goal_driver::GoalDriver>>,
-@@ -563,7 +567,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
+@@ -572,7 +576,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
                  &model_prompts.errors,
              ));
      }
@@ -265,16 +265,16 @@ index 684ba6e28..8c22bcea3 100644
          &crate::prompts::system_prompt::BuildSystemPromptOptions {
              custom_prompt: resources.system_prompt.clone(),
              model_prompt_extras: model_prompts.extras.as_deref(),
-@@ -689,7 +693,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
-     };
-     let agent = Agent::new(AgentOptions {
+@@ -702,7 +706,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
+         // (TS `sdk.ts` passes `sessionManager.getSessionId()`).
+         session_id: Some(session_id),
          initial_state: AgentInitialState {
 -            system_prompt: Some(system_prompt.clone()),
 +            system_prompt: Some(prompt_breakdown.assembled.clone()),
              model: Some(model),
              thinking_level: Some(thinking_level),
              tools: Some(tools),
-@@ -911,7 +915,9 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
+@@ -924,7 +928,9 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
          skill_diagnostics: resources.skill_diagnostics,
          prompt_templates: resources.prompts,
          agents_files: resources.agents_files,
@@ -299,10 +299,10 @@ index 433b48de1..bbfcea0fa 100644
              assert!(prompt.starts_with("CUSTOM_SYSTEM_SENTINEL"));
          } else {
 diff --git a/crates/pa-core/src/session_engine/engine/tests.rs b/crates/pa-core/src/session_engine/engine/tests.rs
-index a69e04252..5aae94780 100644
+index 462944fbf..76a2d2b80 100644
 --- a/crates/pa-core/src/session_engine/engine/tests.rs
 +++ b/crates/pa-core/src/session_engine/engine/tests.rs
-@@ -97,9 +97,9 @@ async fn engine_runs_tool_loop_and_persists() {
+@@ -106,9 +106,9 @@ async fn engine_runs_tool_loop_and_persists() {
  
      // The system prompt is the layered assembly: static core layer
      // first, dynamic tail after.
@@ -314,7 +314,7 @@ index a69e04252..5aae94780 100644
          .contains("Recursive agent depth: 0 (root)"));
  
      let outcome = engine
-@@ -200,9 +200,9 @@ async fn spawned_child_prompt_stamps_its_depth() {
+@@ -214,9 +214,9 @@ async fn spawned_child_prompt_stamps_its_depth() {
      .unwrap();
  
      assert!(engine
@@ -326,7 +326,7 @@ index a69e04252..5aae94780 100644
  }
  
  /// The login chain's prompt-gating end to end: a settings-declared OAuth
-@@ -296,7 +296,7 @@ async fn oauth_creds_unlock_generic_mcp_gating_in_new_sessions() {
+@@ -310,7 +310,7 @@ async fn oauth_creds_unlock_generic_mcp_gating_in_new_sessions() {
      let engine = create_session(config(&cwd, &agent_dir, provider.stream_fn()))
          .await
          .unwrap();
@@ -335,7 +335,7 @@ index a69e04252..5aae94780 100644
  
      // The persisted credential begin_login leaves behind (the TS
      // McpCredentials shape, endpoint-bound).
-@@ -325,14 +325,14 @@ async fn oauth_creds_unlock_generic_mcp_gating_in_new_sessions() {
+@@ -339,14 +339,14 @@ async fn oauth_creds_unlock_generic_mcp_gating_in_new_sessions() {
      let engine = create_session(config(&cwd, &agent_dir, provider.stream_fn()))
          .await
          .unwrap();
@@ -353,7 +353,7 @@ index a69e04252..5aae94780 100644
  }
  
  #[tokio::test]
-@@ -547,7 +547,7 @@ async fn engine_over(
+@@ -561,7 +561,7 @@ async fn engine_over(
  
  fn prompt_lists_skill(engine: &SessionEngine, name: &str) -> bool {
      engine
@@ -562,7 +562,7 @@ index 000000000..bd7490bbd
 +    }
 +}
 diff --git a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
-index 50e014a20..9ea3dd91f 100644
+index 7d1ee9f4e..f25efe14d 100644
 --- a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
 +++ b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
 @@ -472,20 +472,12 @@ impl SessionEngine for AgentSessionEngine {
@@ -614,7 +614,7 @@ index 50e014a20..9ea3dd91f 100644
          }))
      }
  
-@@ -1215,7 +1214,7 @@ impl SessionEngine for AgentSessionEngine {
+@@ -1223,7 +1222,7 @@ impl SessionEngine for AgentSessionEngine {
              self.ensure_core_session_async(&model).await?;
              let guard = self.session.lock().await;
              let engine = guard.as_deref().expect("session built above");

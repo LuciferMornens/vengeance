@@ -1,8 +1,8 @@
 diff --git a/packages/coding-agent/src/config.ts b/packages/coding-agent/src/config.ts
-index 1940d1f6..14b24c55 100644
+index 2a22326d7..f831f9d5a 100644
 --- a/packages/coding-agent/src/config.ts
 +++ b/packages/coding-agent/src/config.ts
-@@ -586,6 +586,8 @@ export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
+@@ -611,6 +611,8 @@ export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
  export const VERSION: string = pkg.version || "0.0.0";
  // Extensions compare VERSION against upstream releases, independently of distribution identity.
  export const DISTRIBUTION_VERSION: string = pkg.vengeance?.version || VERSION;
@@ -12,19 +12,19 @@ index 1940d1f6..14b24c55 100644
  // e.g., PI_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
  export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
 diff --git a/packages/coding-agent/src/modes/interactive/components/config-selector.ts b/packages/coding-agent/src/modes/interactive/components/config-selector.ts
-index a8054886..ceb910ec 100644
+index 913b51179..f4c010139 100644
 --- a/packages/coding-agent/src/modes/interactive/components/config-selector.ts
 +++ b/packages/coding-agent/src/modes/interactive/components/config-selector.ts
-@@ -3,7 +3,7 @@
+@@ -2,7 +2,7 @@
+  * TUI component for managing package resources (enable/disable)
   */
  
- import { homedir } from "node:os";
 -import { basename, dirname, join, relative } from "node:path";
 +import { basename, dirname, join, relative, sep } from "node:path";
  import {
  	type Component,
  	Container,
-@@ -868,7 +868,7 @@ class ResourceList implements Component, Focusable {
+@@ -855,7 +855,7 @@ class ResourceList implements Component, Focusable {
  
  	private getPackageResourcePattern(item: ResourceItem): string {
  		const baseDir = item.metadata.baseDir ?? dirname(item.path);
@@ -34,7 +34,7 @@ index a8054886..ceb910ec 100644
  }
  
 diff --git a/packages/coding-agent/src/modes/interactive/external-editor.ts b/packages/coding-agent/src/modes/interactive/external-editor.ts
-index d672d4e0..0e46b9fe 100644
+index c4a0def9f..e2a15fce1 100644
 --- a/packages/coding-agent/src/modes/interactive/external-editor.ts
 +++ b/packages/coding-agent/src/modes/interactive/external-editor.ts
 @@ -1,7 +1,8 @@
@@ -47,39 +47,42 @@ index d672d4e0..0e46b9fe 100644
  import { stripBom } from "../../utils/text.ts";
  
  export interface ExternalEditorOptions {
-@@ -16,16 +17,16 @@ export async function editInExternalEditor(options: ExternalEditorOptions): Prom
+@@ -16,7 +17,10 @@ export async function editInExternalEditor(options: ExternalEditorOptions): Prom
  	const filePath = join(directory, "prompt.md");
  	try {
  		writeFileSync(filePath, options.content, "utf-8");
 -		const [editor, ...editorArgs] = options.command.split(" ");
 +		const [editor, ...editorArgs] = parseCommandArgs(options.command);
-+		if (!editor) return { status: "failed" };
++		if (!editor) {
++			return { status: "failed", message: `Failed to launch external editor: ${options.command}` };
++		}
  		process.stdout.write(`Launching external editor: ${options.command}\nPi will resume when the editor exits.\n`);
  
  		// Do not use spawnSync here. On Windows, synchronous child_process calls can keep
- 		// Node/libuv's console input read active after the parent pauses stdin, racing
- 		// vim/nvim for the console input buffer until Ctrl+C cancels the pending read.
- 		const exitCode = await new Promise<number | null>((resolve) => {
+@@ -29,9 +33,8 @@ export async function editInExternalEditor(options: ExternalEditorOptions): Prom
+ 			// Windows rejects working directories over MAX_PATH, and WSL launches Windows
+ 			// editors (code, notepad.exe) from the cwd's \\wsl.localhost\... path (#11592).
+ 			// The cwd is intentionally not changed; failures are reported to the user instead.
 -			const child = spawn(editor, [...editorArgs, filePath], {
 +			const child = spawnProcess(editor, [...editorArgs, filePath], {
  				stdio: "inherit",
 -				shell: process.platform === "win32",
  			});
  			child.on("error", () => resolve(null));
- 			child.on("close", (code) => resolve(code));
+ 			child.on("close", (code, signal) => resolve(code ?? signal));
 diff --git a/packages/coding-agent/src/package-manager-cli.ts b/packages/coding-agent/src/package-manager-cli.ts
-index 48045afe..fc2a4601 100644
+index b2e68394f..c512ec8d6 100644
 --- a/packages/coding-agent/src/package-manager-cli.ts
 +++ b/packages/coding-agent/src/package-manager-cli.ts
-@@ -22,6 +22,7 @@ import {
+@@ -24,6 +24,7 @@ import {
  	getPackageDir,
  	getSelfUpdateCommand,
  	getSelfUpdateUnavailableInstruction,
 +	IS_VENGEANCE_DISTRIBUTION,
+ 	makeConfiguredSelfUpdateCommand,
  	PACKAGE_NAME,
  	type SelfUpdateCommand,
- 	type SelfUpdatePackageTarget,
-@@ -902,7 +903,11 @@ export async function handlePackageCommand(
+@@ -959,7 +960,11 @@ export async function handlePackageCommand(
  		return true;
  	}
  
@@ -93,7 +96,7 @@ index 48045afe..fc2a4601 100644
  		process.exitCode = 1;
  		return true;
 diff --git a/packages/coding-agent/src/utils/version-check.ts b/packages/coding-agent/src/utils/version-check.ts
-index ada78b95..edbf0de0 100644
+index ada78b95f..edbf0de03 100644
 --- a/packages/coding-agent/src/utils/version-check.ts
 +++ b/packages/coding-agent/src/utils/version-check.ts
 @@ -1,5 +1,5 @@
@@ -114,7 +117,7 @@ index ada78b95..edbf0de0 100644
  	try {
 diff --git a/packages/coding-agent/test/vengeance-self-update.test.ts b/packages/coding-agent/test/vengeance-self-update.test.ts
 new file mode 100644
-index 00000000..3708dbfd
+index 000000000..3708dbfde
 --- /dev/null
 +++ b/packages/coding-agent/test/vengeance-self-update.test.ts
 @@ -0,0 +1,50 @@

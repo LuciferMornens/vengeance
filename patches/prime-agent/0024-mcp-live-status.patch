@@ -1,5 +1,5 @@
 diff --git a/crates/pa-core/README.md b/crates/pa-core/README.md
-index a3a3ff61d..dbc7d9306 100644
+index 07fe1cc2d..d76038944 100644
 --- a/crates/pa-core/README.md
 +++ b/crates/pa-core/README.md
 @@ -76,7 +76,7 @@ only: nothing wires it to a user-facing cloud toggle yet.
@@ -12,7 +12,7 @@ index a3a3ff61d..dbc7d9306 100644
  ## Depends on
  pa-types, pa-ai, pa-agent (one-way).
 diff --git a/crates/pa-core/src/kernel/manager/mod.rs b/crates/pa-core/src/kernel/manager/mod.rs
-index 6c89a4120..2d83aaab8 100644
+index 6ee1c11e7..a8315829b 100644
 --- a/crates/pa-core/src/kernel/manager/mod.rs
 +++ b/crates/pa-core/src/kernel/manager/mod.rs
 @@ -46,6 +46,10 @@ const REPAIR_STEP_TIMEOUT_MS: u64 = 30_000;
@@ -26,7 +26,7 @@ index 6c89a4120..2d83aaab8 100644
  /// Largest legit frame is an attachment display event, base64 capped at
  /// `MAX_ATTACHMENT_DATA_CHARS`; a longer line is corruption the protocol repair owns.
  const MAX_PROTOCOL_LINE_BYTES: usize = 32 * 1024 * 1024;
-@@ -845,7 +849,7 @@ impl ReplKernelManager {
+@@ -851,7 +855,7 @@ impl ReplKernelManager {
      /// bound it with their own deadline.
      ///
      /// The request rides the dedicated MCP status lane (the eager
@@ -35,7 +35,7 @@ index 6c89a4120..2d83aaab8 100644
      /// done event settles by request id, so the listing NEVER occupies
      /// the manager's execution queue — a slow or unreachable server
      /// would otherwise park the user's first python cell behind its
-@@ -858,54 +862,92 @@ impl ReplKernelManager {
+@@ -864,54 +868,92 @@ impl ReplKernelManager {
          servers: &[String],
          per_server_timeout_ms: u64,
      ) -> Option<Vec<Value>> {
@@ -143,7 +143,7 @@ index 6c89a4120..2d83aaab8 100644
          }
      }
 diff --git a/crates/pa-core/src/session_engine/engine.rs b/crates/pa-core/src/session_engine/engine.rs
-index 8c22bcea3..becac1f1e 100644
+index 4cd55d2f0..66f3e1107 100644
 --- a/crates/pa-core/src/session_engine/engine.rs
 +++ b/crates/pa-core/src/session_engine/engine.rs
 @@ -152,6 +152,10 @@ pub struct SessionEngine {
@@ -157,7 +157,7 @@ index 8c22bcea3..becac1f1e 100644
  }
  
  /// Skill overrides for built-in integrations the user is not logged into,
-@@ -592,7 +596,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
+@@ -601,7 +605,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
              rlm_depth: config.rlm_depth,
              daemonless: config.daemonless,
              can_spawn: config.rlm_subagent_host.is_some(),
@@ -166,7 +166,7 @@ index 8c22bcea3..becac1f1e 100644
              append_system_prompt: Some(resources.append_system_prompt.join("\n\n")),
              ..Default::default()
          },
-@@ -927,6 +931,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
+@@ -940,6 +944,7 @@ pub async fn create_session(mut config: SessionEngineConfig) -> anyhow::Result<S
          factory_host,
          rlm_progress_notes: Arc::clone(&wiring.rlm.notes),
          provisioner,
@@ -662,7 +662,7 @@ index 027009ab0..0a7279816 100644
  
  ## Depends on
 diff --git a/crates/pa-daemon/src/agent_engine/lifecycle.rs b/crates/pa-daemon/src/agent_engine/lifecycle.rs
-index 9cfef0d8f..c08e1e3e0 100644
+index a268a3ceb..2a940edd8 100644
 --- a/crates/pa-daemon/src/agent_engine/lifecycle.rs
 +++ b/crates/pa-daemon/src/agent_engine/lifecycle.rs
 @@ -12,6 +12,7 @@ use super::{
@@ -719,10 +719,10 @@ index 9cfef0d8f..c08e1e3e0 100644
      /// through the same guarded funnel.
      pub(crate) fn ensure_core_session(&self, model: &Model) -> anyhow::Result<()> {
 diff --git a/crates/pa-daemon/src/agent_engine/tests/session.rs b/crates/pa-daemon/src/agent_engine/tests/session.rs
-index e74aae2ff..a84d4d61e 100644
+index ed7112fcd..d9480ced4 100644
 --- a/crates/pa-daemon/src/agent_engine/tests/session.rs
 +++ b/crates/pa-daemon/src/agent_engine/tests/session.rs
-@@ -87,6 +87,59 @@ async fn get_commands_enumerates_skills_before_the_first_prompt() {
+@@ -142,6 +142,59 @@ fn the_built_session_carries_the_durable_header_id_across_rebuilds() {
      }
  }
  
@@ -1119,7 +1119,7 @@ index 17909b97c..0e224fc16 100644
      fn factory_activity_commands_are_session_scoped() {
          for (command, action, run_id, spec_id, timeout_ms) in [
 diff --git a/crates/pa-daemon/src/worker/commands.rs b/crates/pa-daemon/src/worker/commands.rs
-index d720269d8..a1d41de7f 100644
+index c8f2c1e5f..8bcfe4e37 100644
 --- a/crates/pa-daemon/src/worker/commands.rs
 +++ b/crates/pa-daemon/src/worker/commands.rs
 @@ -125,6 +125,8 @@ impl Worker {
@@ -1270,7 +1270,7 @@ index 7d70510fb..8049dfc32 100644
      "get_available_models",
      "get_queue",
 diff --git a/prime-agent-runtime/src/rlm/repl.md b/prime-agent-runtime/src/rlm/repl.md
-index a4484484e..5c01a819d 100644
+index 4da6c0b48..543fad1bc 100644
 --- a/prime-agent-runtime/src/rlm/repl.md
 +++ b/prime-agent-runtime/src/rlm/repl.md
 @@ -33,7 +33,7 @@ event.
@@ -1295,10 +1295,10 @@ index a4484484e..5c01a819d 100644
    for updates (no push events). Each row contains opaque `id`, `command`,
    `pid`, `durationMs`, and `status` (`running` or `finished`). Finished rows
 diff --git a/prime-agent-runtime/src/rlm/repl.py b/prime-agent-runtime/src/rlm/repl.py
-index eeb7d9122..2c8f586d3 100644
+index 8dbc102dc..658f3f0c3 100644
 --- a/prime-agent-runtime/src/rlm/repl.py
 +++ b/prime-agent-runtime/src/rlm/repl.py
-@@ -1308,6 +1308,13 @@ async def _handle_mcp_status(req: dict[str, Any], ns: dict[str, Any]) -> None:
+@@ -1335,6 +1335,13 @@ async def _handle_mcp_status(req: dict[str, Any], ns: dict[str, Any]) -> None:
      timeout_ms = req.get("timeout_ms", 10_000)
      if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, (int, float)) or timeout_ms <= 0:
          raise ValueError("mcp_status timeout_ms must be a positive number")
@@ -1312,7 +1312,7 @@ index eeb7d9122..2c8f586d3 100644
      connections = await mcp_mod.status(servers, float(timeout_ms))
      _send({"event": "done", "id": req["id"], "status": "ok", "connections": connections})
  
-@@ -1337,9 +1344,11 @@ async def _mcp_status_lane(req: dict[str, Any], ns: dict[str, Any]) -> None:
+@@ -1364,9 +1371,11 @@ async def _mcp_status_lane(req: dict[str, Any], ns: dict[str, Any]) -> None:
      """One dedicated-lane `mcp_status` request.
  
      The failure shape mirrors `_handle_request`'s backstop (one broken
@@ -1327,7 +1327,7 @@ index eeb7d9122..2c8f586d3 100644
      """
      try:
          await _handle_mcp_status(req, ns)
-@@ -1348,8 +1357,9 @@ async def _mcp_status_lane(req: dict[str, Any], ns: dict[str, Any]) -> None:
+@@ -1375,8 +1384,9 @@ async def _mcp_status_lane(req: dict[str, Any], ns: dict[str, Any]) -> None:
      except BaseException as exc:  # noqa: BLE001 - one broken lane request fails alone
          rid = req["id"]
          try:
@@ -1340,10 +1340,10 @@ index eeb7d9122..2c8f586d3 100644
              pass
  
 diff --git a/prime-agent-runtime/test/test_repl.py b/prime-agent-runtime/test/test_repl.py
-index 81d6bd028..d410af6a2 100644
+index e76e38ecf..b067d15c1 100644
 --- a/prime-agent-runtime/test/test_repl.py
 +++ b/prime-agent-runtime/test/test_repl.py
-@@ -1668,6 +1668,23 @@ class ReplTest(unittest.TestCase):
+@@ -1708,6 +1708,23 @@ class ReplTest(unittest.TestCase):
          events = self.repl.execute("ms3", "'alive'")
          self.assertEqual(one(events, "result")["text"], "'alive'")
  
@@ -1367,7 +1367,7 @@ index 81d6bd028..d410af6a2 100644
      def test_list_names_skips_non_string_keys(self):
          self.repl.execute("lnk1", "globals()[1] = 1\nbeta = 2")
          self.repl.send({"type": "list_names", "id": "lnk2"})
-@@ -3105,6 +3122,64 @@ class SnapshotPairConsistencyTest(unittest.TestCase):
+@@ -3145,6 +3162,64 @@ class SnapshotPairConsistencyTest(unittest.TestCase):
                  dill.load(fh)
  
  

@@ -179,7 +179,7 @@ index f8591a8fb..be7df0822 100644
  
  /// A scripted goal session's dispatch worker with a durable session
 diff --git a/crates/pa-daemon/src/worker/turn_stream_tests.rs b/crates/pa-daemon/src/worker/turn_stream_tests.rs
-index 572fca1dd..1f3a55efb 100644
+index 03bea316d..668236900 100644
 --- a/crates/pa-daemon/src/worker/turn_stream_tests.rs
 +++ b/crates/pa-daemon/src/worker/turn_stream_tests.rs
 @@ -80,6 +80,13 @@ fn burst_runner(engine: Arc<dyn SessionEngine>) -> TurnRunner {

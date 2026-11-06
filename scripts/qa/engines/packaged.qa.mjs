@@ -18,7 +18,7 @@ import { packagedLaunchOptions, recordPackagedTarget } from '../lib/packaged-tar
 const executable = process.env.QA_PACKAGED_EXE
 const expectedProductName = process.env.QA_PACKAGED_NAME ?? 'Vengeance QA'
 const executeFile = promisify(execFile)
-const HELPER_REVISION = '8aac8692456c00c01d4e53e60e6d3347a3506559'
+const HELPER_REVISION = 'ea9d9602ec0938d9e454e8963107cd85af1565c6'
 const HELPER_NAME = executableName('vengeance-prime-auth')
 const HELPER_PROTOCOL = 1
 const HELPER_TIMEOUT_MS = 15_000

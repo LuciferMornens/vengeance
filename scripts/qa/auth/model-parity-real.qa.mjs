@@ -211,6 +211,9 @@ await runSuite(
       const list = page.locator('[cmdk-list]').last()
       await list.locator('[cmdk-item]').first().waitFor()
       const rows = await readModelRows(list)
+      // A background catalog refresh can reorder the list after the suite's first read.
+      engineModels = (await app.rpc({ type: 'get_available_models' }, agentId)).models
+      engineKeys = engineModels.map(keyOf)
       assert.deepEqual(
         rows.map((r) => r.key),
         engineKeys,

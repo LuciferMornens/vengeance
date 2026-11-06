@@ -87,6 +87,9 @@ const SDK_DEFAULTS = {
 /** Internal bookkeeping keys of the `Settings` type that are not user settings. */
 const INTERNAL_KEYS = new Set(['lastChangelogVersion', 'trackingId', 'deviceId'])
 
+/** Documented settings with no effect here: the Vengeance build's `pi update` refuses to update itself. */
+const NOT_APPLICABLE_KEYS = new Set(['selfUpdateCommand'])
+
 /** `| \`key\` | type | default | description |` rows of docs/settings.md, with the section heading. */
 async function documentedSettings() {
   const text = await readFile(join(enginePackageDir(), 'docs', 'settings.md'), 'utf8')
@@ -152,7 +155,8 @@ for (const doc of docs) {
       ? 'per key'
       : '—'
   const notes = []
-  if (!setting && !subKeys.length) notes.push('missing in Vengeance')
+  if (!setting && !subKeys.length && !NOT_APPLICABLE_KEYS.has(doc.key))
+    notes.push('missing in Vengeance')
   // List settings show an empty list instead of a `[]` default.
   const emptyList =
     Array.isArray(docDefault) && docDefault.length === 0 && setting?.default === undefined
@@ -189,7 +193,11 @@ for (const doc of docs) {
         ? 'global only (both)'
         : 'global only (Engine)'
       : 'global + project',
-    status: notes.length ? notes.join('; ') : 'match'
+    status: notes.length
+      ? notes.join('; ')
+      : NOT_APPLICABLE_KEYS.has(doc.key)
+        ? 'not applicable'
+        : 'match'
   })
 }
 

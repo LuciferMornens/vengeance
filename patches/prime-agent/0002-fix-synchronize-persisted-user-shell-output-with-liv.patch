@@ -39,7 +39,7 @@ index 73889e037..6bf41c94a 100644
          let was_assistant = self.has_assistant_entry;
          let was_flushed = self.flushed;
 diff --git a/crates/pa-core/src/session_engine/compaction_arms.rs b/crates/pa-core/src/session_engine/compaction_arms.rs
-index b1bce1936..b2ef8d6ab 100644
+index 5802de731..86c21ed72 100644
 --- a/crates/pa-core/src/session_engine/compaction_arms.rs
 +++ b/crates/pa-core/src/session_engine/compaction_arms.rs
 @@ -6,6 +6,36 @@ use super::{
@@ -132,10 +132,10 @@ index 000000000..3ba0e4a73
 +    }
 +}
 diff --git a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
-index be01ca6db..c2fffb77d 100644
+index 56759926d..69b52bef0 100644
 --- a/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
 +++ b/crates/pa-daemon/src/agent_engine/session_engine_impl.rs
-@@ -790,6 +790,7 @@ impl SessionEngine for AgentSessionEngine {
+@@ -792,6 +792,7 @@ impl SessionEngine for AgentSessionEngine {
          goal_reload: pa_core::session_engine::goal_driver::GoalBranchReload,
      ) -> anyhow::Result<()> {
          // The caller parks this call on a blocking thread, so `blocking_lock` is legal here.
@@ -144,7 +144,7 @@ index be01ca6db..c2fffb77d 100644
          if !built {
              // The session builds lazily; park the branch so the build consumes it.
 diff --git a/crates/pa-daemon/src/user_bash.rs b/crates/pa-daemon/src/user_bash.rs
-index 8cb48ea30..db5797d99 100644
+index ce61b32f2..d0c27b97f 100644
 --- a/crates/pa-daemon/src/user_bash.rs
 +++ b/crates/pa-daemon/src/user_bash.rs
 @@ -16,6 +16,13 @@ use tokio_util::sync::CancellationToken;
@@ -305,7 +305,7 @@ index 8cb48ea30..db5797d99 100644
          response_success(
              None,
              "execute_bash_and_wait",
-@@ -703,38 +762,6 @@ async fn run_bash(run: RunBash<'_>) -> BashEnd {
+@@ -708,38 +767,6 @@ async fn run_bash(run: RunBash<'_>) -> BashEnd {
      }
  }
  

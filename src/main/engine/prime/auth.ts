@@ -49,6 +49,7 @@ const PROVIDER_ENVIRONMENT: Record<string, string[]> = {
   cerebras: ['CEREBRAS_API_KEY'],
   xai: ['XAI_API_KEY'],
   openrouter: ['OPENROUTER_API_KEY'],
+  orcarouter: ['ORCAROUTER_API_KEY'],
   'vercel-ai-gateway': ['AI_GATEWAY_API_KEY'],
   zai: ['ZAI_API_KEY'],
   mistral: ['MISTRAL_API_KEY'],
@@ -81,6 +82,7 @@ const PROVIDER_NAMES: Record<string, string> = {
   'amazon-bedrock': 'Amazon Bedrock',
   'google-vertex': 'Google Vertex AI',
   xai: 'xAI',
+  orcarouter: 'OrcaRouter',
   serper: 'Serper web search'
 }
 

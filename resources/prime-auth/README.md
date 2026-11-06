@@ -7,7 +7,7 @@ the helper never writes account files.
 
 The upstream revision is pinned in [Cargo.toml](Cargo.toml) and
 [engines.lock.json](../../engines.lock.json):
-`763094e1b6a7c17450ee8399b06cda1853847ca5` (Prime Agent v0.10.0). The builder applies
+`ea9d9602ec0938d9e454e8963107cd85af1565c6` (Prime Agent v0.10.2). The builder applies
 Cargo source overrides for the exact patched Engine 2 checkout and checks its locked
 dependency graph. Subscription flows use
 `pa_ai::oauth`; Prime Inference, Agent Traces, and MCP flows use `pa_core::auth`

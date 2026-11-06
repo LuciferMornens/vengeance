@@ -1,5 +1,5 @@
 diff --git a/packages/chord/test/boundary.test.ts b/packages/chord/test/boundary.test.ts
-index 8819a01c..5cfffe4f 100644
+index ae4f1beb4..258c67f60 100644
 --- a/packages/chord/test/boundary.test.ts
 +++ b/packages/chord/test/boundary.test.ts
 @@ -1,5 +1,5 @@
@@ -9,7 +9,7 @@ index 8819a01c..5cfffe4f 100644
  import { fileURLToPath } from "node:url";
  import { describe, expect, test } from "vitest";
  
-@@ -31,7 +31,10 @@ describe("package boundary", () => {
+@@ -32,7 +32,10 @@ describe("package boundary", () => {
  				const pkg = specifier.split("/").slice(0, 2).join("/");
  				if (specifier.startsWith("@earendil-works/pi-") && !ALLOWED.has(pkg))
  					violations.push(`${path}: ${specifier}`);
@@ -22,7 +22,7 @@ index 8819a01c..5cfffe4f 100644
  				}
  			}
 diff --git a/packages/codemode/test/worker-lifetime.test.ts b/packages/codemode/test/worker-lifetime.test.ts
-index 67ac4b2b..22ee7c9e 100644
+index 67ac4b2bb..22ee7c9ed 100644
 --- a/packages/codemode/test/worker-lifetime.test.ts
 +++ b/packages/codemode/test/worker-lifetime.test.ts
 @@ -1,10 +1,11 @@
@@ -163,7 +163,7 @@ index 67ac4b2b..22ee7c9e 100644
  		25000,
  	);
 diff --git a/packages/coding-agent/test/config.test.ts b/packages/coding-agent/test/config.test.ts
-index ff652cae..5d58af8a 100644
+index ff2c8a733..4ed8262d0 100644
 --- a/packages/coding-agent/test/config.test.ts
 +++ b/packages/coding-agent/test/config.test.ts
 @@ -1,7 +1,8 @@
@@ -176,7 +176,7 @@ index ff652cae..5d58af8a 100644
  import {
  	detectInstallChange,
  	detectInstallMethod,
-@@ -17,6 +18,11 @@ const originalPiPackageDir = process.env.PI_PACKAGE_DIR;
+@@ -19,6 +20,11 @@ const originalPiPackageDir = process.env.PI_PACKAGE_DIR;
  const originalArgv1 = process.argv[1];
  let tempDir: string | undefined;
  
@@ -188,7 +188,7 @@ index ff652cae..5d58af8a 100644
  function setExecPath(value: string): void {
  	Object.defineProperty(process, "execPath", {
  		value,
-@@ -25,6 +31,7 @@ function setExecPath(value: string): void {
+@@ -27,6 +33,7 @@ function setExecPath(value: string): void {
  }
  
  afterEach(() => {
@@ -196,7 +196,7 @@ index ff652cae..5d58af8a 100644
  	if (execPathDescriptor) {
  		Object.defineProperty(process, "execPath", execPathDescriptor);
  	}
-@@ -125,7 +132,7 @@ function createBunGlobalInstall(): { packageDir: string } {
+@@ -127,7 +134,7 @@ function createBunGlobalInstall(): { packageDir: string } {
  
  function createFakePnpmScript(root: string): string {
  	if (process.platform === "win32") {
@@ -205,7 +205,7 @@ index ff652cae..5d58af8a 100644
  	}
  	const escapedRoot = root.replaceAll("'", "'\\''");
  	return `#!/bin/sh\nif [ "$1" = "root" ] && [ "$2" = "-g" ]; then\n\tprintf '%s\\n' '${escapedRoot}'\n\texit 0\nfi\nexit 1\n`;
-@@ -133,7 +140,7 @@ function createFakePnpmScript(root: string): string {
+@@ -135,7 +142,7 @@ function createFakePnpmScript(root: string): string {
  
  function createFakeYarnScript(globalDir: string): string {
  	if (process.platform === "win32") {
@@ -214,7 +214,7 @@ index ff652cae..5d58af8a 100644
  	}
  	const escapedGlobalDir = globalDir.replaceAll("'", "'\\''");
  	return `#!/bin/sh\nif [ "$1" = "global" ] && [ "$2" = "dir" ]; then\n\tprintf '%s\\n' '${escapedGlobalDir}'\n\texit 0\nfi\nexit 1\n`;
-@@ -141,7 +148,7 @@ function createFakeYarnScript(globalDir: string): string {
+@@ -143,7 +150,7 @@ function createFakeYarnScript(globalDir: string): string {
  
  function createFakeBunScript(bunBin: string): string {
  	if (process.platform === "win32") {
@@ -223,7 +223,7 @@ index ff652cae..5d58af8a 100644
  	}
  	const escapedBunBin = bunBin.replaceAll("'", "'\\''");
  	return `#!/bin/sh\nif [ "$1" = "pm" ] && [ "$2" = "bin" ] && [ "$3" = "-g" ]; then\n\tprintf '%s\\n' '${escapedBunBin}'\n\texit 0\nfi\nexit 1\n`;
-@@ -252,6 +259,12 @@ describe("detectInstallMethod", () => {
+@@ -281,6 +288,12 @@ describe("detectInstallMethod", () => {
  
  	test("self-update respects configured npmCommand", () => {
  		const { prefix } = createNpmPrefixInstall();
@@ -236,7 +236,7 @@ index ff652cae..5d58af8a 100644
  
  		const command = getSelfUpdateCommand("@earendil-works/pi-coding-agent", ["npm", "--prefix", prefix]);
  
-@@ -442,7 +455,13 @@ describe("detectInstallMethod", () => {
+@@ -471,7 +484,13 @@ describe("detectInstallMethod", () => {
  
  	test("does not self-update when npm install path is not writable", () => {
  		const { packageDir } = createNpmPrefixInstall();
@@ -252,7 +252,7 @@ index ff652cae..5d58af8a 100644
  		expect(getSelfUpdateCommand("@earendil-works/pi-coding-agent")).toBeUndefined();
  		expect(getSelfUpdateUnavailableInstruction("@earendil-works/pi-coding-agent")).toContain(
 diff --git a/packages/coding-agent/test/external-editor.test.ts b/packages/coding-agent/test/external-editor.test.ts
-index 5cbbc93b..d51feadc 100644
+index e9a540821..18ef58cdd 100644
 --- a/packages/coding-agent/test/external-editor.test.ts
 +++ b/packages/coding-agent/test/external-editor.test.ts
 @@ -1,6 +1,6 @@
@@ -287,7 +287,7 @@ index 5cbbc93b..d51feadc 100644
  		expect(basename(capture.filePath)).toBe("prompt.md");
  		expect(capture.entries).toEqual(["prompt.md"]);
 diff --git a/packages/coding-agent/test/file-mutation-queue.test.ts b/packages/coding-agent/test/file-mutation-queue.test.ts
-index 8e13a45e..071e971c 100644
+index 8e13a45e6..071e971c8 100644
 --- a/packages/coding-agent/test/file-mutation-queue.test.ts
 +++ b/packages/coding-agent/test/file-mutation-queue.test.ts
 @@ -1,7 +1,8 @@
@@ -312,7 +312,7 @@ index 8e13a45e..071e971c 100644
  		const order: string[] = [];
  		await Promise.all([
 diff --git a/packages/coding-agent/test/footer-width.test.ts b/packages/coding-agent/test/footer-width.test.ts
-index 12c074d0..7a134aed 100644
+index 12c074d01..7a134aed8 100644
 --- a/packages/coding-agent/test/footer-width.test.ts
 +++ b/packages/coding-agent/test/footer-width.test.ts
 @@ -1,3 +1,4 @@
@@ -330,7 +330,7 @@ index 12c074d0..7a134aed 100644
  });
  
 diff --git a/packages/coding-agent/test/interactive-mode-suspend.test.ts b/packages/coding-agent/test/interactive-mode-suspend.test.ts
-index 996d2f1a..045c8d7b 100644
+index 996d2f1ab..045c8d7bd 100644
 --- a/packages/coding-agent/test/interactive-mode-suspend.test.ts
 +++ b/packages/coding-agent/test/interactive-mode-suspend.test.ts
 @@ -24,8 +24,10 @@ function callHandleCtrlZ(context: HandleCtrlZThis): void {
@@ -361,10 +361,10 @@ index 996d2f1a..045c8d7b 100644
  			start: vi.fn(),
  			stop: vi.fn(),
 diff --git a/packages/coding-agent/test/mcp-command.test.ts b/packages/coding-agent/test/mcp-command.test.ts
-index 7bde1e11..8b0c29cb 100644
+index 2e9a0a1fa..b220c3b84 100644
 --- a/packages/coding-agent/test/mcp-command.test.ts
 +++ b/packages/coding-agent/test/mcp-command.test.ts
-@@ -41,9 +41,12 @@ describe("pi mcp", () => {
+@@ -42,9 +42,12 @@ describe("pi mcp", () => {
  		expect(exitCode).toBe(1);
  		expect(output).toContain("fixture: connected, 1 tool (codemode, global)\n");
  		expect(output).toContain("  tools: echo");
@@ -379,7 +379,7 @@ index 7bde1e11..8b0c29cb 100644
  		expect(output).toContain("config error: ");
  		expect(output).toContain('server "bad" needs either "command"');
 diff --git a/packages/coding-agent/test/package-command-paths.test.ts b/packages/coding-agent/test/package-command-paths.test.ts
-index 68949f9a..87f70f3b 100644
+index a12acd856..442863fcf 100644
 --- a/packages/coding-agent/test/package-command-paths.test.ts
 +++ b/packages/coding-agent/test/package-command-paths.test.ts
 @@ -24,6 +24,13 @@ import { initTheme } from "../src/modes/interactive/theme/theme.ts";
@@ -396,7 +396,7 @@ index 68949f9a..87f70f3b 100644
  describe("package commands", () => {
  	let tempDir: string;
  	let agentDir: string;
-@@ -960,7 +967,7 @@ else {
+@@ -1094,7 +1101,7 @@ else {
  		writeFileSync(join(selfPackageDir, "package.json"), JSON.stringify({ name: PACKAGE_NAME, version: VERSION }));
  		const fakePnpmScript =
  			process.platform === "win32"
@@ -406,13 +406,13 @@ index 68949f9a..87f70f3b 100644
  		writeFileSync(fakePnpmPath, fakePnpmScript);
  		chmodSync(fakePnpmPath, 0o755);
 diff --git a/packages/coding-agent/test/package-manager.test.ts b/packages/coding-agent/test/package-manager.test.ts
-index 8aedd93c..5179f7d5 100644
+index b5895b331..34d4c23e6 100644
 --- a/packages/coding-agent/test/package-manager.test.ts
 +++ b/packages/coding-agent/test/package-manager.test.ts
 @@ -1,9 +1,10 @@
  import { EventEmitter } from "node:events";
--import { existsSync, mkdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-+import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+-import { existsSync, mkdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
++import { existsSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
  import { tmpdir } from "node:os";
  import { join, relative } from "node:path";
  import { PassThrough } from "node:stream";
@@ -421,7 +421,7 @@ index 8aedd93c..5179f7d5 100644
  import { DefaultPackageManager, type ProgressEvent, type ResolvedResource } from "../src/core/package-manager.ts";
  import { SettingsManager } from "../src/core/settings-manager.ts";
  
-@@ -1615,7 +1616,9 @@ Content`,
+@@ -1771,7 +1772,9 @@ Content`,
  		// #10765
  		it("should expand ~ in exclusion and exact patterns", async () => {
  			const previousHome = process.env.HOME;
@@ -431,7 +431,7 @@ index 8aedd93c..5179f7d5 100644
  
  			try {
  				const skillsDir = join(tempDir, "extra", "skills");
-@@ -1635,6 +1638,8 @@ Content`,
+@@ -1791,6 +1794,8 @@ Content`,
  				expect(result.skills.some((r) => isDisabled(r, "glob-excluded/SKILL.md"))).toBe(true);
  				expect(result.skills.some((r) => isDisabled(r, "exact-excluded/SKILL.md"))).toBe(true);
  			} finally {
@@ -441,7 +441,7 @@ index 8aedd93c..5179f7d5 100644
  					delete process.env.HOME;
  				} else {
 diff --git a/packages/coding-agent/test/paths.test.ts b/packages/coding-agent/test/paths.test.ts
-index fbdb4f56..0928ec96 100644
+index b57238c13..1cb41f6be 100644
 --- a/packages/coding-agent/test/paths.test.ts
 +++ b/packages/coding-agent/test/paths.test.ts
 @@ -1,8 +1,9 @@
@@ -455,7 +455,7 @@ index fbdb4f56..0928ec96 100644
  import {
  	canonicalizePath,
  	getCwdRelativePath,
-@@ -37,9 +38,8 @@ describe("canonicalizePath", () => {
+@@ -99,9 +100,8 @@ describe("canonicalizePath", () => {
  	it("resolves symlinks to their targets", () => {
  		const dir = createTempDir();
  		const target = join(dir, "target.txt");
@@ -466,7 +466,7 @@ index fbdb4f56..0928ec96 100644
  		expect(canonicalizePath(link)).toBe(realpathSync(target));
  	});
  
-@@ -63,7 +63,7 @@ describe("canonicalizePath", () => {
+@@ -125,7 +125,7 @@ describe("canonicalizePath", () => {
  		const target = join(dir, "target.txt");
  		const link = join(dir, "link.txt");
  		// Create a symlink whose target does not exist.
@@ -476,7 +476,7 @@ index fbdb4f56..0928ec96 100644
  		expect(canonicalizePath(link)).toBe(link);
  	});
 diff --git a/packages/coding-agent/test/resource-loader.test.ts b/packages/coding-agent/test/resource-loader.test.ts
-index bba3fc95..dab31b3d 100644
+index e68b4cfea..7caf3888f 100644
 --- a/packages/coding-agent/test/resource-loader.test.ts
 +++ b/packages/coding-agent/test/resource-loader.test.ts
 @@ -1,8 +1,9 @@
@@ -490,7 +490,7 @@ index bba3fc95..dab31b3d 100644
  import { AuthStorage } from "../src/core/auth-storage.ts";
  import { ExtensionRunner } from "../src/core/extensions/runner.ts";
  import { DefaultResourceLoader, loadProjectContextFiles } from "../src/core/resource-loader.ts";
-@@ -1244,27 +1245,33 @@ export default function(pi: ExtensionAPI) {
+@@ -1328,27 +1329,33 @@ export default function(pi: ExtensionAPI) {
  		});
  
  		// https://github.com/earendil-works/pi/issues/10681
@@ -546,7 +546,7 @@ index bba3fc95..dab31b3d 100644
  		it("should still inherit the main repo's context when the worktree root has none", () => {
  			const { main, worktreeSrc } = setupNestedWorktree();
 diff --git a/packages/coding-agent/test/sdk-session-manager.test.ts b/packages/coding-agent/test/sdk-session-manager.test.ts
-index cf1349f5..846aa2c6 100644
+index cf1349f51..846aa2c6b 100644
 --- a/packages/coding-agent/test/sdk-session-manager.test.ts
 +++ b/packages/coding-agent/test/sdk-session-manager.test.ts
 @@ -1,6 +1,6 @@
@@ -588,7 +588,7 @@ index cf1349f5..846aa2c6 100644
  		session.dispose();
  	});
 diff --git a/packages/coding-agent/test/session-manager/load-entries.test.ts b/packages/coding-agent/test/session-manager/load-entries.test.ts
-index 463dfadf..6c0ea069 100644
+index 463dfadf0..6c0ea0693 100644
 --- a/packages/coding-agent/test/session-manager/load-entries.test.ts
 +++ b/packages/coding-agent/test/session-manager/load-entries.test.ts
 @@ -1,3 +1,4 @@
@@ -606,7 +606,7 @@ index 463dfadf..6c0ea069 100644
  
  	it("generates a session id when the options carry none", () => {
 diff --git a/packages/coding-agent/test/session-selector-path-delete.test.ts b/packages/coding-agent/test/session-selector-path-delete.test.ts
-index 4a0ed364..43fd8a69 100644
+index 4a0ed3642..43fd8a693 100644
 --- a/packages/coding-agent/test/session-selector-path-delete.test.ts
 +++ b/packages/coding-agent/test/session-selector-path-delete.test.ts
 @@ -1,8 +1,9 @@
@@ -632,7 +632,7 @@ index 4a0ed364..43fd8a69 100644
  	const parentRealPath = join(sharedDir, "parent.jsonl");
  	const childRealPath = join(sharedDir, "child.jsonl");
 diff --git a/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts b/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts
-index 61b0918e..032dacc2 100644
+index 61b0918e6..032dacc20 100644
 --- a/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts
 +++ b/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts
 @@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
@@ -653,7 +653,7 @@ index 61b0918e..032dacc2 100644
  
  		// Script that sets up the watcher and emits a synthetic error on it.
 diff --git a/packages/coding-agent/test/tools.test.ts b/packages/coding-agent/test/tools.test.ts
-index 91432623..c1a520c3 100644
+index a096c2f91..9703c9eaa 100644
 --- a/packages/coding-agent/test/tools.test.ts
 +++ b/packages/coding-agent/test/tools.test.ts
 @@ -1,5 +1,6 @@
@@ -709,7 +709,7 @@ index 91432623..c1a520c3 100644
  
  			const result = await computeEditsDiff(unreadableFile, [{ oldText: "hello", newText: "world" }], testDir);
  
-@@ -944,6 +955,7 @@ describe("Coding Agent Tools", () => {
+@@ -961,6 +972,7 @@ describe("Coding Agent Tools", () => {
  			const result = await grepTool.execute("test-call-grep-injection", {
  				pattern: `--pre=${payload}`,
  				path: testDir,
@@ -717,7 +717,7 @@ index 91432623..c1a520c3 100644
  			});
  
  			expect(getTextOutput(result)).toContain("No matches found");
-@@ -1126,7 +1138,8 @@ describe("tool cwd resolution", () => {
+@@ -1143,7 +1155,8 @@ describe("tool cwd resolution", () => {
  			fakeCtx(testDir),
  		);
  		const output = getTextOutput(result);
@@ -728,7 +728,7 @@ index 91432623..c1a520c3 100644
  });
  
 diff --git a/packages/coding-agent/test/trust-selector.test.ts b/packages/coding-agent/test/trust-selector.test.ts
-index c4659001..a3c3a76c 100644
+index c4659001b..a3c3a76c9 100644
 --- a/packages/coding-agent/test/trust-selector.test.ts
 +++ b/packages/coding-agent/test/trust-selector.test.ts
 @@ -1,3 +1,4 @@
@@ -833,7 +833,7 @@ index c4659001..a3c3a76c 100644
  		});
  	});
 diff --git a/packages/coding-agent/test/version-check.test.ts b/packages/coding-agent/test/version-check.test.ts
-index ffe21508..07584f70 100644
+index ffe21508c..07584f703 100644
 --- a/packages/coding-agent/test/version-check.test.ts
 +++ b/packages/coding-agent/test/version-check.test.ts
 @@ -11,6 +11,12 @@ import { allowNetwork } from "./test-network-env.ts";
@@ -850,7 +850,7 @@ index ffe21508..07584f70 100644
  	allowNetwork();
  });
 diff --git a/packages/durable/test/env-node.test.ts b/packages/durable/test/env-node.test.ts
-index 4287987d..039319c8 100644
+index 4287987de..039319c88 100644
 --- a/packages/durable/test/env-node.test.ts
 +++ b/packages/durable/test/env-node.test.ts
 @@ -6,6 +6,7 @@ import { delimiter, join } from "node:path";
@@ -918,7 +918,7 @@ index 4287987d..039319c8 100644
  		const entries = getOrThrow(await env.listDir(".", BACKGROUND_CONTEXT));
  		expect(
 diff --git a/packages/durable/test/tools.test.ts b/packages/durable/test/tools.test.ts
-index dba4d7c9..bb0b47eb 100644
+index dba4d7c9d..bb0b47eb3 100644
 --- a/packages/durable/test/tools.test.ts
 +++ b/packages/durable/test/tools.test.ts
 @@ -1,7 +1,6 @@
@@ -973,8 +973,23 @@ index dba4d7c9..bb0b47eb 100644
  			expect(getOrThrow(await env.readTextFile("target.txt", BACKGROUND_CONTEXT))).toBe("after\n");
  		});
  
+diff --git a/packages/schema/test/suite.ts b/packages/schema/test/suite.ts
+index fac5bebbd..6fcf04d39 100644
+--- a/packages/schema/test/suite.ts
++++ b/packages/schema/test/suite.ts
+@@ -29,7 +29,9 @@ export function suiteFiles(): SuiteFile[] {
+ 		["draft7", "7"],
+ 	] as const) {
+ 		for (const path of jsonFiles(join(root, "tests", dir))) {
+-			const name = relative(join(root, "tests"), path).replace(/\.json$/, "");
++			const name = relative(join(root, "tests"), path)
++				.replaceAll("\\", "/")
++				.replace(/\.json$/, "");
+ 			files.push({ name, draft, groups: JSON.parse(readFileSync(path, "utf8")) });
+ 		}
+ 	}
 diff --git a/packages/tui/test/autocomplete.test.ts b/packages/tui/test/autocomplete.test.ts
-index 67a5511a..674442ff 100644
+index 67a5511a3..674442ff2 100644
 --- a/packages/tui/test/autocomplete.test.ts
 +++ b/packages/tui/test/autocomplete.test.ts
 @@ -1,9 +1,10 @@
@@ -1025,10 +1040,10 @@ index 67a5511a..674442ff 100644
  			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
  			const line = "@link";
 diff --git a/packages/tui/test/terminal-image.test.ts b/packages/tui/test/terminal-image.test.ts
-index 6fd05f43..9c394fe4 100644
+index 0ae5bd8b4..5058fdb70 100644
 --- a/packages/tui/test/terminal-image.test.ts
 +++ b/packages/tui/test/terminal-image.test.ts
-@@ -806,7 +806,7 @@ describe("imageFallback", () => {
+@@ -823,7 +823,7 @@ describe("imageFallback", () => {
  		try {
  			const abs = join(homedir(), ".pi", "agent", "shot.png");
  			const result = imageFallback("image/png", { widthPx: 1280, heightPx: 720 }, abs);
@@ -1037,7 +1052,7 @@ index 6fd05f43..9c394fe4 100644
  		} finally {
  			resetCapabilitiesCache();
  		}
-@@ -824,7 +824,7 @@ describe("imageFallback", () => {
+@@ -841,7 +841,7 @@ describe("imageFallback", () => {
  			);
  			// Visible text must use ~/... not the expanded home path.
  			const visible = result.replace(/\x1b\]8;;.*?\x1b\\/g, "");
@@ -1046,31 +1061,8 @@ index 6fd05f43..9c394fe4 100644
  		} finally {
  			resetCapabilitiesCache();
  		}
-diff --git a/scripts/check-entry-graphs.mjs b/scripts/check-entry-graphs.mjs
-index f53303d9..288c0d61 100644
---- a/scripts/check-entry-graphs.mjs
-+++ b/scripts/check-entry-graphs.mjs
-@@ -12,7 +12,7 @@
-  */
- 
- import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
--import { dirname, relative, resolve } from "node:path";
-+import { dirname, relative, resolve, sep } from "node:path";
- import { fileURLToPath } from "node:url";
- 
- const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-@@ -150,7 +150,8 @@ for (const [pkgDir, budgets] of Object.entries(BUDGETS)) {
- 				failures += 1;
- 				continue;
- 			}
--			const graph = [...walk(source)].map((file) => relative(ROOT, file));
-+			// Budget patterns use "/", so Windows paths are compared in that form too.
-+			const graph = [...walk(source)].map((file) => relative(ROOT, file).split(sep).join("/"));
- 			if (graph.length > budget.maxFiles) {
- 				console.error(
- 					`${pkgDir} export "${name}" reaches ${graph.length} files, budget ${budget.maxFiles}\n` +
 diff --git a/scripts/local-package-install.test.mjs b/scripts/local-package-install.test.mjs
-index fe467d0f..9a58baf0 100644
+index fe467d0fe..9a58baf0c 100644
 --- a/scripts/local-package-install.test.mjs
 +++ b/scripts/local-package-install.test.mjs
 @@ -7,6 +7,7 @@ import test from "node:test";
@@ -1090,9 +1082,23 @@ index fe467d0f..9a58baf0 100644
  
  	const manifest = JSON.parse(readFileSync(join(consumerDirectory, "package.json"), "utf8"));
  	assert.match(manifest.dependencies["@pi-package-test/target"], /^file:/);
+diff --git a/scripts/preview-packages.test.mjs b/scripts/preview-packages.test.mjs
+index d287c0c49..545e8b3f4 100644
+--- a/scripts/preview-packages.test.mjs
++++ b/scripts/preview-packages.test.mjs
+@@ -79,7 +79,8 @@ test("pack points internal dependencies at the commit's builds and restores pack
+ 	assert.deepEqual(manifest.packages.map((pkg) => pkg.name).sort(), ["@scope/a", "@scope/b"]);
+ 	assert.deepEqual(readdirSync(out).sort(), ["manifest.json", ...manifest.packages.map((pkg) => pkg.file)].sort());
+ 	const fileA = manifest.packages.find((pkg) => pkg.name === "@scope/a").file;
+-	const packedA = JSON.parse(execFileSync("tar", ["-xOzf", join(out, fileA), "package/package.json"], { encoding: "utf8" }));
++	// Relative: GNU tar reads the `D:` of a Windows path as a remote host.
++	const packedA = JSON.parse(execFileSync("tar", ["-xOzf", fileA, "package/package.json"], { cwd: out, encoding: "utf8" }));
+ 	assert.deepEqual(packedA.dependencies, { "@scope/b": `https://pkg.earendil.com/@scope/b@${sha}`, other: "2.0.0" });
+ 	assert.equal(readFileSync(join(repo, "packages/a/package.json"), "utf8"), original);
+ });
 diff --git a/scripts/test-filesystem.ts b/scripts/test-filesystem.ts
 new file mode 100644
-index 00000000..c6c44d0f
+index 000000000..c6c44d0f2
 --- /dev/null
 +++ b/scripts/test-filesystem.ts
 @@ -0,0 +1,38 @@
@@ -1135,7 +1141,7 @@ index 00000000..c6c44d0f
 +/** File-link metadata tests require Windows symlink privilege; directory/alias tests always run. */
 +export const fileSymlinksAvailable = probeFileSymlinks();
 diff --git a/test.sh b/test.sh
-index 574b5cdd..2296ef4f 100755
+index 574b5cdda..2296ef4f3 100755
 --- a/test.sh
 +++ b/test.sh
 @@ -12,6 +12,13 @@ mkdir -p "$test_root/home/.config" "$test_root/tmp" "$test_root/cache/npm"

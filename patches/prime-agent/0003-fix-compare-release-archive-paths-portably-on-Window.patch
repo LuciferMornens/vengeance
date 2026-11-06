@@ -1,5 +1,5 @@
 diff --git a/scripts/package_release.py b/scripts/package_release.py
-index f60a1ad4d..df5b2e897 100644
+index 461973a27..19a7c68da 100644
 --- a/scripts/package_release.py
 +++ b/scripts/package_release.py
 @@ -321,11 +321,11 @@ def write_tar(stage_dir, output):
