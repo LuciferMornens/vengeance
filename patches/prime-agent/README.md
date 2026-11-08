@@ -3,7 +3,7 @@
 Follow [UPSTREAM.md](../../UPSTREAM.md) for reconstruction and qualification.
 
 Vengeance ships a source build of stable `v0.10.2`, upstream commit
-`ea9d9602ec0938d9e454e8963107cd85af1565c6`, identified as `0.10.2+vengeance.1`.
+`ea9d9602ec0938d9e454e8963107cd85af1565c6`, identified as `0.10.2+vengeance.2`.
 The exact source, catalog revision, toolchain and patch order live in
 [engines.lock.json](../../engines.lock.json). The native helper links this same stable base.
 
@@ -30,6 +30,7 @@ The exact source, catalog revision, toolchain and patch order live in
 | 0023  | Verify and explicitly install the bundled Intel macOS cryptography wheel; refresh kernel identity.        |
 | 0024  | Report each open session's live MCP server state from its kernel and reconnect one server on request.     |
 | 0025  | Add OrcaRouter as a compiled provider that survives every catalog layer.                                  |
+| 0026  | Add Audn as a compiled provider that survives every catalog layer.                                        |
 
 `v0.10.2` retires patch 0010, which reported Windows edit failures. Upstream deleted the dead built-in
 bash and edit tools it changed ([#3823](https://github.com/PrimeIntellect-ai/prime-agent/pull/3823)), so
@@ -167,6 +168,11 @@ reports `cached_tokens` and `cache_write_tokens` apart, so the usage parser keep
 The patch also makes `merge_compat` keep the base compat when there is no override. Upstream returned
 none there, so any `modelOverrides` entry without `compat` erased a built-in model's compat, which for
 OrcaRouter brought back the `developer` role and a 400 on every turn.
+
+Patch 0026 adds Audn with API-key login, `AUDN_API_KEY` discovery and a default model, joined to every
+catalog layer through `COMPILED_ONLY_PROVIDERS` like OrcaRouter. Its map names Low, High and Max and
+leaves Off unmapped, since `none` still reasons, so a saved Off clamps up to Low. Audn reports cached
+input inside `prompt_tokens` and no writes, which the default usage parser already reads correctly.
 
 When upstream incorporates a local fix, demonstrate the regression passing on that upstream base,
 then remove the redundant patch. Do not blindly carry patches or the helper across releases.

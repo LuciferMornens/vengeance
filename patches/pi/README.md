@@ -1,13 +1,13 @@
 # Vengeance's pi build
 
 Vengeance builds stable `v1.5.0`, commit `f9a26365568127461c47a07a37dcb42c140a3ac5`,
-as `1.5.0+vengeance.1`. See [UPSTREAM.md](../../UPSTREAM.md) and
+as `1.5.0+vengeance.2`. See [UPSTREAM.md](../../UPSTREAM.md) and
 [engines.lock.json](../../engines.lock.json) for the source and maintenance contract.
 
 The active series includes distribution policy (0001), extension runtime version identity (0002),
 native runtime qualification (0003), Windows native test fixtures (0005), Abliteration (0006),
 native session sharing (0007), POSIX shell test paths (0008), MCP host state (0009), OAuth
-refresh rejection (0010), the per-request image limit (0011) and OrcaRouter (0012).
+refresh rejection (0010), the per-request image limit (0011), OrcaRouter (0012) and Audn (0013).
 Patch `0005` normalizes the external-editor fixture's temporary path on Windows. Patch `0006`
 also supplies Abliteration's native default model, required by the 1.3 provider-selection contract.
 Rebasing onto 1.4.0 needed two reviewed resolutions: the chord package-boundary test, where 1.4.0's
@@ -147,3 +147,9 @@ Patch `0012` adds OrcaRouter's `orca/orcacyber-k3.1-pro` as a native provider wi
 OrcaRouter documents, so a saved Minimal, Medium or Extra high moves to Low, High or Max. The API
 rejects the `developer` role, so instructions stay in `system`. Video input has no Engine input type
 and is not declared. Images use the same conservative resize profile as every other vision model.
+
+Patch `0013` adds Audn's `necromicon` as a native provider with API-key login, `AUDN_API_KEY`
+discovery and a default model. Its ladder is Low, High and Max, the efforts Audn documents. Reasoning
+cannot be turned off, so a saved Off or Minimal moves to Low, Medium to High and Extra high to Max.
+The API accepts images but the model ignores them, so the model is declared text-only and the composer
+says so. Instructions stay in `system` and the output limit travels as `max_tokens`.

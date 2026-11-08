@@ -140,6 +140,16 @@ export const MOCK_MODELS: Model[] = [
     contextWindow: 200_000,
     maxTokens: 64_000,
     cost: [4, 20, 0.4, 5]
+  }),
+  // Text only: the composer's image notices and Engine 2's image turn refusal.
+  model('openrouter', 'meta-llama/llama-3.3-70b-instruct', 'Llama 3.3 70B Instruct', {
+    api: 'openai-completions',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    reasoning: false,
+    contextWindow: 131_072,
+    maxTokens: 16_384,
+    cost: [0.13, 0.4, 0, 0],
+    image: false
   })
 ]
 

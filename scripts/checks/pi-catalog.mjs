@@ -57,6 +57,15 @@ assert.deepEqual(orcarouter.cost, { input: 4, output: 20, cacheRead: 0.35, cache
 assert.deepEqual(models.getSupportedThinkingLevels(orcarouter), ['off', 'low', 'high', 'max'])
 assert.equal(orcarouter.compat.supportsDeveloperRole, false)
 
+const audn = catalog.getBuiltinModel('audn', 'necromicon')
+assert.equal(audn.reasoning, true)
+assert.deepEqual(audn.input, ['text'])
+assert.equal(audn.contextWindow, 1_048_576)
+assert.equal(audn.maxTokens, 32_768)
+assert.deepEqual(audn.cost, { input: 3, output: 5, cacheRead: 0.3, cacheWrite: 3 })
+assert.deepEqual(models.getSupportedThinkingLevels(audn), ['low', 'high', 'max'])
+assert.equal(audn.compat.supportsDeveloperRole, false)
+
 console.log(
-  '✓ native catalog: Haiku capabilities, pricing and Off thinking; Sonnet cache price; OrcaRouter'
+  '✓ native catalog: Haiku capabilities, pricing and Off thinking; Sonnet cache price; OrcaRouter; Audn'
 )

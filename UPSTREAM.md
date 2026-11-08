@@ -21,8 +21,8 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 
 `engines.lock.json` is the source of truth. Current stable bases are pi `v1.5.0` at
 `f9a26365568127461c47a07a37dcb42c140a3ac5` and Prime `v0.10.2` at
-`ea9d9602ec0938d9e454e8963107cd85af1565c6`. The builds identify as `1.5.0+vengeance.1` and
-`0.10.2+vengeance.1`. Never reuse a Vengeance build version for different shipped behavior.
+`ea9d9602ec0938d9e454e8963107cd85af1565c6`. The builds identify as `1.5.0+vengeance.2` and
+`0.10.2+vengeance.2`. Never reuse a Vengeance build version for different shipped behavior.
 
 The current stable-release verification and patch decisions are recorded in
 [ENGINE-STABLE-AUDIT-2026-11-06.md](docs/ENGINE-STABLE-AUDIT-2026-11-06.md), following
@@ -347,8 +347,8 @@ background activity stays out of the Dock. The main Vengeance app must remain a 
 
 Since 0.3.3, the macOS arm64/x64 and Linux arm64/x64 release runners then qualify the official
 same-platform 0.3.2 Engine 2 package (`0.10.0+vengeance.10`) against the final packaged candidate
-(`.12` in 0.3.3, `.13` in 0.3.4 to 0.3.6, `0.10.1+vengeance.1` in 0.3.7 and 0.3.8, and `0.10.2+vengeance.1`
-in 0.3.9).
+(`.12` in 0.3.3, `.13` in 0.3.4 to 0.3.6, `0.10.1+vengeance.1` in 0.3.7 and 0.3.8, `0.10.2+vengeance.1` in 0.3.9
+and `0.10.2+vengeance.2` in 0.4.0).
 `scripts/qa/engines/release-baseline.mjs` pins both the public release's `SHA256SUMS` and each archive's
 SHA-256, verifies the complete extracted native inventories and macOS app signature, and emits
 `release-baseline.json` plus `release-baseline-env.json`. It never launches the production app.
@@ -362,7 +362,7 @@ This upgrade group follows the nine core suites and macOS visibility gate, befor
 benchmarking. Windows's `.10` to `.11` native transition is covered by the retained PR qualification
 report; that historical evidence does not qualify `.12` or later builds. The Intel wheel patch
 changes no Windows dependency resolution. pi is `1.3.0+vengeance.2` in 0.3.2 and 0.3.3,
-`1.3.0+vengeance.3` in 0.3.4 and `1.3.0+vengeance.4` in 0.3.5 and 0.3.6, all on the `v1.3.0` base, then `1.4.0+vengeance.1` in 0.3.7, `1.4.0+vengeance.2` in 0.3.8 and `1.5.0+vengeance.1` in 0.3.9. Its historical 1.2 to 1.3 transition fixture
+`1.3.0+vengeance.3` in 0.3.4 and `1.3.0+vengeance.4` in 0.3.5 and 0.3.6, all on the `v1.3.0` base, then `1.4.0+vengeance.1` in 0.3.7, `1.4.0+vengeance.2` in 0.3.8, `1.5.0+vengeance.1` in 0.3.9 and `1.5.0+vengeance.2` in 0.4.0. Its historical 1.2 to 1.3 transition fixture
 is not used as a release upgrade gate.
 
 Each of the five release runners then runs
@@ -646,6 +646,29 @@ reports `cached_tokens` and `cache_write_tokens` as disjoint parts of `prompt_to
 Prime's usage parser branches on the provider for that. Retire both patches when upstream supplies
 qualified support. Run `scripts/qa/auth/orcarouter.qa.mjs` for isolated coverage of both engines. Live
 verification is opt-in with `VENGEANCE_LIVE_ORCAROUTER_QA=1` and `ORCAROUTER_API_KEY`.
+
+pi patch `0013` and Prime patch `0026` add Audn's `necromicon` as a native provider in both engines,
+with API-key login, `AUDN_API_KEY` discovery and a native default model. The base URL is
+`https://platform.audn.ai/api/v1`; plain `/v1` redirects to a sign-in page and `/responses`
+answers 404. Limits and prices come from `GET /api/v1/models`, whose `x_behavior.max_output_tokens`
+is 32768.
+It lists no cache write price, so writes cost the input price; the API reports cached input in
+`prompt_tokens_details.cached_tokens` and no writes. Reasoning is the documented low/high/max ladder
+from `supported_reasoning_efforts`. `none` and made-up values answer 200 and the model still reasons,
+so Off is not offered and a saved Off moves to Low. On 7 November 2026 the three levels did not
+measurably differ on tiny prompts. The API accepts and ignores `max_tokens` (16 produced 1670 output
+tokens) and images (prompt tokens are the same with one attached), so the model is declared
+text-only. It also accepts `developer`, `store` and `strict`; the patches send `system` and
+`max_tokens` and omit the rest. Tool calls arrive in a single delta, tool turns return no reasoning,
+and a continuation with replayed `reasoning_content` works. audn.ai/necromicon calls the model Kimi
+K3.1 Pro with Audn's abliteration, while `/models` names `Deepseek-v4.1-Flash-1017-unrestricted`. On
+7 November 2026 its `prompt_tokens` deltas matched OpenAI's o200k tokenizer exactly on two probes and
+neither Kimi K3.1 Pro's nor DeepSeek V4.1 Flash's published tokenizer, so the catalog uses Audn's own
+name and claims no base. Recheck the model list, ladder, prices and that probe on upgrades. Like
+OrcaRouter, Prime's remote catalog and bundled snapshot do not carry Audn, so it is listed in
+`COMPILED_ONLY_PROVIDERS`. Retire both patches when upstream supplies qualified support. Run
+`scripts/qa/auth/audn.qa.mjs` for isolated coverage of both engines. Live verification is opt-in with
+`VENGEANCE_LIVE_AUDN_QA=1` and `AUDN_API_KEY`.
 
 Qualified on 16 October 2026 against the reconstructed and staged Engine `1.2.0+vengeance.4`.
 The staged pi payload hash is

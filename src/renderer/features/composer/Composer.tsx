@@ -33,6 +33,7 @@ import { promptHistory, pushHistory, useDraft, useDrafts, type DraftPatch } from
 import { RotatingPlaceholder } from './editor-hints'
 import { ComposerFooter } from './footer'
 import { useComposerFocus, type OpeningFocus } from './focus'
+import { useImageNotice } from './image-notice'
 import { cycleThinkingLevel, stopAgent } from './operations'
 import { AttachmentTray, BashRunningRow, QueueChips, type QueuedItem } from './parts'
 import {
@@ -553,14 +554,7 @@ export function Composer({ agentId, opening }: { agentId: string; opening: Openi
         ? 'include'
         : null
     : null
-  const imagesUnsupported =
-    draft.images.length > 0 && model
-      ? model.input.length === 0
-        ? `Image support could not be verified for ${model.name}.`
-        : !model.input.includes('image')
-          ? `${model.name} can’t read images. They will be ignored.`
-          : undefined
-      : undefined
+  const imageNotice = useImageNotice(agentId, engine, cwd, model, draft.images.length > 0)
   const placeholderHints = useMemo(
     () =>
       !ready
@@ -691,7 +685,7 @@ export function Composer({ agentId, opening }: { agentId: string; opening: Openi
               <AttachmentTray
                 images={draft.images}
                 pending={draft.pending}
-                imagesUnsupported={imagesUnsupported}
+                notice={imageNotice}
                 onRemove={(id) =>
                   patchDraft((d) => ({ images: d.images.filter((i) => i.id !== id) }))
                 }

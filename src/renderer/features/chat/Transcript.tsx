@@ -40,6 +40,7 @@ import {
   RetryFailedCard,
   retriesGaveUpOn,
   retryPending,
+  TurnFailedCard,
   UnknownNote
 } from './notices'
 import { SubagentUpdates, SupervisorReplyRow, WakeDivider } from './subagent-notices'
@@ -604,6 +605,12 @@ function AgentTranscript({ agentId }: { agentId: string }) {
     const last = agent.entries[agent.entries.length - 1]?.message
     return last?.role === 'assistant' && retriesGaveUpOn(agent, last) ? null : agent.retryError
   })
+  const turnError = useAgents((s) => {
+    const agent = s.agents[agentId]
+    return agent?.turnError && agent.turnError.entries === agent.entries.length
+      ? agent.turnError.message
+      : null
+  })
   const compaction = useAgents((s) => s.agents[agentId]?.compaction ?? null)
   const bash = useAgents((s) => s.agents[agentId]?.bash)
   const waiting = useAgents((s) => {
@@ -746,6 +753,9 @@ function AgentTranscript({ agentId }: { agentId: string }) {
                     <BashRunCard key={run.id} agentId={agentId} run={run} />
                   ))}
                   {retryError && !running && <RetryFailedCard message={retryError} />}
+                  {turnError && !running && (
+                    <TurnFailedCard agentId={agentId} message={turnError} />
+                  )}
                   {compaction && <CompactingNote compaction={compaction} />}
                   {waiting && <WorkingIndicator />}
                 </div>

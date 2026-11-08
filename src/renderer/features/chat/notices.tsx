@@ -6,6 +6,7 @@ import {
   ChevronUp,
   Cpu,
   GitBranch,
+  ImageIcon,
   Layers,
   Puzzle,
   RefreshCw,
@@ -32,13 +33,19 @@ import { Collapse } from '../../ui/Collapse'
 import { CopyButton } from '../../ui/CopyButton'
 import { Markdown } from '../../ui/Markdown'
 import { openModelPicker } from '../composer/model-pill'
+import { revealImageModelSetting } from '../composer/image-notice'
 import { supportsAgentCommand } from '../composer/operations'
 import { SIGN_IN_EXPIRED } from '../settings/provider-status'
 import { Console, ExitBadge, PromptIcon } from '../tools'
 import { useCatalogProviders } from './catalog-providers'
 import { EarlierHistoryContext } from './earlier-history'
 import { openSignIn } from './failure-toast'
-import { expiredSignInName, parseProviderError, type ParsedProviderError } from './provider-error'
+import {
+  expiredSignInName,
+  imageTurnRefusal,
+  parseProviderError,
+  type ParsedProviderError
+} from './provider-error'
 
 /** Hairline — label — hairline separator for session events. */
 function Divider({
@@ -514,6 +521,64 @@ export function RetryFailedCard({ message }: { message: string }) {
   if (parsed.expiredSignIn)
     return <ExpiredSignInCard parsed={parsed} provider={parsed.expiredSignIn} title={title} />
   return <ErrorCard title={title} detail={parsed.detail} raw={parsed.raw} />
+}
+
+/**
+ * A turn the engine ended before any response, below the message it ended: Engine 2 refuses an image turn
+ * its model cannot read, with the remedies named in the app's terms instead of its CLI's.
+ */
+export function TurnFailedCard({ agentId, message }: { agentId: string; message: string }) {
+  const model = useAgents((s) => s.agents[agentId]?.model)
+  const refusal = imageTurnRefusal(message)
+  if (!refusal) {
+    const parsed = parseProviderError(message)
+    // Engine 2 reports these in prose: the first line is the headline, the rest stays in the details.
+    return (
+      <ErrorCard title={parsed.title.split('\n')[0]!} detail={parsed.detail} raw={parsed.raw} />
+    )
+  }
+  const named =
+    refusal.kind === 'required' && model && `${model.provider}/${model.id}` === refusal.model
+      ? model.name
+      : undefined
+  return (
+    <ErrorCard
+      title={
+        refusal.kind === 'required'
+          ? `${named ?? refusal.model} can’t read images`
+          : 'The image model isn’t available'
+      }
+      detail={
+        refusal.kind === 'required'
+          ? 'Engine 2 didn’t send this message. Choose a model that reads images, or set an image model to answer messages with images, then send it again.'
+          : `Engine 2 didn’t send this message: its image model “${refusal.reference}” isn’t a signed-in model that reads images. Fix the image model or choose a model that reads images, then send it again.`
+      }
+      meta={refusal.kind === 'required' ? refusal.model : undefined}
+      raw={message}
+      action={
+        <div className="flex shrink-0 gap-1.5">
+          {supportsAgentCommand(agentId, 'set_model') && (
+            <Button
+              size="sm"
+              variant="secondary"
+              leading={<Cpu />}
+              onClick={() => openModelPicker(agentId)}
+            >
+              Change model
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="secondary"
+            leading={<ImageIcon />}
+            onClick={revealImageModelSetting}
+          >
+            Set image model
+          </Button>
+        </div>
+      }
+    />
+  )
 }
 
 /** A user `!command` run: "You ran" console card (live while running). */

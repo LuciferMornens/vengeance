@@ -58,6 +58,26 @@ export function expiredSignInSummary(
   return `${SIGN_IN_EXPIRED.label} for ${expiredSignInName(provider, providers)}. ${SIGN_IN_EXPIRED.explanation}`
 }
 
+/** Engine 2's refusal of an image turn its model cannot read; the text names CLI remedies the app replaces. */
+export type ImageTurnRefusal =
+  /** No `imageModel` is set; `model` is the session model's "provider/id". */
+  | { kind: 'required'; model: string }
+  /** `imageModel` (`reference`) is not an available, signed-in model that reads images. */
+  | { kind: 'unusable'; reference: string }
+
+const IMAGE_MODEL_REQUIRED =
+  /^This turn attaches images, but the selected model \((.+?)\) does not accept image input\./
+const IMAGE_MODEL_UNUSABLE =
+  /^imageModel "(.+?)" could not be resolved to an available, image-capable, authenticated model\./
+
+export function imageTurnRefusal(raw: string): ImageTurnRefusal | undefined {
+  const text = raw.trim()
+  const required = IMAGE_MODEL_REQUIRED.exec(text)
+  if (required) return { kind: 'required', model: required[1]! }
+  const unusable = IMAGE_MODEL_UNUSABLE.exec(text)
+  return unusable ? { kind: 'unusable', reference: unusable[1]! } : undefined
+}
+
 const OVERLOADED = 'The provider is overloaded'
 
 /**

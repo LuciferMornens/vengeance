@@ -1,0 +1,195 @@
+diff --git a/packages/ai/src/env-api-keys.ts b/packages/ai/src/env-api-keys.ts
+index 3fbcbe9..4d3dedf 100644
+--- a/packages/ai/src/env-api-keys.ts
++++ b/packages/ai/src/env-api-keys.ts
+@@ -84,6 +84,7 @@ function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
+ 	const envMap: Record<string, string> = {
+ 		abliteration: "ABLIT_KEY",
+ 		"ant-ling": "ANT_LING_API_KEY",
++		audn: "AUDN_API_KEY",
+ 		orcarouter: "ORCAROUTER_API_KEY",
+ 		"qwen-token-plan": "QWEN_TOKEN_PLAN_API_KEY",
+ 		"qwen-token-plan-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
+diff --git a/packages/ai/src/providers/all.ts b/packages/ai/src/providers/all.ts
+index cd3d082..0d5ae7f 100644
+--- a/packages/ai/src/providers/all.ts
++++ b/packages/ai/src/providers/all.ts
+@@ -9,6 +9,7 @@ import { ABLITERATION_MODELS, abliterationProvider } from "./abliteration.ts";
+ import { amazonBedrockProvider } from "./amazon-bedrock.ts";
+ import { antLingProvider } from "./ant-ling.ts";
+ import { anthropicProvider } from "./anthropic.ts";
++import { AUDN_MODELS, audnProvider } from "./audn.ts";
+ import { azureProvider } from "./azure.ts";
+ import { basetenProvider } from "./baseten.ts";
+ import { cerebrasProvider } from "./cerebras.ts";
+@@ -54,9 +55,14 @@ import { zaiCodingCnProvider } from "./zai-coding-cn.ts";
+ export { radiusProvider };
+ 
+ // Keep the content-addressed upstream catalog intact; qualify this provider separately.
+-const MODELS = { ...GENERATED_MODELS, abliteration: ABLITERATION_MODELS, orcarouter: ORCAROUTER_MODELS };
+-const IMAGE_MODELS = { ...GENERATED_IMAGE_MODELS, abliteration: {}, orcarouter: {} };
+-const CLASSIFIER_MODELS = { ...GENERATED_CLASSIFIER_MODELS, abliteration: {}, orcarouter: {} };
++const MODELS = {
++	...GENERATED_MODELS,
++	abliteration: ABLITERATION_MODELS,
++	audn: AUDN_MODELS,
++	orcarouter: ORCAROUTER_MODELS,
++};
++const IMAGE_MODELS = { ...GENERATED_IMAGE_MODELS, abliteration: {}, audn: {}, orcarouter: {} };
++const CLASSIFIER_MODELS = { ...GENERATED_CLASSIFIER_MODELS, abliteration: {}, audn: {}, orcarouter: {} };
+ 
+ /** Providers present in the generated catalog. `KnownProvider` additionally
+  * includes purely dynamic providers (e.g. "radius") that have no static
+@@ -150,6 +156,7 @@ export function builtinProviders(): Provider[] {
+ 		amazonBedrockProvider(),
+ 		antLingProvider(),
+ 		anthropicProvider(),
++		audnProvider(),
+ 		azureProvider(),
+ 		basetenProvider(),
+ 		cerebrasProvider(),
+diff --git a/packages/ai/src/providers/audn.ts b/packages/ai/src/providers/audn.ts
+new file mode 100644
+index 0000000..d254f1f
+--- /dev/null
++++ b/packages/ai/src/providers/audn.ts
+@@ -0,0 +1,46 @@
++import { openAICompletionsApi } from "../api/openai-completions.lazy.ts";
++import { envApiKeyAuth } from "../auth/helpers.ts";
++import { createProvider, type Provider } from "../models.ts";
++import type { Model } from "../types.ts";
++
++const PROVIDER_ID = "audn";
++const BASE_URL = "https://platform.audn.ai/api/v1";
++
++// Limits and USD per million tokens: GET /api/v1/models. No cache write price is listed, so writes cost the input
++// price. The API takes images but the model answers as if they were absent, so only text is declared.
++export const AUDN_MODELS = {
++	necromicon: {
++		id: "necromicon",
++		name: "Necromicon",
++		provider: PROVIDER_ID,
++		baseUrl: BASE_URL,
++		api: "openai-completions",
++		reasoning: true,
++		// Audn documents low, high and max. `none` and made-up values still answer 200 and the model still reasons,
++		// so reasoning cannot be turned off and the other levels would be controls that cannot be shown to do anything.
++		thinkingLevelMap: { off: null, minimal: null, low: "low", medium: null, high: "high", xhigh: null, max: "max" },
++		input: ["text"],
++		contextWindow: 1048576,
++		maxTokens: 32768,
++		cost: { input: 3, output: 5, cacheRead: 0.3, cacheWrite: 3 },
++		compat: {
++			supportsStore: false,
++			supportsDeveloperRole: false,
++			supportsReasoningEffort: true,
++			maxTokensField: "max_tokens",
++			supportsStrictMode: false,
++			supportsLongCacheRetention: false,
++		},
++	},
++} satisfies Record<string, Model<"openai-completions">>;
++
++export function audnProvider(): Provider<"openai-completions"> {
++	return createProvider({
++		id: PROVIDER_ID,
++		name: "Audn",
++		baseUrl: BASE_URL,
++		auth: { apiKey: envApiKeyAuth("Audn API key", ["AUDN_API_KEY"]) },
++		models: Object.values(AUDN_MODELS),
++		api: openAICompletionsApi(),
++	});
++}
+diff --git a/packages/ai/src/types.ts b/packages/ai/src/types.ts
+index e553f7b..d96fb90 100644
+--- a/packages/ai/src/types.ts
++++ b/packages/ai/src/types.ts
+@@ -89,6 +89,7 @@ export type ClassifierApi = KnownClassifierApi | (string & {});
+ 
+ export type KnownProvider =
+ 	| "abliteration"
++	| "audn"
+ 	| "orcarouter"
+ 	| "amazon-bedrock"
+ 	| "ant-ling"
+diff --git a/packages/ai/test/audn.test.ts b/packages/ai/test/audn.test.ts
+new file mode 100644
+index 0000000..38eaffc
+--- /dev/null
++++ b/packages/ai/test/audn.test.ts
+@@ -0,0 +1,63 @@
++import { describe, expect, it } from "vitest";
++import { findEnvKeys, getEnvApiKey } from "../src/env-api-keys.ts";
++import { clampThinkingLevel, getSupportedThinkingLevels } from "../src/models.ts";
++import { builtinModels, getBuiltinModel, getBuiltinModels, getBuiltinProviders } from "../src/providers/all.ts";
++
++const MODEL_ID = "necromicon";
++
++describe("Audn provider", () => {
++	it("offers native API-key login and shares the static and runtime catalog", async () => {
++		const models = builtinModels({
++			authContext: { env: async () => undefined, fileExists: async () => false },
++		});
++		const provider = models.getProviders().find((entry) => entry.id === "audn");
++		expect(provider?.name).toBe("Audn");
++		expect(provider?.auth.oauth).toBeUndefined();
++		expect(await models.getAvailable("audn")).toEqual([]);
++		const credential = await models.login("audn", "api_key", {
++			prompt: async () => "test-audn-key",
++			notify: () => {},
++		});
++		expect(credential).toEqual({ type: "api_key", key: "test-audn-key" });
++		expect(getBuiltinProviders()).toContain("audn");
++		expect(models.getModels("audn")).toEqual(getBuiltinModels("audn"));
++		expect((await models.getAvailable("audn")).map((model) => model.id)).toEqual([MODEL_ID]);
++		await models.logout("audn");
++		expect(await models.getAvailable("audn")).toEqual([]);
++	});
++
++	it("resolves AUDN_API_KEY without another provider's credentials", async () => {
++		const environment = { AUDN_API_KEY: "test-audn-key", ABLIT_KEY: "other-key" };
++		expect(findEnvKeys("audn", environment)).toEqual(["AUDN_API_KEY"]);
++		expect(getEnvApiKey("audn", environment)).toBe(environment.AUDN_API_KEY);
++		const models = builtinModels({
++			authContext: {
++				env: async (name) => environment[name as keyof typeof environment],
++				fileExists: async () => false,
++			},
++		});
++		expect((await models.getAuth("audn"))?.auth.apiKey).toBe(environment.AUDN_API_KEY);
++	});
++
++	it("offers the documented efforts without Off and moves a saved level to the next one up", () => {
++		const model = getBuiltinModel("audn", MODEL_ID);
++		expect(getSupportedThinkingLevels(model)).toEqual(["low", "high", "max"]);
++		expect(clampThinkingLevel(model, "off")).toBe("low");
++		expect(clampThinkingLevel(model, "minimal")).toBe("low");
++		expect(clampThinkingLevel(model, "medium")).toBe("high");
++		expect(clampThinkingLevel(model, "xhigh")).toBe("max");
++	});
++
++	it("declares the live limits, text input, prices and the request shape the API accepts", () => {
++		const model = getBuiltinModel("audn", MODEL_ID);
++		expect(model).toMatchObject({
++			baseUrl: "https://platform.audn.ai/api/v1",
++			api: "openai-completions",
++			input: ["text"],
++			contextWindow: 1048576,
++			maxTokens: 32768,
++			cost: { input: 3, output: 5, cacheRead: 0.3, cacheWrite: 3 },
++			compat: { supportsDeveloperRole: false, supportsStore: false, maxTokensField: "max_tokens" },
++		});
++	});
++});
+diff --git a/packages/coding-agent/src/core/model-resolver.ts b/packages/coding-agent/src/core/model-resolver.ts
+index d5a73e1..3b215a1 100644
+--- a/packages/coding-agent/src/core/model-resolver.ts
++++ b/packages/coding-agent/src/core/model-resolver.ts
+@@ -61,6 +61,7 @@ export const defaultModelPerProvider: Partial<Record<KnownProvider, string>> = {
+ 	"xiaomi-token-plan-sgp": "mimo-v2.6-pro",
+ 	abliteration: "abliterated-model",
+ 	orcarouter: "orca/orcacyber-k3.1-pro",
++	audn: "necromicon",
+ };
+ 
+ export interface ScopedModel {

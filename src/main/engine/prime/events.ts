@@ -26,6 +26,9 @@ const COMMON_EVENTS = new Set([
   'summarization_retry_finished'
 ])
 
+/** The daemon's settle text for a stopped turn (upstream `ABORTED_TURN_SETTLE_ERROR`): a stop, not a failure. */
+const ABORTED_TURN_ERROR = 'No response produced.'
+
 export class PrimeEventAdapter {
   private assistant: AssistantMessage | undefined
   private readonly tools = new Map<string, ToolMetadata>()
@@ -108,6 +111,7 @@ export class PrimeEventAdapter {
       }
       // These native event names share their documented common wire payloads.
       this.emit(event as unknown as EngineEvent)
+      if (type === 'turn_end') this.reportTurnFailure(event)
       return
     }
     this.emit({
@@ -122,6 +126,16 @@ export class PrimeEventAdapter {
     if (!this.busy) return
     this.busy = false
     this.emit({ type: 'agent_settled', aborted: this.aborted })
+  }
+
+  /**
+   * The daemon settles a turn the agent loop never ran with its own `turn_end`: no message, and the error
+   * as its only report. A turn the loop ran carries its failure on the assistant message instead.
+   */
+  private reportTurnFailure(event: PrimeRecord): void {
+    const error = stringValue(event.error)
+    if (event.message !== undefined || !error || error === ABORTED_TURN_ERROR) return
+    this.emit({ type: 'turn_failed', error })
   }
 
   private updateMessage(event: PrimeRecord): void {
