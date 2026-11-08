@@ -5,6 +5,8 @@ import { spring } from '../../lib/motion'
 import type { BashRun } from '../../store/agent-state'
 import { Spinner, Tooltip } from '../../ui'
 import type { ImageAttachment, PendingAttachment } from './drafts'
+import { revealImageModelSetting } from './image-notice'
+import type { ImageNotice } from './image-support'
 
 // ─── Attachment tray ─────────────────────────────────────────────────────────────────────────
 
@@ -24,16 +26,22 @@ export function middleEllipsis(name: string, max = 24): string {
 
 const attachmentCard = 'group relative flex h-12 max-w-[220px] items-center gap-2.5 rounded-card bg-surface-3 py-1.5 pr-3 pl-1.5 shadow-[inset_0_0_0_1px_var(--hairline)]'
 
+const NOTICE_TONES: Record<ImageNotice['tone'], string> = {
+  info: 'text-fg-3',
+  warning: 'text-warning',
+  danger: 'text-danger'
+}
+
 export function AttachmentTray({
   images,
   pending,
   onRemove,
-  imagesUnsupported
+  notice
 }: {
   images: ImageAttachment[]
   pending: PendingAttachment[]
   onRemove(id: string): void
-  imagesUnsupported?: string
+  notice?: ImageNotice
 }) {
   if (images.length === 0 && pending.length === 0) return null
   return (
@@ -90,10 +98,21 @@ export function AttachmentTray({
           ))}
         </AnimatePresence>
       </div>
-      {imagesUnsupported && (
-        <div className="mt-1.5 inline-flex items-center gap-1.5 text-xs text-warning">
-          <AlertTriangle className="size-3" />
-          {imagesUnsupported}
+      {notice && (
+        <div data-image-notice={notice.tone} className={cn('mt-1.5 flex items-start gap-1.5 text-xs', NOTICE_TONES[notice.tone])}>
+          {notice.tone === 'info' ? <ImageIcon className="mt-px size-3 shrink-0" /> : <AlertTriangle className="mt-px size-3 shrink-0" />}
+          <span>
+            {notice.text}
+            {notice.refusal && (
+              <span className="block text-fg-3">
+                Choose a model that reads images, or{' '}
+                <button type="button" onClick={revealImageModelSetting} className="font-medium text-fg-2 underline decoration-hairline-strong underline-offset-2 hover:text-fg">
+                  {notice.refusal === 'unset' ? 'set an image model' : 'fix the image model'}
+                </button>
+                .
+              </span>
+            )}
+          </span>
         </div>
       )}
     </div>

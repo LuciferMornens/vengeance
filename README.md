@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/LuciferMornens/vengeance/releases/latest"><img alt="Version 0.3.9" src="https://img.shields.io/badge/version-0.3.9-FF4D3D?style=flat-square"></a>
+  <a href="https://github.com/LuciferMornens/vengeance/releases/latest"><img alt="Version 0.4.0" src="https://img.shields.io/badge/version-0.4.0-FF4D3D?style=flat-square"></a>
   <a href="https://github.com/LuciferMornens/vengeance/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/LuciferMornens/vengeance/actions/workflows/ci.yml/badge.svg"></a>
   <a href="#download"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-0078D4?style=flat-square"></a>
   <a href="#download"><img alt="macOS arm64 and x64" src="https://img.shields.io/badge/macOS-arm64%20%7C%20x64-000000?style=flat-square"></a>
@@ -187,6 +187,12 @@ either one separately.
   `ORCAROUTER_API_KEY` in the launch environment. The model is gated to OrcaRouter's Security
   Research tier. With reasoning Off it tends to think in its visible answer and can repeat tool
   calls, so prefer Low or higher.
+- **Audn (both engines).** Necromicon (`necromicon`) is included, with a 1M-token context, tools and
+  Low, High and Max reasoning effort. Connect in **Settings → Providers & accounts → Audn**, or
+  supply `AUDN_API_KEY` in the launch environment. Reasoning can't be turned off. The model reads
+  text only: Audn's API accepts images, but the model doesn't see them. Audn describes it as Kimi
+  K3.1 Pro with its own abliteration, while its model list names a different base, so Vengeance
+  shows Audn's own name.
 
 <p align="center">
   <a href="docs/screenshots/settings-models.png"><img src="docs/screenshots/settings-models.png" alt="Settings, Models: default model, default thinking level, response speed for new sessions and per-model thinking levels, with the settings navigation alongside" width="880"></a>
@@ -225,7 +231,7 @@ command palette and inspector are shared.
 
 |            | Engine                                                                                      | Engine 2                                                                                                                                               |
 | ---------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Built from | [pi](https://github.com/earendil-works/pi) `v1.5.0`, build `1.5.0+vengeance.1`              | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) `v0.10.2`, build `0.10.2+vengeance.1`                                                  |
+| Built from | [pi](https://github.com/earendil-works/pi) `v1.5.0`, build `1.5.0+vengeance.2`              | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) `v0.10.2`, build `0.10.2+vengeance.2`                                                  |
 | Runs on    | Electron's Node, so no separate Node install                                                | A native executable that includes its Python kernel package, skills and catalogs                                                                       |
 | Sessions   | One process per open session                                                                | Saved resident sessions that survive closing a tab and are listed under **Background sessions**                                                        |
 | Highlights | Extension gallery, extension dialogs and widgets, project-trust dialog, Abliteration models | Native subagents, goals, schedules (heartbeat and cron), side questions, trace inspection and export, native Fast and Ultrafast OpenAI speed transport |
@@ -463,6 +469,9 @@ installer.
   available in **Background sessions**.
 - **Reconnects.** After a disconnect, Engine 2 restores committed history and its busy and Stop state
   immediately. Partially streamed text from an unfinished turn is not guaranteed to replay.
+- **Images on text-only models.** The Engine sends the message without the images. Engine 2 refuses
+  it unless its image model setting (**Settings → Models**) names a signed-in model that reads
+  images, which then answers that message. The composer says which will happen before you send.
 - **Switching engines.** A recovery copy stays with the source engine. Native goals, schedules and
   child workers do not transfer, and nonempty ephemeral sessions cannot switch.
 - **Subagent histories.** The sidebar lists main conversations. Subagent histories of both engines
@@ -562,8 +571,8 @@ The app version is defined in [package.json](package.json).
 
 ### Release notes
 
-**Latest: [Vengeance 0.3.9](docs/RELEASE-0.3.9.md)** adds OrcaRouter to both engines and moves both
-engines to their newest stable releases. Published packages are on the
+**Latest: [Vengeance 0.4.0](docs/RELEASE-0.4.0.md)** adds Audn to both engines and shows when Engine
+2 refuses a message with images. Published packages are on the
 [GitHub release](https://github.com/LuciferMornens/vengeance/releases/latest).
 
 <details>
@@ -574,6 +583,8 @@ They are evidence, not current installation status or promises that local genera
 exist. Use the lockfile and current guides for maintenance instructions. Reports before 0.3.0 cover
 local Windows x64 builds only.
 
+- [Release 0.3.9](docs/RELEASE-0.3.9.md): OrcaRouter and both engines on their newest stable
+  releases.
 - [Release 0.3.8](docs/RELEASE-0.3.8.md): Abliteration conversations keep working past four images.
 - [Release 0.3.7](docs/RELEASE-0.3.7.md): both engines on their newest stable releases, provider
   overloads and Abliterated Large Flash.

@@ -198,6 +198,13 @@ export interface CompactionState {
   startedAt: number
 }
 
+/** A turn the engine ended before any response (`turn_failed`). */
+export interface TurnError {
+  message: string
+  /** Transcript length when it failed: the error follows the last entry until another one lands. */
+  entries: number
+}
+
 export interface CompactionOutcome {
   reason: CompactionReason
   result?: CompactionResult
@@ -249,6 +256,8 @@ export interface AgentState {
   retry: RetryState | null
   /** Final auto-retry failure message, cleared by the next run. */
   retryError?: string
+  /** The latest turn's failure when no response carries it, cleared by the next run. */
+  turnError?: TurnError
   compaction: CompactionState | null
   lastCompaction?: CompactionOutcome
   summarizationRetry: {
@@ -320,6 +329,7 @@ export function restartedRuntime(agent: AgentState): Partial<AgentState> {
     queue: fresh.queue,
     retry: null,
     retryError: undefined,
+    turnError: undefined,
     compaction: null,
     summarizationRetry: null,
     liveUsage: undefined,

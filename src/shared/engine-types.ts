@@ -574,6 +574,11 @@ export type AgentSessionEvent =
   | { type: 'agent_settled'; aborted: boolean }
   | { type: 'turn_start' }
   | { type: 'turn_end'; message: AgentMessage; toolResults: ToolResultMessage[] }
+  /**
+   * Vengeance (Engine 2): the engine ended a turn before the agent loop ran (an image turn its model cannot
+   * read, a provider without credentials, a failed session command), so no transcript message carries the error.
+   */
+  | { type: 'turn_failed'; error: string }
   | { type: 'message_start'; message: AgentMessage }
   | { type: 'message_update'; usage: Usage; assistantMessageEvent: AssistantMessageEvent }
   | { type: 'message_end'; message: AgentMessage }

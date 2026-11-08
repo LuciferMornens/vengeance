@@ -15,6 +15,7 @@ import { toastFailure } from './failure-toast'
 
 const PROVIDER_COLORS: Record<string, string> = {
   anthropic: '#d97757',
+  audn: '#c2414b',
   openai: '#10a37f',
   'openai-codex': '#10a37f',
   google: '#4c8df6',

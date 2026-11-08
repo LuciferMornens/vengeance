@@ -290,6 +290,7 @@ function applyNativeSnapshot(state: AgentState, data: Record<string, unknown>): 
         : {},
     retry: null,
     retryError: undefined,
+    turnError: undefined,
     summarizationRetry: null,
     compaction: session.isCompacting
       ? (state.compaction ?? { reason: 'manual', startedAt: Date.now() })
@@ -588,7 +589,13 @@ export function reduceAgentEvent(state: AgentState, event: EngineEvent): AgentSt
         ? applyNativeSnapshot(s, event.data)
         : s
     case 'agent_start':
-      return { ...s, phase: 'running', lastRunAborted: false, retryError: undefined }
+      return {
+        ...s,
+        phase: 'running',
+        lastRunAborted: false,
+        retryError: undefined,
+        turnError: undefined
+      }
     case 'agent_end':
       return s
     case 'agent_settled':
@@ -610,6 +617,8 @@ export function reduceAgentEvent(state: AgentState, event: EngineEvent): AgentSt
       return { ...s, turnActive: true }
     case 'turn_end':
       return { ...s, turnActive: false }
+    case 'turn_failed':
+      return { ...s, turnError: { message: event.error, entries: s.entries.length } }
     case 'message_start':
       return {
         ...s,
