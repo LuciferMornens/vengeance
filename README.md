@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/LuciferMornens/vengeance/releases/latest"><img alt="Version 0.4.0" src="https://img.shields.io/badge/version-0.4.0-FF4D3D?style=flat-square"></a>
+  <a href="https://github.com/LuciferMornens/vengeance/releases/latest"><img alt="Version 0.4.1" src="https://img.shields.io/badge/version-0.4.1-FF4D3D?style=flat-square"></a>
   <a href="https://github.com/LuciferMornens/vengeance/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/LuciferMornens/vengeance/actions/workflows/ci.yml/badge.svg"></a>
   <a href="#download"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-0078D4?style=flat-square"></a>
   <a href="#download"><img alt="macOS arm64 and x64" src="https://img.shields.io/badge/macOS-arm64%20%7C%20x64-000000?style=flat-square"></a>
@@ -571,8 +571,8 @@ The app version is defined in [package.json](package.json).
 
 ### Release notes
 
-**Latest: [Vengeance 0.4.0](docs/RELEASE-0.4.0.md)** adds Audn to both engines and shows when Engine
-2 refuses a message with images. Published packages are on the
+**Latest: [Vengeance 0.4.1](docs/RELEASE-0.4.1.md)** adds Claude Fable 5.2 to both engines, including
+through a Claude subscription, and moves the Engine to pi 1.5.1. Published packages are on the
 [GitHub release](https://github.com/LuciferMornens/vengeance/releases/latest).
 
 <details>
@@ -583,6 +583,7 @@ They are evidence, not current installation status or promises that local genera
 exist. Use the lockfile and current guides for maintenance instructions. Reports before 0.3.0 cover
 local Windows x64 builds only.
 
+- [Release 0.4.0](docs/RELEASE-0.4.0.md): Audn on both engines and Engine 2's image refusals shown.
 - [Release 0.3.9](docs/RELEASE-0.3.9.md): OrcaRouter and both engines on their newest stable
   releases.
 - [Release 0.3.8](docs/RELEASE-0.3.8.md): Abliteration conversations keep working past four images.
