@@ -235,7 +235,7 @@ export const SETTINGS: SettingDef[] = [
     group: 'Prompt caching',
     label: 'Cache warming',
     description:
-      'Keep provider prompt caches warm during runs, or also between runs. ' +
+      'Keep provider prompt caches warm during runs, or also for up to 30 minutes between runs. ' +
       'Only runs when it saves money.',
     control: {
       kind: 'choice',
@@ -246,7 +246,7 @@ export const SETTINGS: SettingDef[] = [
         { value: 'idle', label: 'Always' }
       ]
     },
-    default: 'streaming',
+    default: 'idle',
     globalOnly: true
   },
 

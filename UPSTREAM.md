@@ -19,22 +19,23 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 
 ## Reconstructing and changing our builds
 
-`engines.lock.json` is the source of truth. Current stable bases are pi `v1.5.0` at
-`f9a26365568127461c47a07a37dcb42c140a3ac5` and Prime `v0.10.2` at
-`ea9d9602ec0938d9e454e8963107cd85af1565c6`. The builds identify as `1.5.0+vengeance.3` and
+`engines.lock.json` is the source of truth. Current stable bases are pi `v1.5.1` at
+`dd30101cfc5b0609411dd80b6f93adbc14db14cf` and Prime `v0.10.2` at
+`ea9d9602ec0938d9e454e8963107cd85af1565c6`. The builds identify as `1.5.1+vengeance.1` and
 `0.10.2+vengeance.3`. Never reuse a Vengeance build version for different shipped behavior.
 
-The current stable-release verification and patch decisions are recorded in
-[ENGINE-STABLE-AUDIT-2026-11-06.md](docs/ENGINE-STABLE-AUDIT-2026-11-06.md), following
-[ENGINE-STABLE-AUDIT-2026-10-26.md](docs/ENGINE-STABLE-AUDIT-2026-10-26.md),
+The stable-release verification and patch decisions are recorded in
+[ENGINE-STABLE-AUDIT-2026-11-06.md](docs/ENGINE-STABLE-AUDIT-2026-11-06.md) (pi 1.5.0 and Prime
+0.10.2), following [ENGINE-STABLE-AUDIT-2026-10-26.md](docs/ENGINE-STABLE-AUDIT-2026-10-26.md),
 [ENGINE-STABLE-AUDIT-2026-10-18.md](docs/ENGINE-STABLE-AUDIT-2026-10-18.md) and the
 source comparison in [PRIME-STABLE-AUDIT-2026-10-16.md](docs/PRIME-STABLE-AUDIT-2026-10-16.md).
-The [pi patch guide](patches/pi/README.md) records the 1.5.0 rebase and retired catalog
+The [pi patch guide](patches/pi/README.md) records the 1.5.0 and 1.5.1 rebases and the retired catalog
 fallback. The [14 October audit](docs/ENGINE-AUDIT-2026-10-14.md) records earlier integration
 evidence and gaps. Engine 2 settings preservation and rustls maintenance, former backports, are
-now upstream. Prime `v0.10.2` is the latest stable release. pi `v1.5.1` (9 November 2026) is newer than
-our base, but its pinned catalog lacks Claude Fable 5.2 and its OAuth identity is 2.1.280, so it alone
-would not make Fable 5.2 available; moving to it needs its own qualification.
+now upstream. Prime `v0.10.2` and pi `v1.5.1` (9 November 2026) are the latest stable releases.
+1.5.1 kept all thirteen pi patches: its pinned catalog still lacks Claude Fable 5.2 and its OAuth
+identity is still 2.1.280, so `0014` stays. 1.5.1 also turns `cacheWarming` on between runs by default
+(`"idle"`, formerly `"streaming"`), which the settings schema now shows as the Engine's default.
 
 The [prompt and restart qualification report](docs/ENGINE-PROMPTS-QUALIFICATION-2026-10-18.md) records
 the current reconstructed artifacts and completed or pending gates. The
@@ -46,7 +47,7 @@ compatibility policy and regressions for Prime patch `0015` and the Engine bridg
 Responses transports, both authentication routes, cancellation and saved-session replay on upgrades.
 
 pi's package version and extension-facing SDK `VERSION` stay at the upstream release, currently
-`1.5.0`. Extensions can reject build suffixes even when all required APIs exist. The separate
+`1.5.1`. Extensions can reject build suffixes even when all required APIs exist. The separate
 `vengeance.version` metadata, native CLI `--version` and Vengeance engine descriptor report our build
 identity. Native install-change detection uses that identity so a same-base patch upgrade is visible.
 Qualify both forms through the native loader and repeat startup/restart with compatibility packages;
@@ -673,9 +674,10 @@ OrcaRouter, Prime's remote catalog and bundled snapshot do not carry Audn, so it
 `VENGEANCE_LIVE_AUDN_QA=1` and `AUDN_API_KEY`.
 
 pi patch `0014` and Prime patch `0027` make Claude Fable 5.2 (`claude-fable-5-2`, released on
-9 November 2026) available in both engines. On 10 November 2026 no catalog either engine read listed it:
-not pi's pinned catalog or pi.dev's runtime catalog, and not Prime's remote catalog or bundled snapshot.
-Each patch adds Fable 5.1's shape at Fable 5.2's prices, from the
+9 November 2026) available in both engines. When they were written on 10 November 2026 no catalog either
+engine read listed it: not pi's pinned catalog or pi.dev's runtime catalog, and not Prime's remote catalog
+or bundled snapshot. pi.dev's runtime catalog added it later that day; pi 1.5.1's pinned catalog still
+lacks it. Each patch adds Fable 5.1's shape at Fable 5.2's prices, from the
 [migration guide](https://platform.claude.com/docs/en/models/fable-5-2/migration-guide), and a catalog
 entry of the same id wins once one exists; Prime's `COMPILED_ONLY_MODELS` joins the compiled entry to
 whichever layer resolves. The Claude subscription refuses Fable 5.2 to a Claude Code identity older than

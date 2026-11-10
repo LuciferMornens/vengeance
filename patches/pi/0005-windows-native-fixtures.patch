@@ -1,5 +1,5 @@
 diff --git a/packages/chord/test/boundary.test.ts b/packages/chord/test/boundary.test.ts
-index ae4f1beb4..258c67f60 100644
+index ae4f1be..258c67f 100644
 --- a/packages/chord/test/boundary.test.ts
 +++ b/packages/chord/test/boundary.test.ts
 @@ -1,5 +1,5 @@
@@ -22,7 +22,7 @@ index ae4f1beb4..258c67f60 100644
  				}
  			}
 diff --git a/packages/codemode/test/worker-lifetime.test.ts b/packages/codemode/test/worker-lifetime.test.ts
-index 67ac4b2bb..22ee7c9ed 100644
+index 67ac4b2..22ee7c9 100644
 --- a/packages/codemode/test/worker-lifetime.test.ts
 +++ b/packages/codemode/test/worker-lifetime.test.ts
 @@ -1,10 +1,11 @@
@@ -163,7 +163,7 @@ index 67ac4b2bb..22ee7c9ed 100644
  		25000,
  	);
 diff --git a/packages/coding-agent/test/config.test.ts b/packages/coding-agent/test/config.test.ts
-index ff2c8a733..4ed8262d0 100644
+index ff2c8a7..4ed8262 100644
 --- a/packages/coding-agent/test/config.test.ts
 +++ b/packages/coding-agent/test/config.test.ts
 @@ -1,7 +1,8 @@
@@ -252,7 +252,7 @@ index ff2c8a733..4ed8262d0 100644
  		expect(getSelfUpdateCommand("@earendil-works/pi-coding-agent")).toBeUndefined();
  		expect(getSelfUpdateUnavailableInstruction("@earendil-works/pi-coding-agent")).toContain(
 diff --git a/packages/coding-agent/test/external-editor.test.ts b/packages/coding-agent/test/external-editor.test.ts
-index e9a540821..18ef58cdd 100644
+index e9a5408..18ef58c 100644
 --- a/packages/coding-agent/test/external-editor.test.ts
 +++ b/packages/coding-agent/test/external-editor.test.ts
 @@ -1,6 +1,6 @@
@@ -287,7 +287,7 @@ index e9a540821..18ef58cdd 100644
  		expect(basename(capture.filePath)).toBe("prompt.md");
  		expect(capture.entries).toEqual(["prompt.md"]);
 diff --git a/packages/coding-agent/test/file-mutation-queue.test.ts b/packages/coding-agent/test/file-mutation-queue.test.ts
-index 8e13a45e6..071e971c8 100644
+index 8e13a45..071e971 100644
 --- a/packages/coding-agent/test/file-mutation-queue.test.ts
 +++ b/packages/coding-agent/test/file-mutation-queue.test.ts
 @@ -1,7 +1,8 @@
@@ -312,7 +312,7 @@ index 8e13a45e6..071e971c8 100644
  		const order: string[] = [];
  		await Promise.all([
 diff --git a/packages/coding-agent/test/footer-width.test.ts b/packages/coding-agent/test/footer-width.test.ts
-index 12c074d01..7a134aed8 100644
+index 12c074d..7a134ae 100644
 --- a/packages/coding-agent/test/footer-width.test.ts
 +++ b/packages/coding-agent/test/footer-width.test.ts
 @@ -1,3 +1,4 @@
@@ -330,7 +330,7 @@ index 12c074d01..7a134aed8 100644
  });
  
 diff --git a/packages/coding-agent/test/interactive-mode-suspend.test.ts b/packages/coding-agent/test/interactive-mode-suspend.test.ts
-index 996d2f1ab..045c8d7bd 100644
+index 996d2f1..045c8d7 100644
 --- a/packages/coding-agent/test/interactive-mode-suspend.test.ts
 +++ b/packages/coding-agent/test/interactive-mode-suspend.test.ts
 @@ -24,8 +24,10 @@ function callHandleCtrlZ(context: HandleCtrlZThis): void {
@@ -361,10 +361,10 @@ index 996d2f1ab..045c8d7bd 100644
  			start: vi.fn(),
  			stop: vi.fn(),
 diff --git a/packages/coding-agent/test/mcp-command.test.ts b/packages/coding-agent/test/mcp-command.test.ts
-index 2e9a0a1fa..b220c3b84 100644
+index c3d5547..085dcb2 100644
 --- a/packages/coding-agent/test/mcp-command.test.ts
 +++ b/packages/coding-agent/test/mcp-command.test.ts
-@@ -42,9 +42,12 @@ describe("pi mcp", () => {
+@@ -49,9 +49,12 @@ describe("pi mcp", () => {
  		expect(exitCode).toBe(1);
  		expect(output).toContain("fixture: connected, 1 tool (codemode, global)\n");
  		expect(output).toContain("  tools: echo");
@@ -379,10 +379,10 @@ index 2e9a0a1fa..b220c3b84 100644
  		expect(output).toContain("config error: ");
  		expect(output).toContain('server "bad" needs either "command"');
 diff --git a/packages/coding-agent/test/package-command-paths.test.ts b/packages/coding-agent/test/package-command-paths.test.ts
-index a12acd856..442863fcf 100644
+index f906936..db45245 100644
 --- a/packages/coding-agent/test/package-command-paths.test.ts
 +++ b/packages/coding-agent/test/package-command-paths.test.ts
-@@ -24,6 +24,13 @@ import { initTheme } from "../src/modes/interactive/theme/theme.ts";
+@@ -25,6 +25,13 @@ import { initTheme } from "../src/modes/interactive/theme/theme.ts";
  import { handlePackageCommand } from "../src/package-manager-cli.ts";
  import { allowNetwork } from "./test-network-env.ts";
  
@@ -396,7 +396,7 @@ index a12acd856..442863fcf 100644
  describe("package commands", () => {
  	let tempDir: string;
  	let agentDir: string;
-@@ -1094,7 +1101,7 @@ else {
+@@ -1183,7 +1190,7 @@ else {
  		writeFileSync(join(selfPackageDir, "package.json"), JSON.stringify({ name: PACKAGE_NAME, version: VERSION }));
  		const fakePnpmScript =
  			process.platform === "win32"
@@ -406,7 +406,7 @@ index a12acd856..442863fcf 100644
  		writeFileSync(fakePnpmPath, fakePnpmScript);
  		chmodSync(fakePnpmPath, 0o755);
 diff --git a/packages/coding-agent/test/package-manager.test.ts b/packages/coding-agent/test/package-manager.test.ts
-index b5895b331..34d4c23e6 100644
+index 7d01a4e..b5047db 100644
 --- a/packages/coding-agent/test/package-manager.test.ts
 +++ b/packages/coding-agent/test/package-manager.test.ts
 @@ -1,9 +1,10 @@
@@ -441,7 +441,7 @@ index b5895b331..34d4c23e6 100644
  					delete process.env.HOME;
  				} else {
 diff --git a/packages/coding-agent/test/paths.test.ts b/packages/coding-agent/test/paths.test.ts
-index b57238c13..1cb41f6be 100644
+index b57238c..1cb41f6 100644
 --- a/packages/coding-agent/test/paths.test.ts
 +++ b/packages/coding-agent/test/paths.test.ts
 @@ -1,8 +1,9 @@
@@ -476,7 +476,7 @@ index b57238c13..1cb41f6be 100644
  		expect(canonicalizePath(link)).toBe(link);
  	});
 diff --git a/packages/coding-agent/test/resource-loader.test.ts b/packages/coding-agent/test/resource-loader.test.ts
-index e68b4cfea..7caf3888f 100644
+index e68b4cf..7caf388 100644
 --- a/packages/coding-agent/test/resource-loader.test.ts
 +++ b/packages/coding-agent/test/resource-loader.test.ts
 @@ -1,8 +1,9 @@
@@ -546,7 +546,7 @@ index e68b4cfea..7caf3888f 100644
  		it("should still inherit the main repo's context when the worktree root has none", () => {
  			const { main, worktreeSrc } = setupNestedWorktree();
 diff --git a/packages/coding-agent/test/sdk-session-manager.test.ts b/packages/coding-agent/test/sdk-session-manager.test.ts
-index cf1349f51..846aa2c6b 100644
+index cf1349f..846aa2c 100644
 --- a/packages/coding-agent/test/sdk-session-manager.test.ts
 +++ b/packages/coding-agent/test/sdk-session-manager.test.ts
 @@ -1,6 +1,6 @@
@@ -588,7 +588,7 @@ index cf1349f51..846aa2c6b 100644
  		session.dispose();
  	});
 diff --git a/packages/coding-agent/test/session-manager/load-entries.test.ts b/packages/coding-agent/test/session-manager/load-entries.test.ts
-index 463dfadf0..6c0ea0693 100644
+index 463dfad..6c0ea06 100644
 --- a/packages/coding-agent/test/session-manager/load-entries.test.ts
 +++ b/packages/coding-agent/test/session-manager/load-entries.test.ts
 @@ -1,3 +1,4 @@
@@ -606,7 +606,7 @@ index 463dfadf0..6c0ea0693 100644
  
  	it("generates a session id when the options carry none", () => {
 diff --git a/packages/coding-agent/test/session-selector-path-delete.test.ts b/packages/coding-agent/test/session-selector-path-delete.test.ts
-index 4a0ed3642..43fd8a693 100644
+index 4a0ed36..43fd8a6 100644
 --- a/packages/coding-agent/test/session-selector-path-delete.test.ts
 +++ b/packages/coding-agent/test/session-selector-path-delete.test.ts
 @@ -1,8 +1,9 @@
@@ -632,7 +632,7 @@ index 4a0ed3642..43fd8a693 100644
  	const parentRealPath = join(sharedDir, "parent.jsonl");
  	const childRealPath = join(sharedDir, "child.jsonl");
 diff --git a/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts b/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts
-index 61b0918e6..032dacc20 100644
+index 61b0918..032dacc 100644
 --- a/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts
 +++ b/packages/coding-agent/test/suite/regressions/2791-fswatch-error-crash.test.ts
 @@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
@@ -653,17 +653,17 @@ index 61b0918e6..032dacc20 100644
  
  		// Script that sets up the watcher and emits a synthetic error on it.
 diff --git a/packages/coding-agent/test/tools.test.ts b/packages/coding-agent/test/tools.test.ts
-index a096c2f91..9703c9eaa 100644
+index 7ceb5ef..9e5431d 100644
 --- a/packages/coding-agent/test/tools.test.ts
 +++ b/packages/coding-agent/test/tools.test.ts
 @@ -1,5 +1,6 @@
  import { applyPatch } from "diff";
- import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "fs";
 +import * as fileOperations from "fs/promises";
  import { tmpdir } from "os";
  import { join } from "path";
  import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-@@ -26,8 +27,14 @@ import {
+@@ -32,8 +33,14 @@ import {
  	createReadTool,
  	createWriteTool,
  } from "../src/index.ts";
@@ -678,7 +678,7 @@ index a096c2f91..9703c9eaa 100644
  const readTool = createReadTool(process.cwd());
  const writeTool = createWriteTool(process.cwd());
  const editTool = createEditTool(process.cwd());
-@@ -440,7 +447,7 @@ describe("Coding Agent Tools", () => {
+@@ -446,7 +453,7 @@ describe("Coding Agent Tools", () => {
  			expect(readFileSync(testFile, "utf-8")).toBe(originalContent);
  		});
  
@@ -687,7 +687,7 @@ index a096c2f91..9703c9eaa 100644
  			const testFile = join(testDir, "edit-readonly.txt");
  			writeFileSync(testFile, "hello\n");
  			chmodSync(testFile, 0o444);
-@@ -450,7 +457,9 @@ describe("Coding Agent Tools", () => {
+@@ -456,7 +463,9 @@ describe("Coding Agent Tools", () => {
  					path: testFile,
  					edits: [{ oldText: "hello", newText: "world" }],
  				}),
@@ -698,7 +698,7 @@ index a096c2f91..9703c9eaa 100644
  		});
  
  		it("should include the original error message for unknown edit access errors", async () => {
-@@ -482,7 +491,9 @@ describe("Coding Agent Tools", () => {
+@@ -488,7 +497,9 @@ describe("Coding Agent Tools", () => {
  		it("should include EACCES in diff preview for unreadable files", async () => {
  			const unreadableFile = join(testDir, "unreadable-preview.txt");
  			writeFileSync(unreadableFile, "hello\n");
@@ -709,7 +709,7 @@ index a096c2f91..9703c9eaa 100644
  
  			const result = await computeEditsDiff(unreadableFile, [{ oldText: "hello", newText: "world" }], testDir);
  
-@@ -961,6 +972,7 @@ describe("Coding Agent Tools", () => {
+@@ -1156,6 +1167,7 @@ describe("Coding Agent Tools", () => {
  			const result = await grepTool.execute("test-call-grep-injection", {
  				pattern: `--pre=${payload}`,
  				path: testDir,
@@ -717,7 +717,7 @@ index a096c2f91..9703c9eaa 100644
  			});
  
  			expect(getTextOutput(result)).toContain("No matches found");
-@@ -1143,7 +1155,8 @@ describe("tool cwd resolution", () => {
+@@ -1443,7 +1455,8 @@ describe("tool cwd resolution", () => {
  			fakeCtx(testDir),
  		);
  		const output = getTextOutput(result);
@@ -728,7 +728,7 @@ index a096c2f91..9703c9eaa 100644
  });
  
 diff --git a/packages/coding-agent/test/trust-selector.test.ts b/packages/coding-agent/test/trust-selector.test.ts
-index c4659001b..a3c3a76c9 100644
+index c465900..a3c3a76 100644
 --- a/packages/coding-agent/test/trust-selector.test.ts
 +++ b/packages/coding-agent/test/trust-selector.test.ts
 @@ -1,3 +1,4 @@
@@ -833,7 +833,7 @@ index c4659001b..a3c3a76c9 100644
  		});
  	});
 diff --git a/packages/coding-agent/test/version-check.test.ts b/packages/coding-agent/test/version-check.test.ts
-index ffe21508c..07584f703 100644
+index ffe2150..07584f7 100644
 --- a/packages/coding-agent/test/version-check.test.ts
 +++ b/packages/coding-agent/test/version-check.test.ts
 @@ -11,6 +11,12 @@ import { allowNetwork } from "./test-network-env.ts";
@@ -850,7 +850,7 @@ index ffe21508c..07584f703 100644
  	allowNetwork();
  });
 diff --git a/packages/durable/test/env-node.test.ts b/packages/durable/test/env-node.test.ts
-index 4287987de..039319c88 100644
+index 4287987..039319c 100644
 --- a/packages/durable/test/env-node.test.ts
 +++ b/packages/durable/test/env-node.test.ts
 @@ -6,6 +6,7 @@ import { delimiter, join } from "node:path";
@@ -918,7 +918,7 @@ index 4287987de..039319c88 100644
  		const entries = getOrThrow(await env.listDir(".", BACKGROUND_CONTEXT));
  		expect(
 diff --git a/packages/durable/test/tools.test.ts b/packages/durable/test/tools.test.ts
-index dba4d7c9d..bb0b47eb3 100644
+index 32243c9..d86bfb2 100644
 --- a/packages/durable/test/tools.test.ts
 +++ b/packages/durable/test/tools.test.ts
 @@ -1,7 +1,6 @@
@@ -928,8 +928,8 @@ index dba4d7c9d..bb0b47eb3 100644
 -import { symlink } from "node:fs/promises";
  import { tmpdir } from "node:os";
  import { join } from "node:path";
- import type { Context, JsonValue } from "@earendil-works/chord";
-@@ -14,6 +13,7 @@ import type {
+ import type { Context } from "@earendil-works/chord/context";
+@@ -15,6 +14,7 @@ import type {
  } from "@earendil-works/pi-durable";
  import { applyPatch } from "diff";
  import { afterAll, describe, expect, it } from "vitest";
@@ -937,7 +937,7 @@ index dba4d7c9d..bb0b47eb3 100644
  import {
  	type ExecutionEnv,
  	ExecutionError,
-@@ -443,11 +443,11 @@ describe("durable tools", () => {
+@@ -444,11 +444,11 @@ describe("durable tools", () => {
  		it("serializes concurrent edits through canonical and symlink paths", async () => {
  			const env = new SlowReadExecutionEnv({ cwd: createTempDir() });
  			getOrThrow(await env.writeFile("target.txt", "alpha\nbeta\ngamma\n", BACKGROUND_CONTEXT));
@@ -951,7 +951,7 @@ index dba4d7c9d..bb0b47eb3 100644
  			]);
  			expect(getOrThrow(await env.readTextFile("target.txt", BACKGROUND_CONTEXT))).toBe("ALPHA\nBETA\ngamma\n");
  		});
-@@ -467,8 +467,8 @@ describe("durable tools", () => {
+@@ -468,8 +468,8 @@ describe("durable tools", () => {
  
  		it("serializes a new file created through a symlinked directory with its canonical path", async () => {
  			const env = new BlockingWriteExecutionEnv({ cwd: createTempDir() });
@@ -962,7 +962,7 @@ index dba4d7c9d..bb0b47eb3 100644
  			const tool = createWriteTool();
  			const first = run(tool, { path: "link/new.txt", content: "first\n" }, env);
  			await env.firstWriteStarted.promise;
-@@ -533,8 +533,8 @@ describe("durable tools", () => {
+@@ -534,8 +534,8 @@ describe("durable tools", () => {
  		it("edits regular files through symlinks", async () => {
  			const env = createEnv();
  			getOrThrow(await env.writeFile("target.txt", "before\n", BACKGROUND_CONTEXT));
@@ -974,7 +974,7 @@ index dba4d7c9d..bb0b47eb3 100644
  		});
  
 diff --git a/packages/schema/test/suite.ts b/packages/schema/test/suite.ts
-index fac5bebbd..6fcf04d39 100644
+index fac5beb..6fcf04d 100644
 --- a/packages/schema/test/suite.ts
 +++ b/packages/schema/test/suite.ts
 @@ -29,7 +29,9 @@ export function suiteFiles(): SuiteFile[] {
@@ -989,7 +989,7 @@ index fac5bebbd..6fcf04d39 100644
  		}
  	}
 diff --git a/packages/tui/test/autocomplete.test.ts b/packages/tui/test/autocomplete.test.ts
-index 67a5511a3..674442ff2 100644
+index 67a5511..674442f 100644
 --- a/packages/tui/test/autocomplete.test.ts
 +++ b/packages/tui/test/autocomplete.test.ts
 @@ -1,9 +1,10 @@
@@ -1040,10 +1040,10 @@ index 67a5511a3..674442ff2 100644
  			const provider = new CombinedAutocompleteProvider([], baseDir, requireFdPath());
  			const line = "@link";
 diff --git a/packages/tui/test/terminal-image.test.ts b/packages/tui/test/terminal-image.test.ts
-index 0ae5bd8b4..5058fdb70 100644
+index 2a96f78..1b02342 100644
 --- a/packages/tui/test/terminal-image.test.ts
 +++ b/packages/tui/test/terminal-image.test.ts
-@@ -823,7 +823,7 @@ describe("imageFallback", () => {
+@@ -833,7 +833,7 @@ describe("imageFallback", () => {
  		try {
  			const abs = join(homedir(), ".pi", "agent", "shot.png");
  			const result = imageFallback("image/png", { widthPx: 1280, heightPx: 720 }, abs);
@@ -1052,7 +1052,7 @@ index 0ae5bd8b4..5058fdb70 100644
  		} finally {
  			resetCapabilitiesCache();
  		}
-@@ -841,7 +841,7 @@ describe("imageFallback", () => {
+@@ -851,7 +851,7 @@ describe("imageFallback", () => {
  			);
  			// Visible text must use ~/... not the expanded home path.
  			const visible = result.replace(/\x1b\]8;;.*?\x1b\\/g, "");
@@ -1062,7 +1062,7 @@ index 0ae5bd8b4..5058fdb70 100644
  			resetCapabilitiesCache();
  		}
 diff --git a/scripts/local-package-install.test.mjs b/scripts/local-package-install.test.mjs
-index fe467d0fe..9a58baf0c 100644
+index fe467d0..9a58baf 100644
 --- a/scripts/local-package-install.test.mjs
 +++ b/scripts/local-package-install.test.mjs
 @@ -7,6 +7,7 @@ import test from "node:test";
@@ -1083,10 +1083,10 @@ index fe467d0fe..9a58baf0c 100644
  	const manifest = JSON.parse(readFileSync(join(consumerDirectory, "package.json"), "utf8"));
  	assert.match(manifest.dependencies["@pi-package-test/target"], /^file:/);
 diff --git a/scripts/preview-packages.test.mjs b/scripts/preview-packages.test.mjs
-index d287c0c49..545e8b3f4 100644
+index a5ebbce..288ec3d 100644
 --- a/scripts/preview-packages.test.mjs
 +++ b/scripts/preview-packages.test.mjs
-@@ -79,7 +79,8 @@ test("pack points internal dependencies at the commit's builds and restores pack
+@@ -122,7 +122,8 @@ test("pack points internal dependencies at the commit's builds and restores pack
  	assert.deepEqual(manifest.packages.map((pkg) => pkg.name).sort(), ["@scope/a", "@scope/b"]);
  	assert.deepEqual(readdirSync(out).sort(), ["manifest.json", ...manifest.packages.map((pkg) => pkg.file)].sort());
  	const fileA = manifest.packages.find((pkg) => pkg.name === "@scope/a").file;
@@ -1098,7 +1098,7 @@ index d287c0c49..545e8b3f4 100644
  });
 diff --git a/scripts/test-filesystem.ts b/scripts/test-filesystem.ts
 new file mode 100644
-index 000000000..c6c44d0f2
+index 0000000..c6c44d0
 --- /dev/null
 +++ b/scripts/test-filesystem.ts
 @@ -0,0 +1,38 @@
@@ -1141,7 +1141,7 @@ index 000000000..c6c44d0f2
 +/** File-link metadata tests require Windows symlink privilege; directory/alias tests always run. */
 +export const fileSymlinksAvailable = probeFileSymlinks();
 diff --git a/test.sh b/test.sh
-index 574b5cdda..2296ef4f3 100755
+index 574b5cd..2296ef4 100755
 --- a/test.sh
 +++ b/test.sh
 @@ -12,6 +12,13 @@ mkdir -p "$test_root/home/.config" "$test_root/tmp" "$test_root/cache/npm"

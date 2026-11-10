@@ -19,9 +19,9 @@
   },
   "pi": {
     "repository": "https://github.com/earendil-works/pi.git",
-    "tag": "v1.5.0",
-    "revision": "f9a26365568127461c47a07a37dcb42c140a3ac5",
-    "version": "1.5.0+vengeance.3",
+    "tag": "v1.5.1",
+    "revision": "dd30101cfc5b0609411dd80b6f93adbc14db14cf",
+    "version": "1.5.1+vengeance.1",
     "patches": [
       "patches/pi/0001-vengeance-distribution.patch",
       "patches/pi/0002-preserve-extension-runtime-version.patch",

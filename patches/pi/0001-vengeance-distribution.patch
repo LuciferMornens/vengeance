@@ -1,8 +1,8 @@
 diff --git a/packages/coding-agent/src/package-manager-cli.ts b/packages/coding-agent/src/package-manager-cli.ts
-index eecf962ed..b2e68394f 100644
+index a49230a..4950977 100644
 --- a/packages/coding-agent/src/package-manager-cli.ts
 +++ b/packages/coding-agent/src/package-manager-cli.ts
-@@ -959,6 +959,12 @@ export async function handlePackageCommand(
+@@ -972,6 +972,12 @@ export async function handlePackageCommand(
  		return true;
  	}
  
@@ -16,7 +16,7 @@ index eecf962ed..b2e68394f 100644
  		console.error(chalk.red(`Unknown option ${options.invalidOption} for "${options.command}".`));
  		console.error(chalk.dim(`Use "${APP_NAME} --help" or "${getPackageCommandUsage(options.command)}".`));
 diff --git a/packages/coding-agent/src/utils/version-check.ts b/packages/coding-agent/src/utils/version-check.ts
-index a09a3d000..cadeb9126 100644
+index a09a3d0..cadeb91 100644
 --- a/packages/coding-agent/src/utils/version-check.ts
 +++ b/packages/coding-agent/src/utils/version-check.ts
 @@ -95,6 +95,8 @@ export async function getLatestPiVersion(

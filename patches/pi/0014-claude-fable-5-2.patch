@@ -1,8 +1,8 @@
 diff --git a/packages/ai/src/api/anthropic-messages.ts b/packages/ai/src/api/anthropic-messages.ts
-index 9d6a8bd..485f009 100644
+index d722d35..b031c28 100644
 --- a/packages/ai/src/api/anthropic-messages.ts
 +++ b/packages/ai/src/api/anthropic-messages.ts
-@@ -99,7 +99,7 @@ function getCacheControl(
+@@ -106,7 +106,7 @@ function getCacheControl(
  }
  
  // Stealth mode: Mimic Claude Code's tool naming exactly
@@ -12,7 +12,7 @@ index 9d6a8bd..485f009 100644
  // Claude Code 2.x tool names (canonical casing)
  // Source: https://cchistory.mariozechner.at/data/prompts-2.1.11.md
 diff --git a/packages/ai/src/providers/all.ts b/packages/ai/src/providers/all.ts
-index 0d5ae7f..b318707 100644
+index 61a124a..9b7b398 100644
 --- a/packages/ai/src/providers/all.ts
 +++ b/packages/ai/src/providers/all.ts
 @@ -8,7 +8,7 @@ import type { AnyModel, Api, ClassifierApi, ClassifierModel, ImageApi, ImageMode
@@ -24,7 +24,7 @@ index 0d5ae7f..b318707 100644
  import { AUDN_MODELS, audnProvider } from "./audn.ts";
  import { azureProvider } from "./azure.ts";
  import { basetenProvider } from "./baseten.ts";
-@@ -54,9 +54,10 @@ import { zaiCodingCnProvider } from "./zai-coding-cn.ts";
+@@ -55,9 +55,10 @@ import { zaiCodingCnProvider } from "./zai-coding-cn.ts";
  
  export { radiusProvider };
  
@@ -167,3 +167,15 @@ index 0000000..24435c1
 +		expect(order ?? 0, userAgent).toBeGreaterThanOrEqual(0);
 +	});
 +});
+diff --git a/packages/ai/test/anthropic-mid-conversation-effort.test.ts b/packages/ai/test/anthropic-mid-conversation-effort.test.ts
+index 4db36bf..69fc48f 100644
+--- a/packages/ai/test/anthropic-mid-conversation-effort.test.ts
++++ b/packages/ai/test/anthropic-mid-conversation-effort.test.ts
+@@ -261,6 +261,6 @@ describe("Anthropic mid-conversation effort", () => {
+ 		expect(direct.thinkingLevelMap).toMatchObject({ xhigh: "xhigh", max: "max" });
+ 		// Opus 4.8 cannot take per-message effort, so it is dropped from Fable 5.2's fallbacks.
+ 		expect(direct.compat?.allowedFallbackModels?.map((fallback) => fallback.model)).toEqual(["claude-opus-5"]);
+-		expect(getModel("openrouter", "anthropic/claude-fable-5.2").compat?.supportsMidConvoEffort).toBe(true);
++		// The pinned catalog lists OpenRouter's Fable 5.1 but not its Fable 5.2, so only the direct entry is checked.
+ 	});
+ });

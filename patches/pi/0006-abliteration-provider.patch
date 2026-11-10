@@ -1,5 +1,5 @@
 diff --git a/packages/ai/src/env-api-keys.ts b/packages/ai/src/env-api-keys.ts
-index 560dce8a4..726375267 100644
+index 9e588ef..ce70238 100644
 --- a/packages/ai/src/env-api-keys.ts
 +++ b/packages/ai/src/env-api-keys.ts
 @@ -82,6 +82,7 @@ function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
@@ -12,7 +12,7 @@ index 560dce8a4..726375267 100644
  		"qwen-token-plan-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
 diff --git a/packages/ai/src/providers/abliteration.ts b/packages/ai/src/providers/abliteration.ts
 new file mode 100644
-index 000000000..53e92d263
+index 0000000..53e92d2
 --- /dev/null
 +++ b/packages/ai/src/providers/abliteration.ts
 @@ -0,0 +1,109 @@
@@ -126,7 +126,7 @@ index 000000000..53e92d263
 +	});
 +}
 diff --git a/packages/ai/src/providers/all.ts b/packages/ai/src/providers/all.ts
-index 297db37c9..f89764d27 100644
+index ed872eb..fe96a16 100644
 --- a/packages/ai/src/providers/all.ts
 +++ b/packages/ai/src/providers/all.ts
 @@ -1,6 +1,11 @@
@@ -142,7 +142,7 @@ index 297db37c9..f89764d27 100644
  import { amazonBedrockProvider } from "./amazon-bedrock.ts";
  import { antLingProvider } from "./ant-ling.ts";
  import { anthropicProvider } from "./anthropic.ts";
-@@ -47,6 +52,11 @@ import { zaiCodingCnProvider } from "./zai-coding-cn.ts";
+@@ -48,6 +53,11 @@ import { zaiCodingCnProvider } from "./zai-coding-cn.ts";
  
  export { radiusProvider };
  
@@ -154,7 +154,7 @@ index 297db37c9..f89764d27 100644
  /** Providers present in the generated catalog. `KnownProvider` additionally
   * includes purely dynamic providers (e.g. "radius") that have no static
   * catalog entry. */
-@@ -135,6 +145,7 @@ export function getAllBuiltinModels<TProvider extends BuiltinProvider>(provider:
+@@ -136,6 +146,7 @@ export function getAllBuiltinModels<TProvider extends BuiltinProvider>(provider:
  /** All built-in providers, freshly constructed. */
  export function builtinProviders(): Provider[] {
  	return [
@@ -163,7 +163,7 @@ index 297db37c9..f89764d27 100644
  		antLingProvider(),
  		anthropicProvider(),
 diff --git a/packages/ai/src/types.ts b/packages/ai/src/types.ts
-index e435126ea..0c79ef8b7 100644
+index 5aad0e8..b3fc9ca 100644
 --- a/packages/ai/src/types.ts
 +++ b/packages/ai/src/types.ts
 @@ -88,6 +88,7 @@ export type KnownClassifierApi =
@@ -176,7 +176,7 @@ index e435126ea..0c79ef8b7 100644
  	| "anthropic"
 diff --git a/packages/ai/test/abliteration.test.ts b/packages/ai/test/abliteration.test.ts
 new file mode 100644
-index 000000000..21059f472
+index 0000000..21059f4
 --- /dev/null
 +++ b/packages/ai/test/abliteration.test.ts
 @@ -0,0 +1,59 @@
@@ -240,10 +240,10 @@ index 000000000..21059f472
 +	});
 +});
 diff --git a/packages/coding-agent/src/core/model-resolver.ts b/packages/coding-agent/src/core/model-resolver.ts
-index d1abd57cf..839e32537 100644
+index 5b48308..2a932e7 100644
 --- a/packages/coding-agent/src/core/model-resolver.ts
 +++ b/packages/coding-agent/src/core/model-resolver.ts
-@@ -59,6 +59,7 @@ export const defaultModelPerProvider: Partial<Record<KnownProvider, string>> = {
+@@ -60,6 +60,7 @@ export const defaultModelPerProvider: Partial<Record<KnownProvider, string>> = {
  	"xiaomi-token-plan-cn": "mimo-v2.6-pro",
  	"xiaomi-token-plan-ams": "mimo-v2.6-pro",
  	"xiaomi-token-plan-sgp": "mimo-v2.6-pro",
