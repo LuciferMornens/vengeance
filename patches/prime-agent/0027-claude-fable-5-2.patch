@@ -1,0 +1,185 @@
+diff --git a/crates/pa-ai/src/models_generated.rs b/crates/pa-ai/src/models_generated.rs
+index 77c6e96..bd9a816 100644
+--- a/crates/pa-ai/src/models_generated.rs
++++ b/crates/pa-ai/src/models_generated.rs
+@@ -138,6 +138,33 @@ static RAW_MODELS: &[RawModel] = &[
+         headers: &[],
+         compat: None,
+     },
++    // Claude Fable 5.2 (9 November 2026) is newer than every catalog layer, so `pa_models::transports`
++    // joins it to them until the catalog lists it. Fable 5.1's catalog shape at Fable 5.2's prices:
++    // https://platform.claude.com/docs/en/models/fable-5-2/migration-guide
++    RawModel {
++        provider: "anthropic",
++        id: "claude-fable-5-2",
++        name: "Claude Fable 5.2",
++        api: "anthropic-messages",
++        base_url: "https://api.anthropic.com",
++        reasoning: true,
++        thinking_levels: &[
++                (crate::types::ModelThinkingLevel::Off, None),
++                (crate::types::ModelThinkingLevel::Minimal, None),
++                (crate::types::ModelThinkingLevel::Low, Some("low")),
++                (crate::types::ModelThinkingLevel::Medium, Some("medium")),
++                (crate::types::ModelThinkingLevel::High, Some("high")),
++                (crate::types::ModelThinkingLevel::Xhigh, Some("xhigh")),
++                (crate::types::ModelThinkingLevel::Max, Some("max")),
++        ],
++        input: &[crate::types::ModelInput::Text, crate::types::ModelInput::Image],
++        cost: (8.0, 40.0, 0.2, 10.0),
++        context_window: 1_000_000,
++        max_tokens: 128_000,
++        featured: None,
++        headers: &[],
++        compat: None,
++    },
+     // No catalog layer carries Audn: `pa_models::transports` joins it to each of them. Audn documents low,
+     // high and max; `none` and made-up values answer 200 and the model still reasons, so Off is not offered.
+     // The API takes images but the model answers as if they were absent, so only text is declared.
+@@ -4564,7 +4591,10 @@ mod tests {
+             .iter()
+             .map(|provider| get_models(provider).len())
+             .sum();
+-        assert_eq!(total, 154, "the TS fallback models + Audn's + OrcaRouter's");
++        assert_eq!(
++            total, 155,
++            "the TS fallback models + Audn's + OrcaRouter's + Claude Fable 5.2"
++        );
+         assert_eq!(
+             get_models("prime-inference").len(),
+             110,
+diff --git a/crates/pa-ai/src/providers/anthropic/mod.rs b/crates/pa-ai/src/providers/anthropic/mod.rs
+index ffbfd03..d1d4a94 100644
+--- a/crates/pa-ai/src/providers/anthropic/mod.rs
++++ b/crates/pa-ai/src/providers/anthropic/mod.rs
+@@ -30,9 +30,9 @@ mod stream_tests;
+ pub const API_ANTHROPIC_MESSAGES: &str = "anthropic-messages";
+ 
+ /// Claude Code version mimicked in OAuth mode. The API gates newer models on the claimed client
+-/// version (e.g. claude-opus-5.5 requires >= 2.280), so keep this at or above the latest released
+-/// Claude Code.
+-const CLAUDE_CODE_VERSION: &str = "2.1.281";
++/// version (e.g. claude-opus-5.5 requires >= 2.280, claude-fable-5-2 >= 2.1.290), so keep this at
++/// or above the latest released Claude Code.
++const CLAUDE_CODE_VERSION: &str = "2.1.322";
+ const FINE_GRAINED_TOOL_STREAMING_BETA: &str = "fine-grained-tool-streaming-2025-05-14";
+ const INTERLEAVED_THINKING_BETA: &str = "interleaved-thinking-2025-05-14";
+ 
+@@ -630,7 +630,15 @@ mod subscription_identity_tests {
+                 .map(|(_, value)| value.as_str())
+         };
+         let user_agent = header("user-agent").expect("the OAuth request sends a user-agent");
+-        assert!(user_agent.starts_with("claude-cli/"), "got {user_agent}");
++        let version: Vec<u32> = user_agent
++            .strip_prefix("claude-cli/")
++            .unwrap_or_else(|| panic!("got {user_agent}"))
++            .split(['.', ' '])
++            .take(3)
++            .map(|part| part.parse().expect("numeric Claude Code version"))
++            .collect();
++        // claude-fable-5-2 answers anything older with `claude_code_version_too_old`.
++        assert!(version >= vec![2, 1, 290], "got {user_agent}");
+         assert_eq!(header("x-app"), Some("cli"));
+         let beta = header("anthropic-beta").expect("the OAuth request sends the claude-code beta");
+         assert!(beta.contains("claude-code-20250219"));
+diff --git a/crates/pa-models/src/chain.rs b/crates/pa-models/src/chain.rs
+index 361f716..8a51ea4 100644
+--- a/crates/pa-models/src/chain.rs
++++ b/crates/pa-models/src/chain.rs
+@@ -355,19 +355,21 @@ mod tests {
+         let models = catalog.resolve(None);
+         assert_eq!(
+             models.len(),
+-            113,
+-            "1 pinned bundled entry + 110 offline prime-inference entries + Audn's + OrcaRouter's"
++            114,
++            "1 pinned bundled entry + 110 offline prime-inference entries + Audn's + OrcaRouter's \
++             + Claude Fable 5.2"
+         );
+         assert!(models.iter().any(|m| m.id == "bundled-a"));
+     }
+ 
+-    /// The compiled `audn` and `orcarouter` entries; each must appear exactly once.
++    /// The compiled `audn`, `orcarouter` and Claude Fable 5.2 entries; each must appear exactly once.
+     fn compiled_only_entries(models: &[Model]) -> usize {
+         models
+             .iter()
+             .filter(|model| {
+                 (model.provider == "audn" && model.id == "necromicon")
+                     || (model.provider == "orcarouter" && model.id == "orca/orcacyber-k3.1-pro")
++                    || (model.provider == "anthropic" && model.id == "claude-fable-5-2")
+             })
+             .count()
+     }
+@@ -379,7 +381,7 @@ mod tests {
+             ModelCatalog::with_bundled_dir(Some(empty.path().into()), Some(empty.path().into()));
+         assert_eq!(
+             compiled_only_entries(&compiled.resolve(None)),
+-            2,
++            3,
+             "compiled"
+         );
+ 
+@@ -391,13 +393,16 @@ mod tests {
+         .unwrap();
+         let bundled =
+             ModelCatalog::with_bundled_dir(Some(dir.path().into()), Some(dir.path().into()));
+-        assert_eq!(compiled_only_entries(&bundled.resolve(None)), 2, "bundled");
++        assert_eq!(compiled_only_entries(&bundled.resolve(None)), 3, "bundled");
+ 
++        // This layer already lists Claude Fable 5.2, so its own entry stays and no second one joins.
+         let snapshot = json!({
+             "url": MODEL_CATALOG_URL,
+             "scope": PUBLIC_SCOPE,
+             "fetchedAt": 1,
+-            "payload": serde_json::from_str::<serde_json::Value>(&models_json(&["cached-a"])).unwrap(),
++            "payload": serde_json::from_str::<serde_json::Value>(
++                &models_json(&["cached-a", "claude-fable-5-2"])
++            ).unwrap(),
+         });
+         std::fs::write(
+             dir.path().join(PROVIDER_CATALOG_CACHE_FILE),
+@@ -408,7 +413,15 @@ mod tests {
+             ModelCatalog::with_bundled_dir(Some(dir.path().into()), Some(dir.path().into()));
+         let models = cached.resolve(None);
+         assert!(models.iter().any(|m| m.id == "cached-a"), "cache wins");
+-        assert_eq!(compiled_only_entries(&models), 2, "cached");
++        assert_eq!(compiled_only_entries(&models), 3, "cached");
++        let fable = models
++            .iter()
++            .find(|m| m.provider == "anthropic" && m.id == "claude-fable-5-2")
++            .expect("Claude Fable 5.2");
++        assert_eq!(
++            fable.name, "claude-fable-5-2",
++            "the cached entry, not the compiled one"
++        );
+     }
+ 
+     #[test]
+diff --git a/crates/pa-models/src/transports.rs b/crates/pa-models/src/transports.rs
+index 88cb483..213e7e0 100644
+--- a/crates/pa-models/src/transports.rs
++++ b/crates/pa-models/src/transports.rs
+@@ -52,12 +52,17 @@ pub fn compiled_transport_tuples() -> Vec<(&'static str, &'static str, &'static
+ /// used: the remote catalog and the bundled snapshot would otherwise drop them.
+ const COMPILED_ONLY_PROVIDERS: &[&str] = &["audn", "orcarouter"];
+ 
+-/// Add the compiled entries of [`COMPILED_ONLY_PROVIDERS`] that `models` lacks.
++/// Compiled `(provider, id)` models newer than every catalog layer, joined the same way until a
++/// layer lists them, whose own entry then wins.
++const COMPILED_ONLY_MODELS: &[(&str, &str)] = &[("anthropic", "claude-fable-5-2")];
++
++/// Add the compiled entries of [`COMPILED_ONLY_PROVIDERS`] and [`COMPILED_ONLY_MODELS`] that
++/// `models` lacks.
+ pub fn join_compiled_only_entries(models: &mut Vec<Model>) {
+-    for model in compiled_models()
+-        .iter()
+-        .filter(|model| COMPILED_ONLY_PROVIDERS.contains(&model.provider.as_str()))
+-    {
++    for model in compiled_models().iter().filter(|model| {
++        COMPILED_ONLY_PROVIDERS.contains(&model.provider.as_str())
++            || COMPILED_ONLY_MODELS.contains(&(model.provider.as_str(), model.id.as_str()))
++    }) {
+         if !models
+             .iter()
+             .any(|existing| existing.provider == model.provider && existing.id == model.id)

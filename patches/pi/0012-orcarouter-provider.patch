@@ -1,5 +1,5 @@
 diff --git a/packages/ai/src/env-api-keys.ts b/packages/ai/src/env-api-keys.ts
-index 726375267..3fbcbe999 100644
+index ce70238..27cf061 100644
 --- a/packages/ai/src/env-api-keys.ts
 +++ b/packages/ai/src/env-api-keys.ts
 @@ -84,6 +84,7 @@ function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
@@ -11,7 +11,7 @@ index 726375267..3fbcbe999 100644
  		"qwen-token-plan-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
  		"qwen-token-plan-individual": "QWEN_TOKEN_PLAN_API_KEY",
 diff --git a/packages/ai/src/providers/all.ts b/packages/ai/src/providers/all.ts
-index f89764d27..cd3d0827e 100644
+index fe96a16..c7ab8f9 100644
 --- a/packages/ai/src/providers/all.ts
 +++ b/packages/ai/src/providers/all.ts
 @@ -35,6 +35,7 @@ import { openaiCodexProvider } from "./openai-codex.ts";
@@ -22,7 +22,7 @@ index f89764d27..cd3d0827e 100644
  import { qwenTokenPlanProvider } from "./qwen-token-plan.ts";
  import { qwenTokenPlanCnProvider } from "./qwen-token-plan-cn.ts";
  import { qwenTokenPlanIndividualProvider } from "./qwen-token-plan-individual.ts";
-@@ -53,9 +54,9 @@ import { zaiCodingCnProvider } from "./zai-coding-cn.ts";
+@@ -54,9 +55,9 @@ import { zaiCodingCnProvider } from "./zai-coding-cn.ts";
  export { radiusProvider };
  
  // Keep the content-addressed upstream catalog intact; qualify this provider separately.
@@ -35,7 +35,7 @@ index f89764d27..cd3d0827e 100644
  
  /** Providers present in the generated catalog. `KnownProvider` additionally
   * includes purely dynamic providers (e.g. "radius") that have no static
-@@ -174,6 +175,7 @@ export function builtinProviders(): Provider[] {
+@@ -175,6 +176,7 @@ export function builtinProviders(): Provider[] {
  		opencodeProvider(),
  		opencodeGoProvider(),
  		openrouterProvider(),
@@ -45,7 +45,7 @@ index f89764d27..cd3d0827e 100644
  		qwenTokenPlanIndividualProvider(),
 diff --git a/packages/ai/src/providers/orcarouter.ts b/packages/ai/src/providers/orcarouter.ts
 new file mode 100644
-index 000000000..5294f2137
+index 0000000..5294f21
 --- /dev/null
 +++ b/packages/ai/src/providers/orcarouter.ts
 @@ -0,0 +1,57 @@
@@ -107,7 +107,7 @@ index 000000000..5294f2137
 +	});
 +}
 diff --git a/packages/ai/src/types.ts b/packages/ai/src/types.ts
-index 0c79ef8b7..e553f7b27 100644
+index b3fc9ca..f6fd191 100644
 --- a/packages/ai/src/types.ts
 +++ b/packages/ai/src/types.ts
 @@ -89,6 +89,7 @@ export type ClassifierApi = KnownClassifierApi | (string & {});
@@ -120,7 +120,7 @@ index 0c79ef8b7..e553f7b27 100644
  	| "anthropic"
 diff --git a/packages/ai/test/orcarouter.test.ts b/packages/ai/test/orcarouter.test.ts
 new file mode 100644
-index 000000000..d7c44932e
+index 0000000..d7c4493
 --- /dev/null
 +++ b/packages/ai/test/orcarouter.test.ts
 @@ -0,0 +1,62 @@
@@ -187,10 +187,10 @@ index 000000000..d7c44932e
 +	});
 +});
 diff --git a/packages/coding-agent/src/core/model-resolver.ts b/packages/coding-agent/src/core/model-resolver.ts
-index 839e32537..d5a73e140 100644
+index 2a932e7..2c17bb6 100644
 --- a/packages/coding-agent/src/core/model-resolver.ts
 +++ b/packages/coding-agent/src/core/model-resolver.ts
-@@ -60,6 +60,7 @@ export const defaultModelPerProvider: Partial<Record<KnownProvider, string>> = {
+@@ -61,6 +61,7 @@ export const defaultModelPerProvider: Partial<Record<KnownProvider, string>> = {
  	"xiaomi-token-plan-ams": "mimo-v2.6-pro",
  	"xiaomi-token-plan-sgp": "mimo-v2.6-pro",
  	abliteration: "abliterated-model",

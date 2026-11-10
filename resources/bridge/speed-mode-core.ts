@@ -120,7 +120,12 @@ const CHATGPT_FALLBACK_FAST_MODELS = new Set([
 ])
 
 /** Claude fast mode (research preview), first-party Anthropic API only. */
-const CLAUDE_FAST_MODELS = new Set(['claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8'])
+const CLAUDE_FAST_MODELS = new Set([
+  'claude-fable-5-2',
+  'claude-opus-5-5',
+  'claude-opus-5',
+  'claude-opus-4-8'
+])
 
 const CLAUDE_SUBSCRIPTION_REASON = 'Claude fast mode needs an Anthropic API key'
 

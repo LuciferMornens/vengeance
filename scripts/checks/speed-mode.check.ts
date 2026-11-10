@@ -374,7 +374,7 @@ await check(
 )
 
 await check('speedOffer: Claude fast mode needs an Anthropic API key', () => {
-  for (const id of ['claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8']) {
+  for (const id of ['claude-fable-5-2', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8']) {
     assert.deepEqual(speedOffer('anthropic-api-key', id).options, [
       { mode: 'fast', costMultiplier: 2 }
     ])

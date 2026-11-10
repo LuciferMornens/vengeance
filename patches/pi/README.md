@@ -1,13 +1,14 @@
 # Vengeance's pi build
 
-Vengeance builds stable `v1.5.0`, commit `f9a26365568127461c47a07a37dcb42c140a3ac5`,
-as `1.5.0+vengeance.2`. See [UPSTREAM.md](../../UPSTREAM.md) and
+Vengeance builds stable `v1.5.1`, commit `dd30101cfc5b0609411dd80b6f93adbc14db14cf`,
+as `1.5.1+vengeance.1`. See [UPSTREAM.md](../../UPSTREAM.md) and
 [engines.lock.json](../../engines.lock.json) for the source and maintenance contract.
 
 The active series includes distribution policy (0001), extension runtime version identity (0002),
 native runtime qualification (0003), Windows native test fixtures (0005), Abliteration (0006),
 native session sharing (0007), POSIX shell test paths (0008), MCP host state (0009), OAuth
-refresh rejection (0010), the per-request image limit (0011), OrcaRouter (0012) and Audn (0013).
+refresh rejection (0010), the per-request image limit (0011), OrcaRouter (0012), Audn (0013) and
+Claude Fable 5.2 (0014).
 Patch `0005` normalizes the external-editor fixture's temporary path on Windows. Patch `0006`
 also supplies Abliteration's native default model, required by the 1.3 provider-selection contract.
 Rebasing onto 1.4.0 needed two reviewed resolutions: the chord package-boundary test, where 1.4.0's
@@ -19,6 +20,58 @@ form, so `0005` dropped that hunk; `0010` keeps upstream's `./models` forbid lis
 1.5.0's new JSON Schema suite and preview-package test assumed POSIX paths, so `0005` normalizes the
 suite's fixture names and reads the packed tarball by relative path, because GNU tar takes a `D:` prefix
 for a remote host.
+
+Rebasing onto 1.5.1 (373 upstream commits) kept all thirteen patches; 1.5.1 supplies none of their
+behavior. Three resolutions were imports: 1.5.1's tools test imports `symlinkSync` for its new grep glob
+case, which `0005`'s `fs/promises` import and `0008`'s `realpathSync` now join, and `0009` imports
+`isOAuthServer` beside the MCP runtime's new `sliceTail`. Every other patch applied by three-way merge.
+1.5.1's new `refreshModelsAuth: "configured"` catalog refresh, which pi.dev's overlay gives every built-in
+provider but Radius and OpenRouter, asks `checkProviderAuth` whether the provider is configured, and `0010`
+already answers no for a rejected sign-in, so those refreshes skip it too. 1.5.1 itself only stops
+refreshing OAuth for these refreshes and warns about a stale login in `pi update --models`; it still marks
+nothing. `0014` also drops one assertion of upstream's new Fable 5.2 case in
+`anthropic-mid-conversation-effort.test.ts`, which expects OpenRouter's `anthropic/claude-fable-5.2`: the
+pinned catalog lists OpenRouter's Fable 5.1 but not 5.2, so unpatched 1.5.1 fails its own `check` and that
+test.
+
+On Windows, seven coding-agent tests fail on both the patched tree and unpatched `v1.5.1` through the same
+harness: five new 1.5.1 tests that assume POSIX (file and directory symlinks without symlink privilege in
+`auth-storage` and the grep glob case, `SIGTERM` and a `B:` path joined below a folder in
+`subagent-extension`), the new compaction-summary transformer case, which expects `1,234` where an
+`en-DE` host formats `1.234`, and the earlier directory `chmod` case in `session-manager/file-operations`.
+The same seven files fail fourteen tests unpatched; `0005` fixes the other seven. No patch touches the code
+these tests exercise.
+
+1.5.1 was qualified on 10 November 2026 against the reconstructed and staged `1.5.1+vengeance.1`, payload
+hash `bb62eb8b43bcd50cfc3268836547c9364adb995a31ebc0303a0585066561fdf0`, whose manifest lists this series'
+thirteen patch hashes. Native runs set `QA_TMP_ROOT` outside the repository and `QA_PI_SOURCE` to a short
+junction to the staged checkout. From an app worktree the default temporary root lies inside the main
+checkout, where `resource-loader.test.ts` finds its `AGENTS.md`, and the long source path wraps a width-120
+render in `tool-execution-component.test.ts`; those eleven tests fail that way and pass this way.
+
+```text
+node scripts/checks/pi-workspace.mjs check
+  ✓ isolated native Engine checks passed
+node scripts/checks/pi-workspace.mjs
+  scripts 61/61, agent 94, ai 1920 (893 skipped), codemode 231, env 99 (20 skipped), evals 54,
+  mcp 130 (2 skipped), schema 8744 (9 expected fail), telemetry 52, tui 1303
+  chord 55 failed, 3172 passed; coding-agent 7 failed, 3140 passed; durable 2 failed, 1924 passed
+node scripts/checks/pi-workspace.mjs durable --config vitest.store.config.ts
+  Tests  550 passed | 5 skipped (555)
+node scripts/checks/pi-workspace.mjs durable --config test-workers/vitest.config.ts
+  Tests  37 passed (37)
+node scripts/checks/pi-catalog.mjs
+  ✓ native catalog: Haiku capabilities, pricing and Off thinking; Sonnet cache price; Fable 5.2; OrcaRouter; Audn
+```
+
+Every failure also fails on unpatched `v1.5.1`, built with `build:offline` and run through the same harness,
+which fails more. Chord's 55 are Windows assumptions (POSIX file modes, symlinks, `D:` paths imported as
+URLs, file locks and `SIGTERM`); unpatched, it also fails the package-boundary test that `0005` fixes.
+Unpatched durable fails seven: `0005` fixes five symlink cases, and the other two, an idle-scope recompute
+and a streamed tool-call partial, exceed vitest's five-second timeout on both trees. Its memory-proportion
+test failed once on the patched tree and passed in two reruns. Because `npm test` stops durable at its first
+failure, the full run skips its later passes. The store and worker passes ran separately above; the
+zero-retention pass did not, because the harness strips `PI_` variables.
 
 Patch `0010` raises the `./models` budget from 20 to 21 files for
 `auth/oauth-error.ts`, which rejected-refresh recognition adds to that entry.
@@ -127,7 +180,7 @@ Extension/package updates and model catalog refreshes remain native operations. 
 the CLI, RPC entry and the SDK all come from our source checkout. Internal runtime packages are
 packed locally and substituted into upstream's installation lock; external dependencies stay pinned.
 
-The compatibility patch keeps the native package version and SDK `VERSION` at `1.5.0`.
+The compatibility patch keeps the native package version and SDK `VERSION` at `1.5.1`.
 Some extensions require a dotted upstream release and reject SemVer build metadata. Distribution
 identity lives in `package.json`'s `vengeance.version`, the engine manifest and CLI `--version`.
 Install-change detection compares the distribution identity, including builds on the same upstream base.
@@ -153,3 +206,24 @@ discovery and a default model. Its ladder is Low, High and Max, the efforts Audn
 cannot be turned off, so a saved Off or Minimal moves to Low, Medium to High and Extra high to Max.
 The API accepts images but the model ignores them, so the model is declared text-only and the composer
 says so. Instructions stay in `system` and the output limit travels as `max_tokens`.
+
+Patch `0014` makes Claude Fable 5.2 (`claude-fable-5-2`, released 9 November 2026) available. 1.5.1 adds
+it to the catalog generator ([`0d1793c`](https://github.com/earendil-works/pi/commit/0d1793c)), but the
+catalog its release commit pins (`sha256-175c0d73533fad08fdd1554932a4993c37564d2a2ea084cbcc2126772fbf906f`)
+still lacks it. pi.dev's runtime catalog listed it later on 10 November, with the same fields as the
+patch's entry, so an Engine without the patch shows it only after a catalog refresh, and the subscription
+still refuses it. The patch adds the entry beside the catalog's Anthropic models, and the catalog's own
+entry of the same id wins once it lists one. It has Fable 5.1's shape at Fable 5.2's prices ($8 and $40
+per million input and output tokens, $0.20 cache reads, $10 cache writes), a 1M context and 128k output.
+Thinking is adaptive and cannot be turned off, and Opus 5 is the fallback for requests its safety
+classifiers refuse.
+The subscription refuses Fable 5.2 to a Claude Code identity older than 2.1.290 with
+`claude_code_version_too_old` (upstream issues
+[11969](https://github.com/earendil-works/pi/issues/11969) and
+[11989](https://github.com/earendil-works/pi/issues/11989)), so the patch also raises the OAuth identity from
+2.1.280 to 2.1.322, as upstream main does after 1.5.1; 1.5.1 still claims 2.1.280. The native
+`anthropic-fable-5-2.test.ts` qualifies the entry, the runtime model list and the OAuth identity, and
+upstream's Fable 5.2 case in `anthropic-mid-conversation-effort.test.ts` passes against the entry, apart
+from the OpenRouter assertion the patch drops (see the 1.5.1 rebase above); `scripts/checks/pi-catalog.mjs`
+checks the staged entry. Retire it when the base's pinned catalog lists Fable 5.2 and its identity is
+2.1.290 or newer.

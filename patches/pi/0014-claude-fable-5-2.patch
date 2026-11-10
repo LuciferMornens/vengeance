@@ -1,0 +1,181 @@
+diff --git a/packages/ai/src/api/anthropic-messages.ts b/packages/ai/src/api/anthropic-messages.ts
+index d722d35..b031c28 100644
+--- a/packages/ai/src/api/anthropic-messages.ts
++++ b/packages/ai/src/api/anthropic-messages.ts
+@@ -106,7 +106,7 @@ function getCacheControl(
+ }
+ 
+ // Stealth mode: Mimic Claude Code's tool naming exactly
+-const claudeCodeVersion = "2.1.280";
++const claudeCodeVersion = "2.1.322";
+ 
+ // Claude Code 2.x tool names (canonical casing)
+ // Source: https://cchistory.mariozechner.at/data/prompts-2.1.11.md
+diff --git a/packages/ai/src/providers/all.ts b/packages/ai/src/providers/all.ts
+index 61a124a..9b7b398 100644
+--- a/packages/ai/src/providers/all.ts
++++ b/packages/ai/src/providers/all.ts
+@@ -8,7 +8,7 @@ import type { AnyModel, Api, ClassifierApi, ClassifierModel, ImageApi, ImageMode
+ import { ABLITERATION_MODELS, abliterationProvider } from "./abliteration.ts";
+ import { amazonBedrockProvider } from "./amazon-bedrock.ts";
+ import { antLingProvider } from "./ant-ling.ts";
+-import { anthropicProvider } from "./anthropic.ts";
++import { ANTHROPIC_MODELS, anthropicProvider } from "./anthropic.ts";
+ import { AUDN_MODELS, audnProvider } from "./audn.ts";
+ import { azureProvider } from "./azure.ts";
+ import { basetenProvider } from "./baseten.ts";
+@@ -55,9 +55,10 @@ import { zaiCodingCnProvider } from "./zai-coding-cn.ts";
+ 
+ export { radiusProvider };
+ 
+-// Keep the content-addressed upstream catalog intact; qualify this provider separately.
++// Keep the content-addressed upstream catalog intact; qualify these additions separately.
+ const MODELS = {
+ 	...GENERATED_MODELS,
++	anthropic: ANTHROPIC_MODELS,
+ 	abliteration: ABLITERATION_MODELS,
+ 	audn: AUDN_MODELS,
+ 	orcarouter: ORCAROUTER_MODELS,
+diff --git a/packages/ai/src/providers/anthropic.ts b/packages/ai/src/providers/anthropic.ts
+index 0f7e8b6..bdabf0a 100644
+--- a/packages/ai/src/providers/anthropic.ts
++++ b/packages/ai/src/providers/anthropic.ts
+@@ -13,8 +13,50 @@ import {
+ 	ANTHROPIC_WORKSPACE_ID_ENV,
+ } from "../env-api-keys.ts";
+ import { createProvider, type Provider } from "../models.ts";
+-import type { ProviderEnv } from "../types.ts";
+-import { ANTHROPIC_MODELS } from "./anthropic.models.ts";
++import type { Model, ProviderEnv } from "../types.ts";
++import { ANTHROPIC_MODELS as CATALOG_MODELS } from "./anthropic.models.ts";
++
++// Claude Fable 5.2 (9 November 2026) is newer than the pinned catalog. Upstream adds it to the catalog
++// generator in 1.5.1 (0d1793c): Fable 5.1's shape at Fable 5.2's prices, with Claude Opus 5 answering
++// requests its safety classifiers refuse. The catalog's own entry wins once the catalog lists it.
++// https://platform.claude.com/docs/en/models/fable-5-2/migration-guide
++const CLAUDE_FABLE_5_2 = {
++	"claude-fable-5-2": {
++		id: "claude-fable-5-2",
++		name: "Claude Fable 5.2",
++		api: "anthropic-messages",
++		provider: "anthropic",
++		baseUrl: "https://api.anthropic.com",
++		reasoning: true,
++		thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" },
++		input: ["text", "image"],
++		inputLimits: {
++			maxRequestBytes: 32 * 1024 * 1024,
++			images: {
++				maxPerRequest: 600,
++				resize: { maxWidth: 2000, maxHeight: 2000, maxBytes: 4.5 * 1024 * 1024, jpegQuality: 80 },
++			},
++		},
++		cost: { input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 },
++		promptCache: { short: 300, long: 3600 },
++		contextWindow: 1000000,
++		maxTokens: 128000,
++		compat: {
++			forceAdaptiveThinking: true,
++			supportsMidConvoEffort: true,
++			supportsMidConvoSystemMessages: true,
++			supportsMidConvoToolChanges: true,
++			supportsStrictTools: true,
++			// Opus 4.8 cannot take per-message effort, so Opus 5 is Fable 5.2's only fallback.
++			allowedFallbackModels: [
++				{ provider: "anthropic", model: "claude-opus-5", cost: CATALOG_MODELS["claude-opus-5"].cost },
++			],
++		},
++	},
++} satisfies Record<string, Model<"anthropic-messages">>;
++
++/** The catalog's Anthropic chat models, with Claude Fable 5.2 until the catalog lists it. */
++export const ANTHROPIC_MODELS = { ...CLAUDE_FABLE_5_2, ...CATALOG_MODELS };
+ 
+ function anthropicApiKeyAuth(): ApiKeyAuth {
+ 	return {
+diff --git a/packages/ai/test/anthropic-fable-5-2.test.ts b/packages/ai/test/anthropic-fable-5-2.test.ts
+new file mode 100644
+index 0000000..24435c1
+--- /dev/null
++++ b/packages/ai/test/anthropic-fable-5-2.test.ts
+@@ -0,0 +1,68 @@
++import { createServer, type IncomingHttpHeaders } from "node:http";
++import type { AddressInfo } from "node:net";
++import { describe, expect, it } from "vitest";
++import { stream } from "../src/api/anthropic-messages.ts";
++import { builtinModels, getBuiltinModel } from "../src/providers/all.ts";
++import { normalizeContext } from "../src/utils/transcript.ts";
++
++// The subscription answers "Claude Code 2.1.280 does not support this model; version 2.1.290 or newer is
++// required" (claude_code_version_too_old) to a Fable 5.2 request from an older Claude Code identity.
++const MINIMUM_FABLE_5_2_CLAUDE_CODE = [2, 1, 290];
++
++async function oauthRequestHeaders(): Promise<IncomingHttpHeaders> {
++	let headers: IncomingHttpHeaders | undefined;
++	const server = createServer((request, response) => {
++		headers = request.headers;
++		request.resume();
++		response.writeHead(400, { "content-type": "application/json" });
++		response.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "captured" } }));
++	});
++	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
++	try {
++		const { port } = server.address() as AddressInfo;
++		const model = { ...getBuiltinModel("anthropic", "claude-fable-5-2"), baseUrl: `http://127.0.0.1:${port}` };
++		const context = normalizeContext({ messages: [{ role: "user", content: "Hello", timestamp: 1 }] });
++		await stream(model, context, { apiKey: "sk-ant-oat01-test", cacheRetention: "none" }).result();
++	} finally {
++		await new Promise<void>((resolve) => server.close(() => resolve()));
++	}
++	if (!headers) throw new Error("Expected the OAuth request to reach the server");
++	return headers;
++}
++
++describe("Claude Fable 5.2", () => {
++	it("is listed like Fable 5.1 at its own prices, with Claude Opus 5 as its only fallback", () => {
++		const model = getBuiltinModel("anthropic", "claude-fable-5-2");
++		const fable51 = getBuiltinModel("anthropic", "claude-fable-5-1");
++		expect(model).toMatchObject({
++			name: "Claude Fable 5.2",
++			reasoning: true,
++			input: ["text", "image"],
++			contextWindow: 1000000,
++			maxTokens: 128000,
++			cost: { input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 },
++			thinkingLevelMap: fable51.thinkingLevelMap,
++			promptCache: fable51.promptCache,
++			inputLimits: fable51.inputLimits,
++		});
++		expect(model.compat).toEqual({
++			...fable51.compat,
++			allowedFallbackModels: [
++				{ provider: "anthropic", model: "claude-opus-5", cost: getBuiltinModel("anthropic", "claude-opus-5").cost },
++			],
++		});
++	});
++
++	it("is offered by the runtime Anthropic provider", () => {
++		const models = builtinModels({ authContext: { env: async () => undefined, fileExists: async () => false } });
++		expect(models.getModels("anthropic").map((model) => model.id)).toContain("claude-fable-5-2");
++	});
++
++	it("identifies subscription requests as a Claude Code release that serves Fable 5.2", async () => {
++		const userAgent = (await oauthRequestHeaders())["user-agent"] ?? "";
++		const version = /^claude-cli\/(\d+)\.(\d+)\.(\d+)/.exec(userAgent)?.slice(1).map(Number);
++		expect(version, userAgent).toBeDefined();
++		const order = (version ?? []).map((part, index) => part - MINIMUM_FABLE_5_2_CLAUDE_CODE[index]).find(Boolean);
++		expect(order ?? 0, userAgent).toBeGreaterThanOrEqual(0);
++	});
++});
+diff --git a/packages/ai/test/anthropic-mid-conversation-effort.test.ts b/packages/ai/test/anthropic-mid-conversation-effort.test.ts
+index 4db36bf..69fc48f 100644
+--- a/packages/ai/test/anthropic-mid-conversation-effort.test.ts
++++ b/packages/ai/test/anthropic-mid-conversation-effort.test.ts
+@@ -261,6 +261,6 @@ describe("Anthropic mid-conversation effort", () => {
+ 		expect(direct.thinkingLevelMap).toMatchObject({ xhigh: "xhigh", max: "max" });
+ 		// Opus 4.8 cannot take per-message effort, so it is dropped from Fable 5.2's fallbacks.
+ 		expect(direct.compat?.allowedFallbackModels?.map((fallback) => fallback.model)).toEqual(["claude-opus-5"]);
+-		expect(getModel("openrouter", "anthropic/claude-fable-5.2").compat?.supportsMidConvoEffort).toBe(true);
++		// The pinned catalog lists OpenRouter's Fable 5.1 but not its Fable 5.2, so only the direct entry is checked.
+ 	});
+ });

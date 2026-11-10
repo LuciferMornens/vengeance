@@ -1,5 +1,5 @@
 diff --git a/packages/ai/src/env-api-keys.ts b/packages/ai/src/env-api-keys.ts
-index 3fbcbe9..4d3dedf 100644
+index 27cf061..6c5b874 100644
 --- a/packages/ai/src/env-api-keys.ts
 +++ b/packages/ai/src/env-api-keys.ts
 @@ -84,6 +84,7 @@ function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
@@ -11,7 +11,7 @@ index 3fbcbe9..4d3dedf 100644
  		"qwen-token-plan": "QWEN_TOKEN_PLAN_API_KEY",
  		"qwen-token-plan-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
 diff --git a/packages/ai/src/providers/all.ts b/packages/ai/src/providers/all.ts
-index cd3d082..0d5ae7f 100644
+index c7ab8f9..61a124a 100644
 --- a/packages/ai/src/providers/all.ts
 +++ b/packages/ai/src/providers/all.ts
 @@ -9,6 +9,7 @@ import { ABLITERATION_MODELS, abliterationProvider } from "./abliteration.ts";
@@ -22,7 +22,7 @@ index cd3d082..0d5ae7f 100644
  import { azureProvider } from "./azure.ts";
  import { basetenProvider } from "./baseten.ts";
  import { cerebrasProvider } from "./cerebras.ts";
-@@ -54,9 +55,14 @@ import { zaiCodingCnProvider } from "./zai-coding-cn.ts";
+@@ -55,9 +56,14 @@ import { zaiCodingCnProvider } from "./zai-coding-cn.ts";
  export { radiusProvider };
  
  // Keep the content-addressed upstream catalog intact; qualify this provider separately.
@@ -40,7 +40,7 @@ index cd3d082..0d5ae7f 100644
  
  /** Providers present in the generated catalog. `KnownProvider` additionally
   * includes purely dynamic providers (e.g. "radius") that have no static
-@@ -150,6 +156,7 @@ export function builtinProviders(): Provider[] {
+@@ -151,6 +157,7 @@ export function builtinProviders(): Provider[] {
  		amazonBedrockProvider(),
  		antLingProvider(),
  		anthropicProvider(),
@@ -101,7 +101,7 @@ index 0000000..d254f1f
 +	});
 +}
 diff --git a/packages/ai/src/types.ts b/packages/ai/src/types.ts
-index e553f7b..d96fb90 100644
+index f6fd191..cabe19d 100644
 --- a/packages/ai/src/types.ts
 +++ b/packages/ai/src/types.ts
 @@ -89,6 +89,7 @@ export type ClassifierApi = KnownClassifierApi | (string & {});
@@ -182,10 +182,10 @@ index 0000000..38eaffc
 +	});
 +});
 diff --git a/packages/coding-agent/src/core/model-resolver.ts b/packages/coding-agent/src/core/model-resolver.ts
-index d5a73e1..3b215a1 100644
+index 2c17bb6..762260e 100644
 --- a/packages/coding-agent/src/core/model-resolver.ts
 +++ b/packages/coding-agent/src/core/model-resolver.ts
-@@ -61,6 +61,7 @@ export const defaultModelPerProvider: Partial<Record<KnownProvider, string>> = {
+@@ -62,6 +62,7 @@ export const defaultModelPerProvider: Partial<Record<KnownProvider, string>> = {
  	"xiaomi-token-plan-sgp": "mimo-v2.6-pro",
  	abliteration: "abliterated-model",
  	orcarouter: "orca/orcacyber-k3.1-pro",

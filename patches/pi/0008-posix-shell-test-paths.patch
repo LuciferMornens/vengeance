@@ -1,15 +1,15 @@
 diff --git a/packages/coding-agent/test/tools.test.ts b/packages/coding-agent/test/tools.test.ts
-index 9703c9eaa..3ce3f7b51 100644
+index 9e5431d..d8a6807 100644
 --- a/packages/coding-agent/test/tools.test.ts
 +++ b/packages/coding-agent/test/tools.test.ts
 @@ -1,5 +1,5 @@
  import { applyPatch } from "diff";
--import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
-+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "fs";
+-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "fs";
++import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
  import * as fileOperations from "fs/promises";
  import { tmpdir } from "os";
  import { join } from "path";
-@@ -1156,7 +1156,9 @@ describe("tool cwd resolution", () => {
+@@ -1456,7 +1456,9 @@ describe("tool cwd resolution", () => {
  		);
  		const output = getTextOutput(result);
  		const nativePath = process.platform === "win32" ? normalizeWindowsShellPath(output.trim()) : output.trim();

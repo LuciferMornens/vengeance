@@ -48,6 +48,18 @@ assert.deepEqual(models.getSupportedThinkingLevels(sonnet), [
   'max'
 ])
 
+const fable = catalog.getBuiltinModel('anthropic', 'claude-fable-5-2')
+assert.equal(fable.reasoning, true)
+assert.deepEqual(fable.input, ['text', 'image'])
+assert.equal(fable.contextWindow, 1_000_000)
+assert.equal(fable.maxTokens, 128_000)
+assert.deepEqual(fable.cost, { input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 })
+assert.deepEqual(
+  models.getSupportedThinkingLevels(fable),
+  models.getSupportedThinkingLevels(catalog.getBuiltinModel('anthropic', 'claude-fable-5-1'))
+)
+assert.equal(fable.compat.forceAdaptiveThinking, true)
+
 const orcarouter = catalog.getBuiltinModel('orcarouter', 'orca/orcacyber-k3.1-pro')
 assert.equal(orcarouter.reasoning, true)
 assert.deepEqual(orcarouter.input, ['text', 'image'])
@@ -67,5 +79,5 @@ assert.deepEqual(models.getSupportedThinkingLevels(audn), ['low', 'high', 'max']
 assert.equal(audn.compat.supportsDeveloperRole, false)
 
 console.log(
-  '✓ native catalog: Haiku capabilities, pricing and Off thinking; Sonnet cache price; OrcaRouter; Audn'
+  '✓ native catalog: Haiku capabilities, pricing and Off thinking; Sonnet cache price; Fable 5.2; OrcaRouter; Audn'
 )
