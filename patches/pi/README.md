@@ -1,13 +1,14 @@
 # Vengeance's pi build
 
 Vengeance builds stable `v1.5.0`, commit `f9a26365568127461c47a07a37dcb42c140a3ac5`,
-as `1.5.0+vengeance.2`. See [UPSTREAM.md](../../UPSTREAM.md) and
+as `1.5.0+vengeance.3`. See [UPSTREAM.md](../../UPSTREAM.md) and
 [engines.lock.json](../../engines.lock.json) for the source and maintenance contract.
 
 The active series includes distribution policy (0001), extension runtime version identity (0002),
 native runtime qualification (0003), Windows native test fixtures (0005), Abliteration (0006),
 native session sharing (0007), POSIX shell test paths (0008), MCP host state (0009), OAuth
-refresh rejection (0010), the per-request image limit (0011), OrcaRouter (0012) and Audn (0013).
+refresh rejection (0010), the per-request image limit (0011), OrcaRouter (0012), Audn (0013) and
+Claude Fable 5.2 (0014).
 Patch `0005` normalizes the external-editor fixture's temporary path on Windows. Patch `0006`
 also supplies Abliteration's native default model, required by the 1.3 provider-selection contract.
 Rebasing onto 1.4.0 needed two reviewed resolutions: the chord package-boundary test, where 1.4.0's
@@ -153,3 +154,18 @@ discovery and a default model. Its ladder is Low, High and Max, the efforts Audn
 cannot be turned off, so a saved Off or Minimal moves to Low, Medium to High and Extra high to Max.
 The API accepts images but the model ignores them, so the model is declared text-only and the composer
 says so. Instructions stay in `system` and the output limit travels as `max_tokens`.
+
+Patch `0014` makes Claude Fable 5.2 (`claude-fable-5-2`, released 9 November 2026) available. Neither the
+pinned catalog nor pi.dev's runtime catalog lists it yet; 1.5.1 adds it only to the catalog generator
+([`0d1793c`](https://github.com/earendil-works/pi/commit/0d1793c)), and its pinned catalog still lacks it.
+The patch adds the entry beside the catalog's Anthropic models, and the catalog's own entry of the same
+id wins once it lists one. It has Fable 5.1's shape at Fable 5.2's prices ($8 and $40 per million input
+and output tokens, $0.20 cache reads, $10 cache writes), a 1M context and 128k output. Thinking is
+adaptive and cannot be turned off, and Opus 5 is the fallback for requests its safety classifiers refuse.
+The subscription refuses Fable 5.2 to a Claude Code identity older than 2.1.290 with
+`claude_code_version_too_old` (upstream issues
+[11969](https://github.com/earendil-works/pi/issues/11969) and
+[11989](https://github.com/earendil-works/pi/issues/11989)), so the patch also raises the OAuth identity from
+2.1.280 to 2.1.322, as upstream main does after 1.5.1. The native `anthropic-fable-5-2.test.ts` qualifies
+the entry, the runtime model list and the OAuth identity; `scripts/checks/pi-catalog.mjs` checks the
+staged entry. Retire it when the base's pinned catalog lists Fable 5.2 and its identity is 2.1.290 or newer.

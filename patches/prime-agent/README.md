@@ -3,7 +3,7 @@
 Follow [UPSTREAM.md](../../UPSTREAM.md) for reconstruction and qualification.
 
 Vengeance ships a source build of stable `v0.10.2`, upstream commit
-`ea9d9602ec0938d9e454e8963107cd85af1565c6`, identified as `0.10.2+vengeance.2`.
+`ea9d9602ec0938d9e454e8963107cd85af1565c6`, identified as `0.10.2+vengeance.3`.
 The exact source, catalog revision, toolchain and patch order live in
 [engines.lock.json](../../engines.lock.json). The native helper links this same stable base.
 
@@ -31,6 +31,7 @@ The exact source, catalog revision, toolchain and patch order live in
 | 0024  | Report each open session's live MCP server state from its kernel and reconnect one server on request.     |
 | 0025  | Add OrcaRouter as a compiled provider that survives every catalog layer.                                  |
 | 0026  | Add Audn as a compiled provider that survives every catalog layer.                                        |
+| 0027  | Add Claude Fable 5.2 to every catalog layer and claim a Claude Code identity that may use it.             |
 
 `v0.10.2` retires patch 0010, which reported Windows edit failures. Upstream deleted the dead built-in
 bash and edit tools it changed ([#3823](https://github.com/PrimeIntellect-ai/prime-agent/pull/3823)), so
@@ -173,6 +174,15 @@ Patch 0026 adds Audn with API-key login, `AUDN_API_KEY` discovery and a default 
 catalog layer through `COMPILED_ONLY_PROVIDERS` like OrcaRouter. Its map names Low, High and Max and
 leaves Off unmapped, since `none` still reasons, so a saved Off clamps up to Low. Audn reports cached
 input inside `prompt_tokens` and no writes, which the default usage parser already reads correctly.
+
+Patch 0027 makes Claude Fable 5.2 (`claude-fable-5-2`, released 9 November 2026) available. The remote
+catalog and the bundled snapshot do not list it yet, so the patch adds a compiled entry, with Fable 5.1's
+shape at Fable 5.2's prices, and `COMPILED_ONLY_MODELS` joins it to whichever layer resolves. Once a layer
+lists the model, that layer's entry wins. The subscription refuses Fable 5.2 to a Claude Code identity
+older than 2.1.290 with `claude_code_version_too_old`, so the OAuth identity moves from 2.1.281 to 2.1.322,
+and the subscription identity test now asserts that minimum. The `fable-5` id rule already sends Fable 5.2
+adaptive, always-on thinking, and the agent never forces a tool choice, which Fable 5.2 rejects.
+Retire it when the catalog lists Fable 5.2 and upstream claims 2.1.290 or newer.
 
 When upstream incorporates a local fix, demonstrate the regression passing on that upstream base,
 then remove the redundant patch. Do not blindly carry patches or the helper across releases.

@@ -21,8 +21,8 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 
 `engines.lock.json` is the source of truth. Current stable bases are pi `v1.5.0` at
 `f9a26365568127461c47a07a37dcb42c140a3ac5` and Prime `v0.10.2` at
-`ea9d9602ec0938d9e454e8963107cd85af1565c6`. The builds identify as `1.5.0+vengeance.2` and
-`0.10.2+vengeance.2`. Never reuse a Vengeance build version for different shipped behavior.
+`ea9d9602ec0938d9e454e8963107cd85af1565c6`. The builds identify as `1.5.0+vengeance.3` and
+`0.10.2+vengeance.3`. Never reuse a Vengeance build version for different shipped behavior.
 
 The current stable-release verification and patch decisions are recorded in
 [ENGINE-STABLE-AUDIT-2026-11-06.md](docs/ENGINE-STABLE-AUDIT-2026-11-06.md), following
@@ -32,7 +32,9 @@ source comparison in [PRIME-STABLE-AUDIT-2026-10-16.md](docs/PRIME-STABLE-AUDIT-
 The [pi patch guide](patches/pi/README.md) records the 1.5.0 rebase and retired catalog
 fallback. The [14 October audit](docs/ENGINE-AUDIT-2026-10-14.md) records earlier integration
 evidence and gaps. Engine 2 settings preservation and rustls maintenance, former backports, are
-now upstream; both native bases are the latest stable releases.
+now upstream. Prime `v0.10.2` is the latest stable release. pi `v1.5.1` (9 November 2026) is newer than
+our base, but its pinned catalog lacks Claude Fable 5.2 and its OAuth identity is 2.1.280, so it alone
+would not make Fable 5.2 available; moving to it needs its own qualification.
 
 The [prompt and restart qualification report](docs/ENGINE-PROMPTS-QUALIFICATION-2026-10-18.md) records
 the current reconstructed artifacts and completed or pending gates. The
@@ -669,6 +671,19 @@ OrcaRouter, Prime's remote catalog and bundled snapshot do not carry Audn, so it
 `COMPILED_ONLY_PROVIDERS`. Retire both patches when upstream supplies qualified support. Run
 `scripts/qa/auth/audn.qa.mjs` for isolated coverage of both engines. Live verification is opt-in with
 `VENGEANCE_LIVE_AUDN_QA=1` and `AUDN_API_KEY`.
+
+pi patch `0014` and Prime patch `0027` make Claude Fable 5.2 (`claude-fable-5-2`, released on
+9 November 2026) available in both engines. On 10 November 2026 no catalog either engine read listed it:
+not pi's pinned catalog or pi.dev's runtime catalog, and not Prime's remote catalog or bundled snapshot.
+Each patch adds Fable 5.1's shape at Fable 5.2's prices, from the
+[migration guide](https://platform.claude.com/docs/en/models/fable-5-2/migration-guide), and a catalog
+entry of the same id wins once one exists; Prime's `COMPILED_ONLY_MODELS` joins the compiled entry to
+whichever layer resolves. The Claude subscription refuses Fable 5.2 to a Claude Code identity older than
+2.1.290 (`claude_code_version_too_old`), so both patches raise the OAuth identity to 2.1.322, from 2.1.280
+in pi and 2.1.281 in Prime. Thinking is adaptive and cannot be turned off. The API-key route offers fast
+mode at twice the standard price, as for Opus 5. Retire each patch when its base lists Fable 5.2 and
+claims 2.1.290 or newer. Re-check prices, limits and the identity minimum against Anthropic's model
+documentation on upgrades.
 
 Qualified on 16 October 2026 against the reconstructed and staged Engine `1.2.0+vengeance.4`.
 The staged pi payload hash is
