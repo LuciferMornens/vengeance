@@ -1,0 +1,420 @@
+diff --git a/crates/pa-ai/src/env_api_keys.rs b/crates/pa-ai/src/env_api_keys.rs
+index 1b44142..d459a11 100644
+--- a/crates/pa-ai/src/env_api_keys.rs
++++ b/crates/pa-ai/src/env_api_keys.rs
+@@ -22,6 +22,7 @@ pub fn get_api_key_env_vars(provider: &str) -> Option<Vec<&'static str>> {
+                 "audn" => "AUDN_API_KEY",
+                 "openrouter" => "OPENROUTER_API_KEY",
+                 "orcarouter" => "ORCAROUTER_API_KEY",
++                "silkcompute" => "SILK_API_KEY",
+                 "vercel-ai-gateway" => "AI_GATEWAY_API_KEY",
+                 "zai" => "ZAI_API_KEY",
+                 "mistral" => "MISTRAL_API_KEY",
+diff --git a/crates/pa-ai/src/models_generated.rs b/crates/pa-ai/src/models_generated.rs
+index bd9a816..0419933 100644
+--- a/crates/pa-ai/src/models_generated.rs
++++ b/crates/pa-ai/src/models_generated.rs
+@@ -4350,6 +4350,181 @@ compat: Some(RawCompat {
+             supports_strict_mode: Some(false),
+         }),
+     },
++    // No catalog layer carries SilkCompute: `pa_models::transports` joins it to each of them. Limits come
++    // from GET /v1/models and prices from silkcompute.com/models; no cache write price is listed, so writes
++    // cost the input price. SilkCompute documents none, low, high and max and answers minimal, medium and
++    // xhigh as their neighbours; `none` stops every model from reasoning.
++    RawModel {
++        provider: "silkcompute",
++        id: "kimi-k3.1-pro-uncensored",
++        name: "Kimi K3.1 Pro Uncensored",
++        api: "openai-completions",
++        base_url: "https://api.silkcompute.com/v1",
++        reasoning: true,
++        thinking_levels: &[
++                (crate::types::ModelThinkingLevel::Off, Some("none")),
++                (crate::types::ModelThinkingLevel::Minimal, None),
++                (crate::types::ModelThinkingLevel::Low, Some("low")),
++                (crate::types::ModelThinkingLevel::Medium, None),
++                (crate::types::ModelThinkingLevel::High, Some("high")),
++                (crate::types::ModelThinkingLevel::Xhigh, None),
++                (crate::types::ModelThinkingLevel::Max, Some("max")),
++        ],
++        input: &[crate::types::ModelInput::Text, crate::types::ModelInput::Image],
++        cost: (5.0, 15.0, 0.5, 5.0),
++        context_window: 1_048_576,
++        max_tokens: 131_072,
++        featured: None,
++        headers: &[],
++compat: Some(RawCompat {
++            supports_store: Some(false),
++            supports_developer_role: Some(false),
++            supports_reasoning_effort: Some(true),
++            max_tokens_field: Some(crate::types::MaxTokensField::MaxTokens),
++            requires_reasoning_content_on_assistant_messages: None,
++            thinking_format: None,
++            zai_tool_stream: None,
++            send_session_affinity_headers: None,
++            supports_strict_mode: Some(false),
++        }),
++    },
++    RawModel {
++        provider: "silkcompute",
++        id: "deepseek-v4.1-flash-1017-uncensored",
++        name: "DeepSeek V4.1 Flash 1017 Uncensored",
++        api: "openai-completions",
++        base_url: "https://api.silkcompute.com/v1",
++        reasoning: true,
++        thinking_levels: &[
++                (crate::types::ModelThinkingLevel::Off, Some("none")),
++                (crate::types::ModelThinkingLevel::Minimal, None),
++                (crate::types::ModelThinkingLevel::Low, Some("low")),
++                (crate::types::ModelThinkingLevel::Medium, None),
++                (crate::types::ModelThinkingLevel::High, Some("high")),
++                (crate::types::ModelThinkingLevel::Xhigh, None),
++                (crate::types::ModelThinkingLevel::Max, Some("max")),
++        ],
++        input: &[crate::types::ModelInput::Text, crate::types::ModelInput::Image],
++        cost: (0.26, 0.9, 0.06, 0.26),
++        context_window: 1_048_576,
++        max_tokens: 131_072,
++        featured: None,
++        headers: &[],
++compat: Some(RawCompat {
++            supports_store: Some(false),
++            supports_developer_role: Some(false),
++            supports_reasoning_effort: Some(true),
++            max_tokens_field: Some(crate::types::MaxTokensField::MaxTokens),
++            requires_reasoning_content_on_assistant_messages: None,
++            thinking_format: None,
++            zai_tool_stream: None,
++            send_session_affinity_headers: None,
++            supports_strict_mode: Some(false),
++        }),
++    },
++    // The API takes images but GLM-5.3 answers that it cannot see them, so only text is declared.
++    RawModel {
++        provider: "silkcompute",
++        id: "glm-5.3-uncensored",
++        name: "GLM-5.3 Uncensored",
++        api: "openai-completions",
++        base_url: "https://api.silkcompute.com/v1",
++        reasoning: true,
++        thinking_levels: &[
++                (crate::types::ModelThinkingLevel::Off, Some("none")),
++                (crate::types::ModelThinkingLevel::Minimal, None),
++                (crate::types::ModelThinkingLevel::Low, Some("low")),
++                (crate::types::ModelThinkingLevel::Medium, None),
++                (crate::types::ModelThinkingLevel::High, Some("high")),
++                (crate::types::ModelThinkingLevel::Xhigh, None),
++                (crate::types::ModelThinkingLevel::Max, Some("max")),
++        ],
++        input: &[crate::types::ModelInput::Text],
++        cost: (2.0, 4.0, 0.3, 2.0),
++        context_window: 1_048_576,
++        max_tokens: 131_072,
++        featured: None,
++        headers: &[],
++compat: Some(RawCompat {
++            supports_store: Some(false),
++            supports_developer_role: Some(false),
++            supports_reasoning_effort: Some(true),
++            max_tokens_field: Some(crate::types::MaxTokensField::MaxTokens),
++            requires_reasoning_content_on_assistant_messages: None,
++            thinking_format: None,
++            zai_tool_stream: None,
++            send_session_affinity_headers: None,
++            supports_strict_mode: Some(false),
++        }),
++    },
++    RawModel {
++        provider: "silkcompute",
++        id: "glm-5.3-flash-uncensored",
++        name: "GLM-5.3 Flash Uncensored",
++        api: "openai-completions",
++        base_url: "https://api.silkcompute.com/v1",
++        reasoning: true,
++        thinking_levels: &[
++                (crate::types::ModelThinkingLevel::Off, Some("none")),
++                (crate::types::ModelThinkingLevel::Minimal, None),
++                (crate::types::ModelThinkingLevel::Low, Some("low")),
++                (crate::types::ModelThinkingLevel::Medium, None),
++                (crate::types::ModelThinkingLevel::High, Some("high")),
++                (crate::types::ModelThinkingLevel::Xhigh, None),
++                (crate::types::ModelThinkingLevel::Max, Some("max")),
++        ],
++        input: &[crate::types::ModelInput::Text, crate::types::ModelInput::Image],
++        cost: (0.24, 1.0, 0.06, 0.24),
++        context_window: 1_048_576,
++        max_tokens: 131_072,
++        featured: None,
++        headers: &[],
++compat: Some(RawCompat {
++            supports_store: Some(false),
++            supports_developer_role: Some(false),
++            supports_reasoning_effort: Some(true),
++            max_tokens_field: Some(crate::types::MaxTokensField::MaxTokens),
++            requires_reasoning_content_on_assistant_messages: None,
++            thinking_format: None,
++            zai_tool_stream: None,
++            send_session_affinity_headers: None,
++            supports_strict_mode: Some(false),
++        }),
++    },
++    RawModel {
++        provider: "silkcompute",
++        id: "hy4-uncensored",
++        name: "Hy4 Uncensored",
++        api: "openai-completions",
++        base_url: "https://api.silkcompute.com/v1",
++        reasoning: true,
++        thinking_levels: &[
++                (crate::types::ModelThinkingLevel::Off, Some("none")),
++                (crate::types::ModelThinkingLevel::Minimal, None),
++                (crate::types::ModelThinkingLevel::Low, Some("low")),
++                (crate::types::ModelThinkingLevel::Medium, None),
++                (crate::types::ModelThinkingLevel::High, Some("high")),
++                (crate::types::ModelThinkingLevel::Xhigh, None),
++                (crate::types::ModelThinkingLevel::Max, Some("max")),
++        ],
++        input: &[crate::types::ModelInput::Text, crate::types::ModelInput::Image],
++        cost: (1.6, 3.2, 0.3, 1.6),
++        context_window: 1_048_576,
++        max_tokens: 65_536,
++        featured: None,
++        headers: &[],
++compat: Some(RawCompat {
++            supports_store: Some(false),
++            supports_developer_role: Some(false),
++            supports_reasoning_effort: Some(true),
++            max_tokens_field: Some(crate::types::MaxTokensField::MaxTokens),
++            requires_reasoning_content_on_assistant_messages: None,
++            thinking_format: None,
++            zai_tool_stream: None,
++            send_session_affinity_headers: None,
++            supports_strict_mode: Some(false),
++        }),
++    },
+     RawModel {
+         provider: "vercel-ai-gateway",
+         id: "alibaba/qwen-3-14b",
+@@ -4584,16 +4759,16 @@ mod tests {
+         let providers = get_providers();
+         assert_eq!(
+             providers.len(),
+-            34,
+-            "the TS fallback providers + Audn + OrcaRouter"
++            35,
++            "the TS fallback providers + Audn + OrcaRouter + SilkCompute"
+         );
+         let total: usize = providers
+             .iter()
+             .map(|provider| get_models(provider).len())
+             .sum();
+         assert_eq!(
+-            total, 155,
+-            "the TS fallback models + Audn's + OrcaRouter's + Claude Fable 5.2"
++            total, 160,
++            "the TS fallback models + Audn's + OrcaRouter's + SilkCompute's + Claude Fable 5.2"
+         );
+         assert_eq!(
+             get_models("prime-inference").len(),
+@@ -4617,8 +4792,8 @@ mod tests {
+         }
+         assert_eq!(
+             tuples.len(),
+-            45,
+-            "42 public transport tuples + Audn + OrcaRouter + Prime Inference"
++            46,
++            "42 public transport tuples + Audn + OrcaRouter + SilkCompute + Prime Inference"
+         );
+     }
+ 
+@@ -4691,6 +4866,83 @@ mod tests {
+         assert_eq!(compat.max_tokens_field, Some(MaxTokensField::MaxTokens));
+     }
+ 
++    #[test]
++    fn silkcompute_declares_off_the_documented_efforts_and_accepted_request_shape() {
++        use crate::types::ModelInput::{Image, Text};
++        use crate::types::ModelThinkingLevel::{High, Low, Max, Medium, Minimal, Off, Xhigh};
++
++        let expected = [
++            (
++                "kimi-k3.1-pro-uncensored",
++                vec![Text, Image],
++                131_072,
++                (5.0, 15.0, 0.5),
++            ),
++            (
++                "deepseek-v4.1-flash-1017-uncensored",
++                vec![Text, Image],
++                131_072,
++                (0.26, 0.9, 0.06),
++            ),
++            ("glm-5.3-uncensored", vec![Text], 131_072, (2.0, 4.0, 0.3)),
++            (
++                "glm-5.3-flash-uncensored",
++                vec![Text, Image],
++                131_072,
++                (0.24, 1.0, 0.06),
++            ),
++            ("hy4-uncensored", vec![Text, Image], 65_536, (1.6, 3.2, 0.3)),
++        ];
++        assert_eq!(get_models("silkcompute").len(), expected.len());
++        for (id, input, max_tokens, (input_price, output_price, cache_read_price)) in expected {
++            let model = get_model("silkcompute", id).expect("compiled");
++            assert_eq!(
++                crate::models::get_supported_thinking_levels(model),
++                vec![Off, Low, High, Max],
++                "{id}"
++            );
++            assert_eq!(
++                model
++                    .thinking_level_map
++                    .as_ref()
++                    .and_then(|map| map.get(&Off)),
++                Some(&Some("none".to_string())),
++                "the app lists the levels the map names, so Off needs its wire value"
++            );
++            assert_eq!(crate::models::clamp_thinking_level(model, Minimal), Low);
++            assert_eq!(crate::models::clamp_thinking_level(model, Medium), High);
++            assert_eq!(crate::models::clamp_thinking_level(model, Xhigh), Max);
++            assert_eq!(model.base_url, "https://api.silkcompute.com/v1");
++            assert_eq!(model.input, input, "{id}");
++            assert_eq!(model.context_window, 1_048_576);
++            assert_eq!(model.max_tokens, max_tokens, "{id}");
++            assert!(
++                (model.cost.input.as_f64() - input_price).abs() < 1e-9,
++                "{id}"
++            );
++            assert!(
++                (model.cost.output.as_f64() - output_price).abs() < 1e-9,
++                "{id}"
++            );
++            assert!(
++                (model.cost.cache_read.as_f64() - cache_read_price).abs() < 1e-9,
++                "{id}"
++            );
++            assert!(
++                (model.cost.cache_write.as_f64() - input_price).abs() < 1e-9,
++                "{id}"
++            );
++            let Some(crate::types::CompatKind::OpenAiCompletions(compat)) = model.compat_kind()
++            else {
++                panic!("silkcompute carries a compat object");
++            };
++            assert_eq!(compat.supports_store, Some(false));
++            assert_eq!(compat.supports_developer_role, Some(false));
++            assert_eq!(compat.supports_reasoning_effort, Some(true));
++            assert_eq!(compat.max_tokens_field, Some(MaxTokensField::MaxTokens));
++        }
++    }
++
+     /// The compiled Prime Inference section is the conservative fallback (TS #2519): it declares no
+     /// reasoning controls — the live catalog's `supported_parameters` rebuild them at runtime — and
+     /// it never carries the zai thinking format (TS #2459: Prime Inference rejects
+diff --git a/crates/pa-cli/src/provider_login.rs b/crates/pa-cli/src/provider_login.rs
+index 39479ee..5970f31 100644
+--- a/crates/pa-cli/src/provider_login.rs
++++ b/crates/pa-cli/src/provider_login.rs
+@@ -51,6 +51,7 @@ const BUILT_IN_PROVIDER_DISPLAY_NAMES: &[(&str, &str)] = &[
+     ("orcarouter", "OrcaRouter"),
+     ("prime-agent-traces", "Prime Agent Traces"),
+     ("prime-inference", "Prime Inference"),
++    ("silkcompute", "SilkCompute"),
+     ("vercel-ai-gateway", "Vercel AI Gateway"),
+     ("xai", "xAI (Grok)"),
+     ("zai", "ZAI"),
+diff --git a/crates/pa-core/src/models/resolver.rs b/crates/pa-core/src/models/resolver.rs
+index b0b8e2e..d311b91 100644
+--- a/crates/pa-core/src/models/resolver.rs
++++ b/crates/pa-core/src/models/resolver.rs
+@@ -19,6 +19,7 @@ pub fn default_model_per_provider(provider: &str) -> Option<&'static str> {
+         "google" | "google-vertex" => "gemini-3.1-pro-preview",
+         "openrouter" => "moonshotai/kimi-k2.6",
+         "orcarouter" => "orca/orcacyber-k3.1-pro",
++        "silkcompute" => "kimi-k3.1-pro-uncensored",
+         "vercel-ai-gateway" => "zai/glm-5.1",
+         "xai" => "grok-4.20-0309-reasoning",
+         "groq" => "openai/gpt-oss-120b",
+diff --git a/crates/pa-models/src/chain.rs b/crates/pa-models/src/chain.rs
+index 8a51ea4..b4bb8df 100644
+--- a/crates/pa-models/src/chain.rs
++++ b/crates/pa-models/src/chain.rs
+@@ -355,20 +355,22 @@ mod tests {
+         let models = catalog.resolve(None);
+         assert_eq!(
+             models.len(),
+-            114,
++            119,
+             "1 pinned bundled entry + 110 offline prime-inference entries + Audn's + OrcaRouter's \
+-             + Claude Fable 5.2"
++             + SilkCompute's + Claude Fable 5.2"
+         );
+         assert!(models.iter().any(|m| m.id == "bundled-a"));
+     }
+ 
+-    /// The compiled `audn`, `orcarouter` and Claude Fable 5.2 entries; each must appear exactly once.
++    /// The compiled `audn`, `orcarouter`, `silkcompute` and Claude Fable 5.2 entries; each must
++    /// appear exactly once.
+     fn compiled_only_entries(models: &[Model]) -> usize {
+         models
+             .iter()
+             .filter(|model| {
+                 (model.provider == "audn" && model.id == "necromicon")
+                     || (model.provider == "orcarouter" && model.id == "orca/orcacyber-k3.1-pro")
++                    || model.provider == "silkcompute"
+                     || (model.provider == "anthropic" && model.id == "claude-fable-5-2")
+             })
+             .count()
+@@ -381,7 +383,7 @@ mod tests {
+             ModelCatalog::with_bundled_dir(Some(empty.path().into()), Some(empty.path().into()));
+         assert_eq!(
+             compiled_only_entries(&compiled.resolve(None)),
+-            3,
++            8,
+             "compiled"
+         );
+ 
+@@ -393,7 +395,7 @@ mod tests {
+         .unwrap();
+         let bundled =
+             ModelCatalog::with_bundled_dir(Some(dir.path().into()), Some(dir.path().into()));
+-        assert_eq!(compiled_only_entries(&bundled.resolve(None)), 3, "bundled");
++        assert_eq!(compiled_only_entries(&bundled.resolve(None)), 8, "bundled");
+ 
+         // This layer already lists Claude Fable 5.2, so its own entry stays and no second one joins.
+         let snapshot = json!({
+@@ -413,7 +415,7 @@ mod tests {
+             ModelCatalog::with_bundled_dir(Some(dir.path().into()), Some(dir.path().into()));
+         let models = cached.resolve(None);
+         assert!(models.iter().any(|m| m.id == "cached-a"), "cache wins");
+-        assert_eq!(compiled_only_entries(&models), 3, "cached");
++        assert_eq!(compiled_only_entries(&models), 8, "cached");
+         let fable = models
+             .iter()
+             .find(|m| m.provider == "anthropic" && m.id == "claude-fable-5-2")
+diff --git a/crates/pa-models/src/transports.rs b/crates/pa-models/src/transports.rs
+index 213e7e0..3008603 100644
+--- a/crates/pa-models/src/transports.rs
++++ b/crates/pa-models/src/transports.rs
+@@ -50,7 +50,7 @@ pub fn compiled_transport_tuples() -> Vec<(&'static str, &'static str, &'static
+ 
+ /// Compiled providers no catalog layer carries, so resolution must add them to whichever one it
+ /// used: the remote catalog and the bundled snapshot would otherwise drop them.
+-const COMPILED_ONLY_PROVIDERS: &[&str] = &["audn", "orcarouter"];
++const COMPILED_ONLY_PROVIDERS: &[&str] = &["audn", "orcarouter", "silkcompute"];
+ 
+ /// Compiled `(provider, id)` models newer than every catalog layer, joined the same way until a
+ /// layer lists them, whose own entry then wins.
+diff --git a/crates/pa-types/src/ai/mod.rs b/crates/pa-types/src/ai/mod.rs
+index 01885aa..5e6daf8 100644
+--- a/crates/pa-types/src/ai/mod.rs
++++ b/crates/pa-types/src/ai/mod.rs
+@@ -63,6 +63,7 @@ pub enum KnownProvider {
+     Openrouter,
+     Orcarouter,
+     Audn,
++    Silkcompute,
+     #[serde(rename = "vercel-ai-gateway")]
+     VercelAiGateway,
+     Zai,

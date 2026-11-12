@@ -1,0 +1,289 @@
+diff --git a/packages/ai/src/env-api-keys.ts b/packages/ai/src/env-api-keys.ts
+index 6c5b874..0ec7b84 100644
+--- a/packages/ai/src/env-api-keys.ts
++++ b/packages/ai/src/env-api-keys.ts
+@@ -90,6 +90,7 @@ function getApiKeyEnvVars(provider: string): readonly string[] | undefined {
+ 		"qwen-token-plan-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
+ 		"qwen-token-plan-individual": "QWEN_TOKEN_PLAN_API_KEY",
+ 		"qwen-token-plan-individual-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
++		silkcompute: "SILK_API_KEY",
+ 		openai: "OPENAI_API_KEY",
+ 		azure: "AZURE_OPENAI_API_KEY",
+ 		nvidia: "NVIDIA_API_KEY",
+diff --git a/packages/ai/src/providers/all.ts b/packages/ai/src/providers/all.ts
+index 9b7b398..c1f623a 100644
+--- a/packages/ai/src/providers/all.ts
++++ b/packages/ai/src/providers/all.ts
+@@ -42,6 +42,7 @@ import { qwenTokenPlanCnProvider } from "./qwen-token-plan-cn.ts";
+ import { qwenTokenPlanIndividualProvider } from "./qwen-token-plan-individual.ts";
+ import { qwenTokenPlanIndividualCnProvider } from "./qwen-token-plan-individual-cn.ts";
+ import { radiusProvider } from "./radius.ts";
++import { SILKCOMPUTE_MODELS, silkComputeProvider } from "./silkcompute.ts";
+ import { togetherProvider } from "./together.ts";
+ import { typesafeProvider } from "./typesafe.ts";
+ import { vercelAIGatewayProvider } from "./vercel-ai-gateway.ts";
+@@ -62,9 +63,16 @@ const MODELS = {
+ 	abliteration: ABLITERATION_MODELS,
+ 	audn: AUDN_MODELS,
+ 	orcarouter: ORCAROUTER_MODELS,
++	silkcompute: SILKCOMPUTE_MODELS,
++};
++const IMAGE_MODELS = { ...GENERATED_IMAGE_MODELS, abliteration: {}, audn: {}, orcarouter: {}, silkcompute: {} };
++const CLASSIFIER_MODELS = {
++	...GENERATED_CLASSIFIER_MODELS,
++	abliteration: {},
++	audn: {},
++	orcarouter: {},
++	silkcompute: {},
+ };
+-const IMAGE_MODELS = { ...GENERATED_IMAGE_MODELS, abliteration: {}, audn: {}, orcarouter: {} };
+-const CLASSIFIER_MODELS = { ...GENERATED_CLASSIFIER_MODELS, abliteration: {}, audn: {}, orcarouter: {} };
+ 
+ /** Providers present in the generated catalog. `KnownProvider` additionally
+  * includes purely dynamic providers (e.g. "radius") that have no static
+@@ -190,6 +198,7 @@ export function builtinProviders(): Provider[] {
+ 		qwenTokenPlanIndividualProvider(),
+ 		qwenTokenPlanIndividualCnProvider(),
+ 		radiusProvider(),
++		silkComputeProvider(),
+ 		togetherProvider(),
+ 		typesafeProvider(),
+ 		vercelAIGatewayProvider(),
+diff --git a/packages/ai/src/providers/silkcompute.ts b/packages/ai/src/providers/silkcompute.ts
+new file mode 100644
+index 0000000..087f549
+--- /dev/null
++++ b/packages/ai/src/providers/silkcompute.ts
+@@ -0,0 +1,97 @@
++import { openAICompletionsApi } from "../api/openai-completions.lazy.ts";
++import { envApiKeyAuth } from "../auth/helpers.ts";
++import { createProvider, type Provider } from "../models.ts";
++import type { Model, ModelInputModality } from "../types.ts";
++
++const PROVIDER_ID = "silkcompute";
++const BASE_URL = "https://api.silkcompute.com/v1";
++// The conservative profile every vision model shares; SilkCompute documents only the request cap.
++const IMAGE_RESIZE = { maxWidth: 2000, maxHeight: 2000, maxBytes: 4.5 * 1024 * 1024, jpegQuality: 80 };
++const MAX_REQUEST_BYTES = 64 * 1024 * 1024;
++
++/**
++ * One of SilkCompute's abliterated models. Limits come from GET /v1/models, USD per million tokens from
++ * silkcompute.com/models. No cache write price is listed and `prompt_tokens` counts written tokens, so writes
++ * cost the input price.
++ */
++function silkComputeModel(
++	id: string,
++	name: string,
++	input: ModelInputModality[],
++	maxTokens: number,
++	cost: { input: number; output: number; cacheRead: number },
++): Model<"openai-completions"> {
++	return {
++		id,
++		name,
++		provider: PROVIDER_ID,
++		baseUrl: BASE_URL,
++		api: "openai-completions",
++		reasoning: true,
++		// SilkCompute documents none, low, high and max, and answers minimal, medium and xhigh as their neighbours,
++		// so those levels would repeat one. `none` stops every model from reasoning.
++		thinkingLevelMap: { off: "none", minimal: null, low: "low", medium: null, high: "high", xhigh: null, max: "max" },
++		input,
++		inputLimits: {
++			maxRequestBytes: MAX_REQUEST_BYTES,
++			...(input.includes("image") ? { images: { resize: IMAGE_RESIZE } } : {}),
++		},
++		contextWindow: 1048576,
++		maxTokens,
++		cost: { ...cost, cacheWrite: cost.input },
++		compat: {
++			supportsStore: false,
++			supportsDeveloperRole: false,
++			supportsReasoningEffort: true,
++			maxTokensField: "max_tokens",
++			supportsStrictMode: false,
++			supportsLongCacheRetention: false,
++		},
++	};
++}
++
++export const SILKCOMPUTE_MODELS = {
++	"kimi-k3.1-pro-uncensored": silkComputeModel(
++		"kimi-k3.1-pro-uncensored",
++		"Kimi K3.1 Pro Uncensored",
++		["text", "image"],
++		131072,
++		{ input: 5, output: 15, cacheRead: 0.5 },
++	),
++	"deepseek-v4.1-flash-1017-uncensored": silkComputeModel(
++		"deepseek-v4.1-flash-1017-uncensored",
++		"DeepSeek V4.1 Flash 1017 Uncensored",
++		["text", "image"],
++		131072,
++		{ input: 0.26, output: 0.9, cacheRead: 0.06 },
++	),
++	// The API takes images but GLM-5.3 answers that it cannot see them, so only text is declared.
++	"glm-5.3-uncensored": silkComputeModel("glm-5.3-uncensored", "GLM-5.3 Uncensored", ["text"], 131072, {
++		input: 2,
++		output: 4,
++		cacheRead: 0.3,
++	}),
++	"glm-5.3-flash-uncensored": silkComputeModel(
++		"glm-5.3-flash-uncensored",
++		"GLM-5.3 Flash Uncensored",
++		["text", "image"],
++		131072,
++		{ input: 0.24, output: 1, cacheRead: 0.06 },
++	),
++	"hy4-uncensored": silkComputeModel("hy4-uncensored", "Hy4 Uncensored", ["text", "image"], 65536, {
++		input: 1.6,
++		output: 3.2,
++		cacheRead: 0.3,
++	}),
++} satisfies Record<string, Model<"openai-completions">>;
++
++export function silkComputeProvider(): Provider<"openai-completions"> {
++	return createProvider({
++		id: PROVIDER_ID,
++		name: "SilkCompute",
++		baseUrl: BASE_URL,
++		auth: { apiKey: envApiKeyAuth("SilkCompute API key", ["SILK_API_KEY"]) },
++		models: Object.values(SILKCOMPUTE_MODELS),
++		api: openAICompletionsApi(),
++	});
++}
+diff --git a/packages/ai/src/types.ts b/packages/ai/src/types.ts
+index cabe19d..0733e6c 100644
+--- a/packages/ai/src/types.ts
++++ b/packages/ai/src/types.ts
+@@ -91,6 +91,7 @@ export type KnownProvider =
+ 	| "abliteration"
+ 	| "audn"
+ 	| "orcarouter"
++	| "silkcompute"
+ 	| "amazon-bedrock"
+ 	| "ant-ling"
+ 	| "anthropic"
+diff --git a/packages/ai/test/silkcompute.test.ts b/packages/ai/test/silkcompute.test.ts
+new file mode 100644
+index 0000000..d5766e2
+--- /dev/null
++++ b/packages/ai/test/silkcompute.test.ts
+@@ -0,0 +1,105 @@
++import { describe, expect, it } from "vitest";
++import { findEnvKeys, getEnvApiKey } from "../src/env-api-keys.ts";
++import { clampThinkingLevel, getSupportedThinkingLevels } from "../src/models.ts";
++import { builtinModels, getBuiltinModel, getBuiltinModels, getBuiltinProviders } from "../src/providers/all.ts";
++
++const MODEL_IDS = [
++	"kimi-k3.1-pro-uncensored",
++	"deepseek-v4.1-flash-1017-uncensored",
++	"glm-5.3-uncensored",
++	"glm-5.3-flash-uncensored",
++	"hy4-uncensored",
++] as const;
++
++describe("SilkCompute provider", () => {
++	it("offers native API-key login and shares the static and runtime catalog", async () => {
++		const models = builtinModels({
++			authContext: { env: async () => undefined, fileExists: async () => false },
++		});
++		const provider = models.getProviders().find((entry) => entry.id === "silkcompute");
++		expect(provider?.name).toBe("SilkCompute");
++		expect(provider?.auth.oauth).toBeUndefined();
++		expect(await models.getAvailable("silkcompute")).toEqual([]);
++		const credential = await models.login("silkcompute", "api_key", {
++			prompt: async () => "test-silkcompute-key",
++			notify: () => {},
++		});
++		expect(credential).toEqual({ type: "api_key", key: "test-silkcompute-key" });
++		expect(getBuiltinProviders()).toContain("silkcompute");
++		expect(models.getModels("silkcompute")).toEqual(getBuiltinModels("silkcompute"));
++		expect((await models.getAvailable("silkcompute")).map((model) => model.id)).toEqual([...MODEL_IDS]);
++		await models.logout("silkcompute");
++		expect(await models.getAvailable("silkcompute")).toEqual([]);
++	});
++
++	it("resolves SILK_API_KEY without another provider's credentials", async () => {
++		const environment = { SILK_API_KEY: "test-silkcompute-key", ORCAROUTER_API_KEY: "other-key" };
++		expect(findEnvKeys("silkcompute", environment)).toEqual(["SILK_API_KEY"]);
++		expect(getEnvApiKey("silkcompute", environment)).toBe(environment.SILK_API_KEY);
++		const models = builtinModels({
++			authContext: {
++				env: async (name) => environment[name as keyof typeof environment],
++				fileExists: async () => false,
++			},
++		});
++		expect((await models.getAuth("silkcompute"))?.auth.apiKey).toBe(environment.SILK_API_KEY);
++	});
++
++	it("offers Off and the documented efforts and moves a saved in-between level up", () => {
++		for (const id of MODEL_IDS) {
++			const model = getBuiltinModel("silkcompute", id);
++			expect(getSupportedThinkingLevels(model)).toEqual(["off", "low", "high", "max"]);
++			expect(model.thinkingLevelMap?.off).toBe("none");
++			expect(clampThinkingLevel(model, "minimal")).toBe("low");
++			expect(clampThinkingLevel(model, "medium")).toBe("high");
++			expect(clampThinkingLevel(model, "xhigh")).toBe("max");
++		}
++	});
++
++	it("declares the live limits, inputs, prices and the request shape the API accepts", () => {
++		const expected: Record<(typeof MODEL_IDS)[number], object> = {
++			"kimi-k3.1-pro-uncensored": {
++				input: ["text", "image"],
++				maxTokens: 131072,
++				cost: { input: 5, output: 15, cacheRead: 0.5, cacheWrite: 5 },
++			},
++			"deepseek-v4.1-flash-1017-uncensored": {
++				input: ["text", "image"],
++				maxTokens: 131072,
++				cost: { input: 0.26, output: 0.9, cacheRead: 0.06, cacheWrite: 0.26 },
++			},
++			"glm-5.3-uncensored": {
++				input: ["text"],
++				maxTokens: 131072,
++				cost: { input: 2, output: 4, cacheRead: 0.3, cacheWrite: 2 },
++			},
++			"glm-5.3-flash-uncensored": {
++				input: ["text", "image"],
++				maxTokens: 131072,
++				cost: { input: 0.24, output: 1, cacheRead: 0.06, cacheWrite: 0.24 },
++			},
++			"hy4-uncensored": {
++				input: ["text", "image"],
++				maxTokens: 65536,
++				cost: { input: 1.6, output: 3.2, cacheRead: 0.3, cacheWrite: 1.6 },
++			},
++		};
++		const resize = { maxWidth: 2000, maxHeight: 2000, maxBytes: 4.5 * 1024 * 1024, jpegQuality: 80 };
++		for (const id of MODEL_IDS) {
++			const model = getBuiltinModel("silkcompute", id);
++			expect(model.inputLimits).toEqual(
++				model.input.includes("image")
++					? { maxRequestBytes: 64 * 1024 * 1024, images: { resize } }
++					: { maxRequestBytes: 64 * 1024 * 1024 },
++			);
++			expect(model).toMatchObject({
++				baseUrl: "https://api.silkcompute.com/v1",
++				api: "openai-completions",
++				reasoning: true,
++				contextWindow: 1048576,
++				...expected[id],
++				compat: { supportsDeveloperRole: false, supportsStore: false, maxTokensField: "max_tokens" },
++			});
++		}
++	});
++});
+diff --git a/packages/coding-agent/src/core/model-resolver.ts b/packages/coding-agent/src/core/model-resolver.ts
+index 762260e..60003a4 100644
+--- a/packages/coding-agent/src/core/model-resolver.ts
++++ b/packages/coding-agent/src/core/model-resolver.ts
+@@ -63,6 +63,7 @@ export const defaultModelPerProvider: Partial<Record<KnownProvider, string>> = {
+ 	abliteration: "abliterated-model",
+ 	orcarouter: "orca/orcacyber-k3.1-pro",
+ 	audn: "necromicon",
++	silkcompute: "kimi-k3.1-pro-uncensored",
+ };
+ 
+ export interface ScopedModel {

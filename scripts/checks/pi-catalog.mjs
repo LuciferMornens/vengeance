@@ -78,6 +78,30 @@ assert.deepEqual(audn.cost, { input: 3, output: 5, cacheRead: 0.3, cacheWrite: 3
 assert.deepEqual(models.getSupportedThinkingLevels(audn), ['low', 'high', 'max'])
 assert.equal(audn.compat.supportsDeveloperRole, false)
 
+const silkcompute = {
+  'kimi-k3.1-pro-uncensored': [['text', 'image'], 131_072, [5, 15, 0.5]],
+  'deepseek-v4.1-flash-1017-uncensored': [['text', 'image'], 131_072, [0.26, 0.9, 0.06]],
+  'glm-5.3-uncensored': [['text'], 131_072, [2, 4, 0.3]],
+  'glm-5.3-flash-uncensored': [['text', 'image'], 131_072, [0.24, 1, 0.06]],
+  'hy4-uncensored': [['text', 'image'], 65_536, [1.6, 3.2, 0.3]]
+}
+assert.deepEqual(
+  catalog.getBuiltinModels('silkcompute').map((model) => model.id),
+  Object.keys(silkcompute)
+)
+for (const [id, expected] of Object.entries(silkcompute)) {
+  const [input, maxTokens, [inputPrice, output, cacheRead]] = expected
+  const model = catalog.getBuiltinModel('silkcompute', id)
+  assert.equal(model.reasoning, true)
+  assert.deepEqual(model.input, input)
+  assert.equal(model.contextWindow, 1_048_576)
+  assert.equal(model.maxTokens, maxTokens)
+  assert.deepEqual(model.cost, { input: inputPrice, output, cacheRead, cacheWrite: inputPrice })
+  assert.deepEqual(models.getSupportedThinkingLevels(model), ['off', 'low', 'high', 'max'])
+  assert.equal(model.thinkingLevelMap.off, 'none')
+  assert.equal(model.compat.supportsDeveloperRole, false)
+}
+
 console.log(
-  '✓ native catalog: Haiku capabilities, pricing and Off thinking; Sonnet cache price; Fable 5.2; OrcaRouter; Audn'
+  '✓ native catalog: Haiku capabilities, pricing and Off thinking; Sonnet cache price; Fable 5.2; OrcaRouter; Audn; SilkCompute'
 )

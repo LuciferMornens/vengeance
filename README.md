@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/LuciferMornens/vengeance/releases/latest"><img alt="Version 0.4.1" src="https://img.shields.io/badge/version-0.4.1-FF4D3D?style=flat-square"></a>
+  <a href="https://github.com/LuciferMornens/vengeance/releases/latest"><img alt="Version 0.4.2" src="https://img.shields.io/badge/version-0.4.2-FF4D3D?style=flat-square"></a>
   <a href="https://github.com/LuciferMornens/vengeance/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/LuciferMornens/vengeance/actions/workflows/ci.yml/badge.svg"></a>
   <a href="#download"><img alt="Windows x64" src="https://img.shields.io/badge/Windows-x64-0078D4?style=flat-square"></a>
   <a href="#download"><img alt="macOS arm64 and x64" src="https://img.shields.io/badge/macOS-arm64%20%7C%20x64-000000?style=flat-square"></a>
@@ -193,6 +193,12 @@ either one separately.
   text only: Audn's API accepts images, but the model doesn't see them. Audn describes it as Kimi
   K3.1 Pro with its own abliteration, while its model list names a different base, so Vengeance
   shows Audn's own name.
+- **SilkCompute (both engines).** SilkCompute's five abliterated models are included: Kimi K3.1 Pro
+  Uncensored (`kimi-k3.1-pro-uncensored`, the default), DeepSeek V4.1 Flash 1017 Uncensored, GLM-5.3
+  Uncensored, GLM-5.3 Flash Uncensored and Hy4 Uncensored. Each has a 1M-token context, tools and
+  Off, Low, High and Max reasoning effort. Connect in **Settings → Providers & accounts →
+  SilkCompute**, or supply `SILK_API_KEY` in the launch environment. All but GLM-5.3 read images.
+  Hy4 reasons at length at every effort and has a 65,536-token output limit, so give it room.
 
 <p align="center">
   <a href="docs/screenshots/settings-models.png"><img src="docs/screenshots/settings-models.png" alt="Settings, Models: default model, default thinking level, response speed for new sessions and per-model thinking levels, with the settings navigation alongside" width="880"></a>
@@ -231,7 +237,7 @@ command palette and inspector are shared.
 
 |            | Engine                                                                                      | Engine 2                                                                                                                                               |
 | ---------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Built from | [pi](https://github.com/earendil-works/pi) `v1.5.1`, build `1.5.1+vengeance.1`              | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) `v0.10.2`, build `0.10.2+vengeance.3`                                                  |
+| Built from | [pi](https://github.com/earendil-works/pi) `v1.5.1`, build `1.5.1+vengeance.2`              | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) `v0.10.2`, build `0.10.2+vengeance.4`                                                  |
 | Runs on    | Electron's Node, so no separate Node install                                                | A native executable that includes its Python kernel package, skills and catalogs                                                                       |
 | Sessions   | One process per open session                                                                | Saved resident sessions that survive closing a tab and are listed under **Background sessions**                                                        |
 | Highlights | Extension gallery, extension dialogs and widgets, project-trust dialog, Abliteration models | Native subagents, goals, schedules (heartbeat and cron), side questions, trace inspection and export, native Fast and Ultrafast OpenAI speed transport |
@@ -571,8 +577,8 @@ The app version is defined in [package.json](package.json).
 
 ### Release notes
 
-**Latest: [Vengeance 0.4.1](docs/RELEASE-0.4.1.md)** adds Claude Fable 5.2 to both engines, including
-through a Claude subscription, and moves the Engine to pi 1.5.1. Published packages are on the
+**Latest: [Vengeance 0.4.2](docs/RELEASE-0.4.2.md)** adds SilkCompute's five abliterated models to both
+engines. Published packages are on the
 [GitHub release](https://github.com/LuciferMornens/vengeance/releases/latest).
 
 <details>
@@ -583,6 +589,7 @@ They are evidence, not current installation status or promises that local genera
 exist. Use the lockfile and current guides for maintenance instructions. Reports before 0.3.0 cover
 local Windows x64 builds only.
 
+- [Release 0.4.1](docs/RELEASE-0.4.1.md): Claude Fable 5.2 on both engines and the Engine on pi 1.5.1.
 - [Release 0.4.0](docs/RELEASE-0.4.0.md): Audn on both engines and Engine 2's image refusals shown.
 - [Release 0.3.9](docs/RELEASE-0.3.9.md): OrcaRouter and both engines on their newest stable
   releases.

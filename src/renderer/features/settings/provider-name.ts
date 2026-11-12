@@ -11,6 +11,7 @@ const PROVIDER_WORDS: Record<string, string> = {
   openai: 'OpenAI',
   openrouter: 'OpenRouter',
   orcarouter: 'OrcaRouter',
+  silkcompute: 'SilkCompute',
   github: 'GitHub',
   deepseek: 'DeepSeek'
 }

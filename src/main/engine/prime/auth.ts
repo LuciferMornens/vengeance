@@ -51,6 +51,7 @@ const PROVIDER_ENVIRONMENT: Record<string, string[]> = {
   xai: ['XAI_API_KEY'],
   openrouter: ['OPENROUTER_API_KEY'],
   orcarouter: ['ORCAROUTER_API_KEY'],
+  silkcompute: ['SILK_API_KEY'],
   'vercel-ai-gateway': ['AI_GATEWAY_API_KEY'],
   zai: ['ZAI_API_KEY'],
   mistral: ['MISTRAL_API_KEY'],
@@ -85,6 +86,7 @@ const PROVIDER_NAMES: Record<string, string> = {
   'google-vertex': 'Google Vertex AI',
   xai: 'xAI',
   orcarouter: 'OrcaRouter',
+  silkcompute: 'SilkCompute',
   serper: 'Serper web search'
 }
 

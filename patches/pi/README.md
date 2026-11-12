@@ -1,14 +1,14 @@
 # Vengeance's pi build
 
 Vengeance builds stable `v1.5.1`, commit `dd30101cfc5b0609411dd80b6f93adbc14db14cf`,
-as `1.5.1+vengeance.1`. See [UPSTREAM.md](../../UPSTREAM.md) and
+as `1.5.1+vengeance.2`. See [UPSTREAM.md](../../UPSTREAM.md) and
 [engines.lock.json](../../engines.lock.json) for the source and maintenance contract.
 
 The active series includes distribution policy (0001), extension runtime version identity (0002),
 native runtime qualification (0003), Windows native test fixtures (0005), Abliteration (0006),
 native session sharing (0007), POSIX shell test paths (0008), MCP host state (0009), OAuth
-refresh rejection (0010), the per-request image limit (0011), OrcaRouter (0012), Audn (0013) and
-Claude Fable 5.2 (0014).
+refresh rejection (0010), the per-request image limit (0011), OrcaRouter (0012), Audn (0013),
+Claude Fable 5.2 (0014) and SilkCompute (0015).
 Patch `0005` normalizes the external-editor fixture's temporary path on Windows. Patch `0006`
 also supplies Abliteration's native default model, required by the 1.3 provider-selection contract.
 Rebasing onto 1.4.0 needed two reviewed resolutions: the chord package-boundary test, where 1.4.0's
@@ -48,6 +48,8 @@ thirteen patch hashes. Native runs set `QA_TMP_ROOT` outside the repository and 
 junction to the staged checkout. From an app worktree the default temporary root lies inside the main
 checkout, where `resource-loader.test.ts` finds its `AGENTS.md`, and the long source path wraps a width-120
 render in `tool-execution-component.test.ts`; those eleven tests fail that way and pass this way.
+`1.5.1+vengeance.2` adds `0015`. On 12 November 2026 `check` passed on the patched checkout and the `ai`
+suite passed 1924 tests (893 skipped), the four new SilkCompute cases included.
 
 ```text
 node scripts/checks/pi-workspace.mjs check
@@ -227,3 +229,18 @@ upstream's Fable 5.2 case in `anthropic-mid-conversation-effort.test.ts` passes 
 from the OpenRouter assertion the patch drops (see the 1.5.1 rebase above); `scripts/checks/pi-catalog.mjs`
 checks the staged entry. Retire it when the base's pinned catalog lists Fable 5.2 and its identity is
 2.1.290 or newer.
+
+Patch `0015` adds SilkCompute's five abliterated models as a native provider with API-key login,
+`SILK_API_KEY` discovery and Kimi K3.1 Pro Uncensored as the default model: `kimi-k3.1-pro-uncensored`,
+`deepseek-v4.1-flash-1017-uncensored`, `glm-5.3-uncensored`, `glm-5.3-flash-uncensored` and
+`hy4-uncensored`. SilkCompute's standard models are not included. Limits come from
+`GET https://api.silkcompute.com/v1/models` and prices from silkcompute.com/models, which lists no cache
+write price, so writes cost the input price. The ladder is Off, Low, High and Max. Off sends `none`, which
+stopped every model from reasoning on 12 November 2026, and SilkCompute answers `minimal`, `medium` and
+`xhigh` as Low, High and Max, so a saved Minimal, Medium or Extra high moves to them. GLM-5.3 accepts
+images but answers that it cannot see them, so it is declared text-only; the other four carry the
+conservative resize profile every vision model shares. Each model records SilkCompute's 64 MiB request
+cap. Instructions stay in `system` and the output limit travels as
+`max_tokens`. The native `silkcompute.test.ts` qualifies login, environment discovery, the ladder and each
+model's limits, inputs and prices; `scripts/checks/pi-catalog.mjs` checks the staged entries. Retire it
+when upstream supplies qualified support.

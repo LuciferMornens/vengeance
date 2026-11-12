@@ -21,7 +21,7 @@
     "repository": "https://github.com/earendil-works/pi.git",
     "tag": "v1.5.1",
     "revision": "dd30101cfc5b0609411dd80b6f93adbc14db14cf",
-    "version": "1.5.1+vengeance.1",
+    "version": "1.5.1+vengeance.2",
     "patches": [
       "patches/pi/0001-vengeance-distribution.patch",
       "patches/pi/0002-preserve-extension-runtime-version.patch",
@@ -35,7 +35,8 @@
       "patches/pi/0011-image-request-limit.patch",
       "patches/pi/0012-orcarouter-provider.patch",
       "patches/pi/0013-audn-provider.patch",
-      "patches/pi/0014-claude-fable-5-2.patch"
+      "patches/pi/0014-claude-fable-5-2.patch",
+      "patches/pi/0015-silkcompute-provider.patch"
     ],
     "packageDir": "pi/node_modules/@earendil-works/pi-coding-agent",
     "entry": "pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
@@ -44,7 +45,7 @@
     "repository": "https://github.com/PrimeIntellect-ai/prime-agent.git",
     "tag": "v0.10.2",
     "revision": "ea9d9602ec0938d9e454e8963107cd85af1565c6",
-    "version": "0.10.2+vengeance.3",
+    "version": "0.10.2+vengeance.4",
     "patches": [
       "patches/prime-agent/0001-fix-cancel-provider-HTTP-streams-when-compaction-is-.patch",
       "patches/prime-agent/0002-fix-synchronize-persisted-user-shell-output-with-liv.patch",
@@ -68,7 +69,8 @@
       "patches/prime-agent/0024-mcp-live-status.patch",
       "patches/prime-agent/0025-orcarouter-provider.patch",
       "patches/prime-agent/0026-audn-provider.patch",
-      "patches/prime-agent/0027-claude-fable-5-2.patch"
+      "patches/prime-agent/0027-claude-fable-5-2.patch",
+      "patches/prime-agent/0028-silkcompute-provider.patch"
     ],
     "runtimeWheels": {
       "darwin-x64": {
