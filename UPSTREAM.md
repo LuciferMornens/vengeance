@@ -21,8 +21,8 @@ remain native operations. There is no automatic patch rebase or scheduled upstre
 
 `engines.lock.json` is the source of truth. Current stable bases are pi `v1.5.1` at
 `dd30101cfc5b0609411dd80b6f93adbc14db14cf` and Prime `v0.10.2` at
-`ea9d9602ec0938d9e454e8963107cd85af1565c6`. The builds identify as `1.5.1+vengeance.1` and
-`0.10.2+vengeance.3`. Never reuse a Vengeance build version for different shipped behavior.
+`ea9d9602ec0938d9e454e8963107cd85af1565c6`. The builds identify as `1.5.1+vengeance.2` and
+`0.10.2+vengeance.4`. Never reuse a Vengeance build version for different shipped behavior.
 
 The stable-release verification and patch decisions are recorded in
 [ENGINE-STABLE-AUDIT-2026-11-06.md](docs/ENGINE-STABLE-AUDIT-2026-11-06.md) (pi 1.5.0 and Prime
@@ -351,7 +351,7 @@ background activity stays out of the Dock. The main Vengeance app must remain a 
 Since 0.3.3, the macOS arm64/x64 and Linux arm64/x64 release runners then qualify the official
 same-platform 0.3.2 Engine 2 package (`0.10.0+vengeance.10`) against the final packaged candidate
 (`.12` in 0.3.3, `.13` in 0.3.4 to 0.3.6, `0.10.1+vengeance.1` in 0.3.7 and 0.3.8, `0.10.2+vengeance.1` in 0.3.9,
-`0.10.2+vengeance.2` in 0.4.0 and `0.10.2+vengeance.3` in 0.4.1).
+`0.10.2+vengeance.2` in 0.4.0, `0.10.2+vengeance.3` in 0.4.1 and `0.10.2+vengeance.4` in 0.4.2).
 `scripts/qa/engines/release-baseline.mjs` pins both the public release's `SHA256SUMS` and each archive's
 SHA-256, verifies the complete extracted native inventories and macOS app signature, and emits
 `release-baseline.json` plus `release-baseline-env.json`. It never launches the production app.
@@ -365,7 +365,7 @@ This upgrade group follows the nine core suites and macOS visibility gate, befor
 benchmarking. Windows's `.10` to `.11` native transition is covered by the retained PR qualification
 report; that historical evidence does not qualify `.12` or later builds. The Intel wheel patch
 changes no Windows dependency resolution. pi is `1.3.0+vengeance.2` in 0.3.2 and 0.3.3,
-`1.3.0+vengeance.3` in 0.3.4 and `1.3.0+vengeance.4` in 0.3.5 and 0.3.6, all on the `v1.3.0` base, then `1.4.0+vengeance.1` in 0.3.7, `1.4.0+vengeance.2` in 0.3.8, `1.5.0+vengeance.1` in 0.3.9, `1.5.0+vengeance.2` in 0.4.0 and `1.5.1+vengeance.1` in 0.4.1. Its historical 1.2 to 1.3 transition fixture
+`1.3.0+vengeance.3` in 0.3.4 and `1.3.0+vengeance.4` in 0.3.5 and 0.3.6, all on the `v1.3.0` base, then `1.4.0+vengeance.1` in 0.3.7, `1.4.0+vengeance.2` in 0.3.8, `1.5.0+vengeance.1` in 0.3.9, `1.5.0+vengeance.2` in 0.4.0, `1.5.1+vengeance.1` in 0.4.1 and `1.5.1+vengeance.2` in 0.4.2. Its historical 1.2 to 1.3 transition fixture
 is not used as a release upgrade gate.
 
 Each of the five release runners then runs
@@ -672,6 +672,32 @@ OrcaRouter, Prime's remote catalog and bundled snapshot do not carry Audn, so it
 `COMPILED_ONLY_PROVIDERS`. Retire both patches when upstream supplies qualified support. Run
 `scripts/qa/auth/audn.qa.mjs` for isolated coverage of both engines. Live verification is opt-in with
 `VENGEANCE_LIVE_AUDN_QA=1` and `AUDN_API_KEY`.
+
+pi patch `0015` and Prime patch `0028` add SilkCompute's five abliterated models as a native provider in
+both engines, with API-key login, `SILK_API_KEY` discovery and `kimi-k3.1-pro-uncensored` as the native
+default: `kimi-k3.1-pro-uncensored`, `deepseek-v4.1-flash-1017-uncensored`, `glm-5.3-uncensored`,
+`glm-5.3-flash-uncensored` and `hy4-uncensored`. SilkCompute's standard models are left out. The base URL is
+`https://api.silkcompute.com/v1`. Limits come from `GET /v1/models` (1048576 context; 131072 output, 65536
+for Hy4) and prices from [the models page](https://silkcompute.com/models), whose struck-through figures
+are former prices. It lists no cache write price, so writes cost the input price; the API reports cached
+input in `prompt_tokens_details.cached_tokens` and no writes. The
+[reasoning docs](https://silkcompute.com/docs/reasoning) name `none`, `low`, `high` and `max` and map
+`minimal`, `medium` and `xhigh` onto low, high and max, so the ladder is Off, Low, High and Max and Off
+sends `none`. On 12 November 2026 `none` returned no reasoning from any of the five on a short arithmetic
+prompt, and the levels above it reasoned progressively more; a made-up effort also answers 200, so a
+200 proves nothing about a level. GLM-5.3 accepts an image but answers that it cannot see it, so it is
+declared text-only; the other four named a red test image correctly. The API also accepts `developer`,
+`store`, `max_completion_tokens` and an over-limit `max_tokens`; the patches send `system` and `max_tokens`
+and omit the rest. All five return tool calls, a continuation works with or without the replayed
+`reasoning_content`, and with `stream_options.include_usage` the usage arrives in a final chunk without
+choices. Requests are capped at 64 MiB and eight run at once per account. The
+`kimi-k3.1-pro-uncensored` `prompt_tokens` deltas matched Kimi K3.1 Pro's published tokenizer exactly on
+both probes from the Audn check (+459 and +50), and `deepseek-v4.1-flash-1017-uncensored` matched DeepSeek
+V4.1 Flash's (+294 and +46). Like OrcaRouter and Audn, Prime's remote catalog and bundled snapshot do not
+carry SilkCompute, so it is listed in `COMPILED_ONLY_PROVIDERS`. Recheck the model list, ladder, prices
+and the tokenizer probe on upgrades, and retire both patches when upstream supplies qualified support. Run
+`scripts/qa/auth/silkcompute.qa.mjs` for isolated coverage of both engines. Live verification is opt-in
+with `VENGEANCE_LIVE_SILKCOMPUTE_QA=1` and `SILK_API_KEY`.
 
 pi patch `0014` and Prime patch `0027` make Claude Fable 5.2 (`claude-fable-5-2`, released on
 9 November 2026) available in both engines. When they were written on 10 November 2026 no catalog either
